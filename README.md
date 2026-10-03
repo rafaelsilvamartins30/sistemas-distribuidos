@@ -1,8 +1,26 @@
-# Sistemas Distribuídos
+# UNIR
 
-Repositório do projeto prático da disciplina de Sistemas Distribuídos.
+**UNIR — University Network for Integration and Relationships**
 
-## Documentos do Projeto
+UNIR is a university platform focused on helping users discover and participate in communities, activities and opportunities.
 
-* [work.md](./work.md): Especificação completa dos requisitos do projeto, arquitetura, etapas e critérios de avaliação.
-* [docs/propostas-de-projeto.md](./docs/propostas-de-projeto.md): Propostas detalhadas de temas de impacto social com modelagem de microsserviços, SAGA, CQRS, BFFs e LLM/RAG.
+## Main domains
+
+- **User** — users, authentication and user information.
+- **Community** — university communities, managers, followers and public posts.
+- **Activity** — events and activities with direct registration.
+- **Opportunity** — opportunities with application and selection processes.
+- **Payment** — payment lifecycle for paid activities.
+- **Access** — QR credentials, access validation, check-in and attendance history.
+
+## Main distributed flow
+
+A paid activity registration may involve:
+
+```text
+Activity
+  ↓ reserve registration / capacity
+Payment
+  ↓ confirm payment
+Access
+  ↓ issue credential
