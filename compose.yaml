@@ -1,0 +1,94 @@
+name: unir
+
+services:
+  user-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: unir_users
+      POSTGRES_USER: unir
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${USER_DB_PORT:-15433}:5432"
+    volumes:
+      - user_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unir -d unir_users"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  keycloak-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD in .env}
+    volumes:
+      - keycloak_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:v1.29.5
+    ports:
+      - "127.0.0.1:${MAILPIT_PORT:-18025}:8025"
+
+  keycloak:
+    build:
+      context: ./keycloak-theme
+    image: unir-keycloak:local
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-18081}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD in .env}
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "127.0.0.1:${KEYCLOAK_PORT:-18081}:8080"
+    volumes:
+      - ./config/keycloak/unir-realm.json:/opt/keycloak/data/import/unir-realm.json:ro
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf "GET /health/ready HTTP/1.0\r\n\r\n" >&3 &&
+          read -r response <&3 && [[ "$$response" == *"200"* ]]'
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  user-service:
+    build:
+      context: ./user-service
+    image: unir-user-service:local
+    environment:
+      DB_URL: jdbc:postgresql://user-db:5432/unir_users
+      DB_USERNAME: unir
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      KEYCLOAK_ISSUER_URI: http://localhost:${KEYCLOAK_PORT:-18081}/realms/unir
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/unir/protocol/openid-connect/certs
+    ports:
+      - "127.0.0.1:${USER_SERVICE_PORT:-18082}:8080"
+    depends_on:
+      user-db:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+volumes:
+  user_data:
+  keycloak_db_data:

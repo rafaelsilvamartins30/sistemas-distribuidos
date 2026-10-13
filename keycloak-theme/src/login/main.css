@@ -1,0 +1,245 @@
+:root {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #18342d;
+    background: #eef3ef;
+    font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    min-width: 320px;
+    min-height: 100vh;
+    margin: 0;
+    background:
+        radial-gradient(circle at 9% 11%, #d5e5dc 0, transparent 32%),
+        radial-gradient(circle at 94% 90%, #d9e9e3 0, transparent 34%),
+        #eef3ef;
+}
+
+#root {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 32px;
+}
+
+.unir-shell {
+    display: grid;
+    grid-template-columns: minmax(320px, 0.88fr) minmax(410px, 1fr);
+    width: min(1080px, 100%);
+    min-height: 660px;
+    border-radius: 28px;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 30px 80px rgba(19, 57, 43, 0.12), 0 2px 8px rgba(19, 57, 43, 0.05);
+}
+
+#kc-header {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 100%;
+    overflow: hidden;
+    padding: 52px;
+    color: #fff;
+    background:
+        radial-gradient(circle at 94% 16%, rgba(146, 208, 172, 0.22), transparent 38%),
+        radial-gradient(circle at 20% 90%, rgba(227, 191, 111, 0.16), transparent 40%),
+        linear-gradient(145deg, #0b5848, #073a35 85%);
+}
+
+#kc-header::before {
+    content: "";
+    position: absolute;
+    width: 410px;
+    height: 410px;
+    right: -220px;
+    top: 30%;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 50%;
+    box-shadow: 0 0 0 54px rgba(255, 255, 255, 0.035), 0 0 0 108px rgba(255, 255, 255, 0.025);
+    pointer-events: none;
+}
+
+#kc-header::after {
+    content: "Conexões que transformam a vida universitária.\A\A Encontre pessoas, comunidades e oportunidades em um só lugar.";
+    position: relative;
+    display: block;
+    max-width: 330px;
+    margin-bottom: 34px;
+    white-space: pre-line;
+    font-size: clamp(25px, 2.8vw, 34px);
+    font-weight: 660;
+    line-height: 1.24;
+    letter-spacing: -0.035em;
+}
+
+#kc-header-wrapper {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    font-size: 25px;
+    font-weight: 780;
+    letter-spacing: 0.08em;
+}
+
+#kc-header-wrapper::before {
+    content: "";
+    display: block;
+    width: 48px;
+    height: 48px;
+    flex: none;
+    background: url("./brand-mark.svg") center / contain no-repeat;
+}
+
+.unir-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    padding: 58px clamp(32px, 5vw, 72px);
+}
+
+.unir-form-header, #kc-content {
+    width: 100%;
+    max-width: 430px;
+    margin-inline: auto;
+}
+
+#kc-page-title {
+    margin: 0 0 28px;
+    color: #143b31;
+    font-size: clamp(27px, 3vw, 36px);
+    line-height: 1.15;
+    letter-spacing: -0.035em;
+}
+
+#kc-content-wrapper { width: 100%; }
+
+form { margin: 0; }
+
+form > div, .unir-form-group { margin-bottom: 17px; }
+
+label {
+    display: inline-block;
+    margin-bottom: 7px;
+    color: #28453b;
+    font-size: 14px;
+    font-weight: 650;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="submit"]),
+select, textarea {
+    display: block;
+    width: 100%;
+    min-height: 47px;
+    padding: 11px 14px;
+    border: 1px solid #bdcec4;
+    border-radius: 11px;
+    color: #17352b;
+    background: #f9fbfa;
+    font: inherit;
+    font-size: 15px;
+    outline: none;
+    transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+input:hover, select:hover, textarea:hover { border-color: #91ac9b; }
+
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible {
+    outline: 3px solid #a6d4ba;
+    outline-offset: 2px;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):focus,
+select:focus, textarea:focus {
+    border-color: #1d8068;
+    background: #fff;
+    box-shadow: 0 0 0 4px rgba(54, 152, 115, 0.12);
+}
+
+input[aria-invalid="true"] { border-color: #bd4d46; }
+
+input[type="checkbox"] { accent-color: #136c57; }
+
+button, input[type="submit"] { font: inherit; cursor: pointer; }
+
+button[type="submit"], input[type="submit"], .unir-button-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 49px;
+    padding: 11px 18px;
+    border: 1px solid #0d6753;
+    border-radius: 11px;
+    color: #fff;
+    background: #0d6753;
+    font-weight: 700;
+    box-shadow: 0 8px 20px rgba(13, 103, 83, 0.15);
+    transition: background 150ms ease, transform 150ms ease;
+}
+
+button[type="submit"]:hover, input[type="submit"]:hover, .unir-button-primary:hover {
+    background: #084c40;
+    transform: translateY(-1px);
+}
+
+button[type="button"] {
+    border: 0;
+    color: #315749;
+    background: transparent;
+}
+
+a { color: #0c6956; text-decoration: none; font-weight: 620; }
+a:hover { color: #074d3e; text-decoration: underline; }
+
+#kc-form-options, #kc-registration, #kc-info, #kc-social-providers {
+    margin-top: 20px;
+    color: #5b7066;
+    font-size: 14px;
+}
+
+#kc-form-options > div { margin-bottom: 8px; }
+
+.unir-alert, [class*="alert-"] {
+    margin-bottom: 22px;
+    padding: 13px 15px;
+    border: 1px solid #cfe0d4;
+    border-radius: 11px;
+    color: #24453a;
+    background: #eff7f1;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.alert-error, .pf-m-danger {
+    border-color: #ecc6c1;
+    color: #8a302d;
+    background: #fff3f1;
+}
+
+#input-error, [id^="input-error"], .kc-feedback-text { color: #aa3934; font-size: 13px; }
+
+#kc-locale { margin-bottom: 26px; text-align: right; }
+#kc-locale ul { padding: 0; list-style: none; }
+#kc-locale button { color: #386356; background: transparent; border: 0; }
+
+@media (max-width: 760px) {
+    #root { padding: 12px; place-items: start center; }
+    .unir-shell { grid-template-columns: 1fr; min-height: 0; border-radius: 20px; }
+    #kc-header { min-height: 165px; padding: 28px; }
+    #kc-header::after { max-width: 400px; margin: 14px 0 0; font-size: 20px; }
+    #kc-header::before { width: 280px; height: 280px; right: -175px; top: -60px; }
+    #kc-header-wrapper::before { width: 36px; height: 36px; }
+    #kc-header-wrapper { font-size: 21px; }
+    .unir-card { padding: 36px 28px 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
