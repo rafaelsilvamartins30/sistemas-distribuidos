@@ -25,3 +25,4 @@ replay_pid*
 
 # Optional local Docker Compose overrides
 /.env
+/.pnpm-store/

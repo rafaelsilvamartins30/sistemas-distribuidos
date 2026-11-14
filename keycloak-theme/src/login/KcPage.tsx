@@ -43,6 +43,9 @@ const classes = {
     kcFormCardClass: "unir-card",
     kcFormHeaderClass: "unir-form-header",
     kcFormGroupClass: "unir-form-group",
+    kcFormButtonsClass: "unir-form-actions",
+    kcButtonClass: "unir-button",
     kcButtonPrimaryClass: "unir-button-primary",
+    kcButtonDefaultClass: "unir-button-secondary",
     kcAlertClass: "unir-alert"
 } satisfies { [key in ClassKey]?: string };

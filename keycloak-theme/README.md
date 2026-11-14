@@ -1,6 +1,6 @@
 # Tema UNIR para Keycloak
 
-Tema de login, cadastro, verificação de email e recuperação de acesso, feito com Keycloakify. O projeto usa as páginas padrão do Keycloakify com uma identidade visual própria em `src/login/main.css`. As mensagens vêm do Keycloak em português brasileiro.
+O login, cadastro, verificação de email e recuperação de acesso usam Keycloakify, com identidade visual em `src/login/main.css`. A tela de Account usa o Account v3 nativo do Keycloak, estendido em `account-theme/account` para aplicar a marca e as cores UNIR sem substituir o fluxo de conta.
 
 ## Usar com a infraestrutura local
 
@@ -12,7 +12,7 @@ docker compose up --build -d
 
 As credenciais locais ficam no `.env` da raiz; em um clone novo, use `config/local.env.example` como modelo.
 
-Acesse http://localhost:18081/realms/unir/account ou inicie a autorização OIDC conforme `user-service/README.md`. O tema é configurado em `config/keycloak/unir-realm.json` para instalações novas. O importador não sobrescreve um realm existente.
+Acesse http://localhost:18081/realms/unir/account ou inicie a autorização OIDC conforme `user-service/README.md`. O `accountTheme` e o `loginTheme` são definidos em `config/keycloak/unir-realm.json` para instalações novas. Como o importador não sobrescreve um realm existente, `config/keycloak/apply-user-profile.sh` também aplica a configuração ao realm local existente.
 
 ## Desenvolvimento
 

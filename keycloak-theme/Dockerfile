@@ -12,3 +12,4 @@ RUN pnpm build-keycloak-theme
 
 FROM quay.io/keycloak/keycloak:26.8.0
 COPY --from=build /theme/dist_keycloak/keycloak-theme-for-kc-all-other-versions.jar /opt/keycloak/providers/unir-theme.jar
+COPY account-theme /opt/keycloak/themes/unir-account

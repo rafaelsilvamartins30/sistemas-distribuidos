@@ -41,7 +41,6 @@
       ],
       "defaultClientScopes": [
         "basic",
-        "profile",
         "email",
         "roles"
       ],
@@ -52,6 +51,7 @@
   ],
   "displayName": "UNIR",
   "displayNameHtml": "UNIR",
+  "accountTheme": "unir-account",
   "loginTheme": "unir-theme",
   "internationalizationEnabled": true,
   "defaultLocale": "pt-BR",

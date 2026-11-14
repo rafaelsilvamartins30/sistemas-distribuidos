@@ -63,15 +63,15 @@ O código é de uso único e expira rapidamente. Se necessário, gere outra URL 
 curl -i http://localhost:18082/users \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"name":"Ana Silva","institutionalId":"12345","course":"Computação","department":"Tecnologia","interests":[]}'
+  -d '{"name":"Ana Silva","institutionalId":"12345","affiliationStatus":"STUDENT","academicLevel":"UNDERGRADUATE","course":"Computação","department":"Tecnologia","interests":[]}'
 curl -i http://localhost:18082/users/me -H "Authorization: Bearer $ACCESS_TOKEN"
 curl -i -X PATCH http://localhost:18082/users/me \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"name":"Ana Martins","course":"Matemática","department":"DCC","interests":["football"]}'
+  -d '{"name":"Ana Martins","affiliationStatus":"ALUMNI","academicLevel":"MASTERS","course":"Matemática","department":"DCC","interests":["football"]}'
 ```
 
-`POST /users` retorna 201; o ID vem do claim `sub` e o nome vem do request. `GET /users/me` inclui `email` e `emailVerified` lidos apenas do JWT. `PATCH /users/me` aceita apenas os campos enviados entre nome, curso, departamento e interesses; uma lista vazia limpa os interesses. Campos de identidade ou matrícula no request retornam 400. GET/PATCH retornam 404 antes da criação do perfil. Todos retornam 401 sem token válido. Criação repetida do mesmo `sub` ou matrícula retorna 409. As roles do claim `realm_access.roles` ficam disponíveis como authorities `ROLE_USER` e `ROLE_PLATFORM_ADMIN`, sem regras de autorização adicionais por enquanto. O Account Console fica em http://localhost:18081/realms/unir/account e permite gerenciar a autenticação.
+`POST /users` retorna 201; o ID vem do claim `sub` e o nome vem do request. Situação (`STUDENT`, `PROFESSOR` ou `ALUMNI`) e nível acadêmico (`UNDERGRADUATE`, `MASTERS` ou `DOCTORATE`) são declarações do próprio usuário, sem validação institucional e sem alterar o acesso à comunidade. `GET /users/me` inclui `email` e `emailVerified` lidos apenas do JWT. `PATCH /users/me` aceita os campos de perfil enviados; uma lista vazia limpa os interesses. No PATCH, campos de identidade ou matrícula retornam 400. GET/PATCH retornam 404 antes da criação do perfil. Todos retornam 401 sem token válido. Criação repetida do mesmo `sub` ou matrícula retorna 409. As roles do claim `realm_access.roles` ficam disponíveis como authorities `ROLE_USER` e `ROLE_PLATFORM_ADMIN`, sem regras de autorização adicionais por enquanto. O Account Console fica em http://localhost:18081/realms/unir/account e permite gerenciar a autenticação.
 
 ## Qualidade
 

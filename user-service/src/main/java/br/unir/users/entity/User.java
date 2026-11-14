@@ -10,6 +10,8 @@ import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OrderColumn;
@@ -36,6 +38,14 @@ public class User implements Persistable<String> {
     @Column(nullable = false, unique = true)
     private String institutionalId;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "affiliation_status", length = 20)
+    private AffiliationStatus affiliationStatus;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "academic_level", length = 20)
+    private AcademicLevel academicLevel;
+
     @Column(nullable = false)
     private String course;
 
@@ -51,11 +61,13 @@ public class User implements Persistable<String> {
     protected User() {
     }
 
-    public User(String id, String name, String institutionalId, String course, String department,
-            List<String> interests) {
+    public User(String id, String name, String institutionalId, AffiliationStatus affiliationStatus,
+            AcademicLevel academicLevel, String course, String department, List<String> interests) {
         this.id = id;
         this.name = name;
         this.institutionalId = institutionalId;
+        this.affiliationStatus = affiliationStatus;
+        this.academicLevel = academicLevel;
         this.course = course;
         this.department = department;
         this.interests = new ArrayList<>(interests);
@@ -96,8 +108,15 @@ public class User implements Persistable<String> {
         return this.name;
     }
 
-    public void update(String name, String course, String department, List<String> interests) {
+    public void update(String name, AffiliationStatus affiliationStatus, AcademicLevel academicLevel, String course,
+            String department, List<String> interests) {
         this.name = name;
+        if (affiliationStatus != null) {
+            this.affiliationStatus = affiliationStatus;
+        }
+        if (academicLevel != null) {
+            this.academicLevel = academicLevel;
+        }
         this.course = course;
         this.department = department;
         this.interests = new ArrayList<>(interests);
@@ -105,6 +124,14 @@ public class User implements Persistable<String> {
 
     public String getInstitutionalId() {
         return this.institutionalId;
+    }
+
+    public AffiliationStatus getAffiliationStatus() {
+        return this.affiliationStatus;
+    }
+
+    public AcademicLevel getAcademicLevel() {
+        return this.academicLevel;
     }
 
     public String getCourse() {

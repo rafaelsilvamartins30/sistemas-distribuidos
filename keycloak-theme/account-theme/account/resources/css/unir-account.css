@@ -1,0 +1,88 @@
+:root {
+    --unir-accent: #16745e;
+    --unir-accent-strong: #0f604d;
+    --unir-accent-soft: #e5f3eb;
+    --pf-v5-global--primary-color--100: var(--unir-accent);
+    --pf-v5-global--primary-color--200: var(--unir-accent-strong);
+    --pf-v5-global--primary-color--300: var(--unir-accent);
+    --pf-v5-global--active-color--100: var(--unir-accent);
+    --pf-v5-global--active-color--400: var(--unir-accent);
+    --pf-v5-global--link--Color: var(--unir-accent);
+    --pf-v5-global--link--Color--hover: var(--unir-accent-strong);
+    --pf-v5-global--BackgroundColor--200: #f3f6f4;
+}
+
+:root[data-unir-palette="blue"] {
+    --unir-accent: #3468b1;
+    --unir-accent-strong: #28548f;
+    --unir-accent-soft: #eaf1fc;
+}
+
+:root[data-unir-palette="violet"] {
+    --unir-accent: #7853a6;
+    --unir-accent-strong: #613f8c;
+    --unir-accent-soft: #f1ebf8;
+}
+
+:root[data-unir-palette="ember"] {
+    --unir-accent: #c24132;
+    --unir-accent-strong: #9f2f25;
+    --unir-accent-soft: #fdece8;
+}
+
+.pf-v5-theme-dark {
+    --pf-v5-global--primary-color--100: var(--unir-accent);
+    --pf-v5-global--primary-color--200: var(--unir-accent-strong);
+    --pf-v5-global--primary-color--300: var(--unir-accent);
+    --pf-v5-global--active-color--100: var(--unir-accent);
+    --pf-v5-global--active-color--400: var(--unir-accent);
+    --pf-v5-global--link--Color: var(--unir-accent);
+    --pf-v5-global--link--Color--hover: var(--unir-accent);
+}
+
+.pf-v5-c-masthead {
+    --pf-v5-c-masthead--BackgroundColor: var(--unir-accent-strong);
+}
+
+.pf-v5-c-form__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.pf-v5-c-form__actions > * {
+    margin-block: 0 !important;
+}
+
+.pf-v5-c-button {
+    border-radius: 10px;
+}
+
+.pf-v5-c-button.pf-m-primary {
+    border-color: var(--unir-accent);
+    color: #fff;
+    background: var(--unir-accent);
+}
+
+.pf-v5-c-button.pf-m-primary:hover:not(:disabled) {
+    border-color: var(--unir-accent-strong);
+    background: var(--unir-accent-strong);
+}
+
+:root[data-unir-mode="dark"] {
+    --unir-accent-soft: #20372f;
+    --pf-v5-global--BackgroundColor--200: #12161a;
+}
+
+:root[data-unir-mode="dark"][data-unir-palette="blue"] {
+    --unir-accent-soft: #202f49;
+}
+
+:root[data-unir-mode="dark"][data-unir-palette="violet"] {
+    --unir-accent-soft: #312840;
+}
+
+:root[data-unir-mode="dark"][data-unir-palette="ember"] {
+    --unir-accent-soft: #432823;
+}

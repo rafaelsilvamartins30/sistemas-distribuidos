@@ -33,20 +33,21 @@ public class UserService {
         }
 
         List<String> interests = request.interests() == null ? List.of() : request.interests();
-        User user = new User(id, request.name(), request.institutionalId(), request.course(), request.department(),
-                interests);
+        User user = new User(id, request.name(), request.institutionalId(), request.affiliationStatus(),
+                request.academicLevel(), request.course(), request.department(), interests);
         User saved = this.userRepository.saveAndFlush(user);
-        return new CreateUserResponse(saved.getId(), saved.getName(), saved.getInstitutionalId(), saved.getCourse(),
-                saved.getDepartment(), List.copyOf(saved.getInterests()), saved.getCreatedAt(), saved.getUpdatedAt());
+        return new CreateUserResponse(saved.getId(), saved.getName(), saved.getInstitutionalId(),
+                saved.getAffiliationStatus(), saved.getAcademicLevel(), saved.getCourse(), saved.getDepartment(),
+                List.copyOf(saved.getInterests()), saved.getCreatedAt(), saved.getUpdatedAt());
     }
 
     @Transactional(readOnly = true)
     public GetUserResponse getMe(String id, String email, Boolean emailVerified) {
         User user = this.userRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "UNIR user not found"));
-        return new GetUserResponse(user.getId(), user.getName(), user.getInstitutionalId(), user.getCourse(),
-                user.getDepartment(), List.copyOf(user.getInterests()), user.getCreatedAt(), user.getUpdatedAt(), email,
-                emailVerified);
+        return new GetUserResponse(user.getId(), user.getName(), user.getInstitutionalId(), user.getAffiliationStatus(),
+                user.getAcademicLevel(), user.getCourse(), user.getDepartment(), List.copyOf(user.getInterests()),
+                user.getCreatedAt(), user.getUpdatedAt(), email, emailVerified);
     }
 
     @Transactional
@@ -54,13 +55,17 @@ public class UserService {
         User user = this.userRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "UNIR user not found"));
         String name = request.name() == null ? user.getName() : request.name();
+        var affiliationStatus = request.affiliationStatus() == null
+                ? user.getAffiliationStatus()
+                : request.affiliationStatus();
+        var academicLevel = request.academicLevel() == null ? user.getAcademicLevel() : request.academicLevel();
         String course = request.course() == null ? user.getCourse() : request.course();
         String department = request.department() == null ? user.getDepartment() : request.department();
         List<String> interests = request.interests() == null ? user.getInterests() : request.interests();
-        user.update(name, course, department, interests);
+        user.update(name, affiliationStatus, academicLevel, course, department, interests);
         User saved = this.userRepository.saveAndFlush(user);
-        return new GetUserResponse(saved.getId(), saved.getName(), saved.getInstitutionalId(), saved.getCourse(),
-                saved.getDepartment(), List.copyOf(saved.getInterests()), saved.getCreatedAt(), saved.getUpdatedAt(),
-                email, emailVerified);
+        return new GetUserResponse(saved.getId(), saved.getName(), saved.getInstitutionalId(),
+                saved.getAffiliationStatus(), saved.getAcademicLevel(), saved.getCourse(), saved.getDepartment(),
+                List.copyOf(saved.getInterests()), saved.getCreatedAt(), saved.getUpdatedAt(), email, emailVerified);
     }
 }

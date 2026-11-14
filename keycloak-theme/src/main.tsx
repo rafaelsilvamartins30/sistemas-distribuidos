@@ -1,6 +1,9 @@
 import { createRoot } from "react-dom/client";
 import { StrictMode } from "react";
 import { KcPage } from "./kc.gen";
+import { applyKeycloakAppearance } from "./login/appearance";
+
+applyKeycloakAppearance();
 
 createRoot(document.getElementById("root")!).render(
     <StrictMode>

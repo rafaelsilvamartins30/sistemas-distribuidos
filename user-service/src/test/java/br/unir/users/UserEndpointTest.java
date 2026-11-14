@@ -30,6 +30,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import br.unir.users.entity.AcademicLevel;
+import br.unir.users.entity.AffiliationStatus;
 import br.unir.users.entity.User;
 import br.unir.users.repository.UserRepository;
 
@@ -82,6 +84,8 @@ class UserEndpointTest {
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.id").value(subject))
                 .andExpect(jsonPath("$.name").value("Ana Silva"))
                 .andExpect(jsonPath("$.institutionalId").value("12345"))
+                .andExpect(jsonPath("$.affiliationStatus").value("STUDENT"))
+                .andExpect(jsonPath("$.academicLevel").value("UNDERGRADUATE"))
                 .andExpect(jsonPath("$.interests[0]").value("Sistemas distribuídos"))
                 .andExpect(jsonPath("$.createdAt").isNotEmpty()).andExpect(jsonPath("$.updatedAt").isNotEmpty())
                 .andExpect(jsonPath("$.email").doesNotExist());
@@ -129,7 +133,8 @@ class UserEndpointTest {
     @Test
     void assignedIdCannotOverwriteExistingUser() throws Exception {
         createUser(USER_ID, "12345");
-        User duplicate = new User(USER_ID, "Changed name", "67890", "Other course", "Other department", List.of());
+        User duplicate = new User(USER_ID, "Changed name", "67890", AffiliationStatus.STUDENT,
+                AcademicLevel.UNDERGRADUATE, "Other course", "Other department", List.of());
         assertThatThrownBy(() -> this.userRepository.saveAndFlush(duplicate))
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThat(this.userRepository.findById(USER_ID).orElseThrow().getName()).isEqualTo("Ana Silva");
@@ -162,12 +167,16 @@ class UserEndpointTest {
                         .contentType(MediaType.APPLICATION_JSON).content(this.objectMapper.writeValueAsString(update)))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(USER_ID))
                 .andExpect(jsonPath("$.name").value("Ana Martins")).andExpect(jsonPath("$.course").value("Matemática"))
+                .andExpect(jsonPath("$.affiliationStatus").value("ALUMNI"))
+                .andExpect(jsonPath("$.academicLevel").value("MASTERS"))
                 .andExpect(jsonPath("$.department").value("DCC"))
                 .andExpect(jsonPath("$.interests[0]").value("football"))
                 .andExpect(jsonPath("$.institutionalId").value("12345"))
                 .andExpect(jsonPath("$.email").value("ana@unir.br"));
         User saved = this.userRepository.findById(USER_ID).orElseThrow();
         assertThat(saved.getName()).isEqualTo("Ana Martins");
+        assertThat(saved.getAffiliationStatus()).isEqualTo(AffiliationStatus.ALUMNI);
+        assertThat(saved.getAcademicLevel()).isEqualTo(AcademicLevel.MASTERS);
         assertThat(saved.getInstitutionalId()).isEqualTo("12345");
         assertThat(this.userRepository.existsById(OTHER_USER_ID)).isFalse();
     }
@@ -228,7 +237,7 @@ class UserEndpointTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"name", "institutionalId", "course", "department"})
+    @ValueSource(strings = {"name", "institutionalId", "affiliationStatus", "academicLevel", "course", "department"})
     void rejectsMissingRequiredCreateField(String field) throws Exception {
         Map<String, Object> request = validRequest();
         request.remove(field);
@@ -271,12 +280,13 @@ class UserEndpointTest {
     }
 
     private Map<String, Object> validRequest() {
-        return new HashMap<>(Map.of("name", "Ana Silva", "institutionalId", "12345", "course", "Computação",
-                "department", "Tecnologia", "interests", List.of("Sistemas distribuídos")));
+        return new HashMap<>(Map.of("name", "Ana Silva", "institutionalId", "12345", "affiliationStatus", "STUDENT",
+                "academicLevel", "UNDERGRADUATE", "course", "Computação", "department", "Tecnologia", "interests",
+                List.of("Sistemas distribuídos")));
     }
 
     private Map<String, Object> validUpdate() {
-        return new HashMap<>(Map.of("name", "Ana Martins", "course", "Matemática", "department", "DCC", "interests",
-                List.of("football")));
+        return new HashMap<>(Map.of("name", "Ana Martins", "affiliationStatus", "ALUMNI", "academicLevel", "MASTERS",
+                "course", "Matemática", "department", "DCC", "interests", List.of("football")));
     }
 }

@@ -50,6 +50,10 @@ services:
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD in .env}
       KC_HEALTH_ENABLED: "true"
+      KC_SPI_REQUIRED_ACTION__UPDATE_PASSWORD__MAX_AUTH_AGE: "0"
+      KC_SPI_REQUIRED_ACTION__UPDATE_EMAIL__MAX_AUTH_AGE: "0"
+      KC_SPI_REQUIRED_ACTION__UPDATE_EMAIL__VERIFY_EMAIL: "true"
+      KC_SPI_REQUIRED_ACTION__CONFIGURE_TOTP__ADD_RECOVERY_CODES: "true"
     ports:
       - "127.0.0.1:${KEYCLOAK_PORT:-18081}:8080"
     volumes:
@@ -79,6 +83,7 @@ services:
       DB_URL: jdbc:postgresql://user-db:5432/unir_users
       DB_USERNAME: unir
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      WEB_ORIGIN: http://localhost:${WEB_PORT:-15173}
       KEYCLOAK_ISSUER_URI: http://localhost:${KEYCLOAK_PORT:-18081}/realms/unir
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/unir/protocol/openid-connect/certs
     ports:
@@ -88,6 +93,39 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+
+  keycloak-profile-config:
+    image: unir-keycloak:local
+    entrypoint: ["/bin/sh", "/config/apply-user-profile.sh"]
+    environment:
+      KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      WEB_PORT: ${WEB_PORT:-15173}
+      RECOVERY_CODES_ENABLED: "true"
+    volumes:
+      - ./config/keycloak/user-profile.json:/config/user-profile.json:ro
+      - ./config/keycloak/apply-user-profile.sh:/config/apply-user-profile.sh:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./web
+    image: unir-web:local
+    environment:
+      VITE_KEYCLOAK_URL: http://localhost:${KEYCLOAK_PORT:-18081}
+      VITE_KEYCLOAK_REALM: unir
+      VITE_KEYCLOAK_CLIENT_ID: unir-web
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      VITE_USER_SERVICE_URL: http://localhost:${USER_SERVICE_PORT:-18082}
+    ports:
+      - "127.0.0.1:${WEB_PORT:-15173}:5173"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      keycloak-profile-config:
+        condition: service_completed_successfully
 
 volumes:
   user_data:
