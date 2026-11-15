@@ -17,6 +17,8 @@ Esse comando sobe todos os componentes atuais. As credenciais locais ficam no `.
 - Authorization Code com PKCE S256; sem client secret e sem Direct Access Grants. Client scopes padrão: `basic` (inclui `sub`), `profile`, `email` e `roles`.
 - Redirects do futuro cliente web: `http://localhost:15173/*`; web origin: `http://localhost:15173`.
 - Mailpit: http://localhost:18025. O realm envia emails para `mailpit:1025`, sem TLS/autenticação.
+- Gateway: http://localhost:18084 (configurável por `GATEWAY_PORT` em `.env`). Encaminha `GET /api/v1/me` para o Web BFF após validar o JWT do Keycloak.
+- Web BFF: http://localhost:18083 (configurável por `WEB_BFF_PORT` em `.env`). Encaminha `GET /api/v1/me` para `GET /users/me` no User Service.
 - User Service: http://localhost:18082 (configurável por `USER_SERVICE_PORT` em `.env`).
 - PostgreSQL do User Service: `localhost:15433`, banco `unir_users`, usuário `unir`. Keycloak usa outra instância PostgreSQL no Compose.
 
@@ -65,6 +67,7 @@ curl -i http://localhost:18082/users \
   -H 'Content-Type: application/json' \
   -d '{"name":"Ana Silva","institutionalId":"12345","affiliationStatus":"STUDENT","academicLevel":"UNDERGRADUATE","course":"Computação","department":"Tecnologia","interests":[]}'
 curl -i http://localhost:18082/users/me -H "Authorization: Bearer $ACCESS_TOKEN"
+curl -i http://localhost:18084/api/v1/me -H "Authorization: Bearer $ACCESS_TOKEN"
 curl -i -X PATCH http://localhost:18082/users/me \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
