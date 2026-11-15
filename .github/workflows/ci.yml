@@ -197,6 +197,17 @@ jobs:
       - name: Install shared TypeScript tools
         if: matrix.component == 'admin-bff' || matrix.component == 'admin-web'
         run: pnpm install --frozen-lockfile
+      - uses: actions/setup-go@v6
+        if: matrix.component == 'payment'
+        with:
+          go-version-file: payment/go.mod
+          cache-dependency-path: payment/go.sum
+      - name: Install golangci-lint
+        if: matrix.component == 'payment'
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+      - name: Install Rust toolchain
+        if: matrix.component == 'access'
+        run: rustup toolchain install 1.85.0 --profile minimal --component rustfmt,clippy
       - name: Check service
         env:
           COMPONENT: ${{ matrix.component }}

@@ -1,0 +1,97 @@
+:root {
+  color-scheme: light;
+  font-family:
+    "Plus Jakarta Sans",
+    system-ui,
+    -apple-system,
+    sans-serif;
+  background-color: #f4f7f6;
+  color: #102a24;
+}
+
+body {
+  margin: 0;
+}
+
+.admin-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem 2rem;
+  background-color: #0b5848;
+  color: #ffffff;
+}
+
+.admin-header h1 {
+  margin: 0.25rem 0 0;
+  font-size: 1.35rem;
+}
+
+.admin-badge {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.85;
+}
+
+.admin-main {
+  max-width: 64rem;
+  width: 100%;
+  margin: 2rem auto;
+  padding: 0 1.5rem;
+  box-sizing: border-box;
+}
+
+.admin-card {
+  background: #ffffff;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(16, 42, 36, 0.08);
+}
+
+.admin-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem;
+  margin: 1rem 0 0;
+}
+
+.admin-details dt {
+  font-size: 0.8rem;
+  color: #4b635d;
+}
+
+.admin-details dd {
+  margin: 0.25rem 0 0;
+  font-weight: 600;
+}
+
+.admin-alert {
+  margin-top: 1rem;
+  color: #9f1d1d;
+}
+
+.btn-primary,
+.btn-secondary {
+  border-radius: 0.5rem;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-primary {
+  background: #ffffff;
+  color: #0b5848;
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}

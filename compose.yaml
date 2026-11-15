@@ -17,6 +17,54 @@ services:
       timeout: 5s
       retries: 10
 
+  engagement-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: unir_engagement
+      POSTGRES_USER: unir
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${ENGAGEMENT_DB_PORT:-15434}:5432"
+    volumes:
+      - engagement_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unir -d unir_engagement"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  payment-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: unir_payment
+      POSTGRES_USER: unir
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${PAYMENT_DB_PORT:-15435}:5432"
+    volumes:
+      - payment_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unir -d unir_payment"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  access-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: unir_access
+      POSTGRES_USER: unir
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${ACCESS_DB_PORT:-15436}:5432"
+    volumes:
+      - access_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unir -d unir_access"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   keycloak-db:
     image: postgres:16-alpine
     environment:
@@ -94,6 +142,50 @@ services:
       keycloak:
         condition: service_healthy
 
+  engagement:
+    build:
+      context: ./engagement
+    image: unir-engagement:local
+    environment:
+      DB_URL: jdbc:postgresql://engagement-db:5432/unir_engagement
+      DB_USERNAME: unir
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      KEYCLOAK_ISSUER_URI: http://localhost:${KEYCLOAK_PORT:-18081}/realms/unir
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/unir/protocol/openid-connect/certs
+    ports:
+      - "127.0.0.1:${ENGAGEMENT_PORT:-18085}:8080"
+    depends_on:
+      engagement-db:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+  payment:
+    build:
+      context: ./payment
+    image: unir-payment:local
+    environment:
+      PORT: 8080
+      DB_URL: postgres://unir:${DB_PASSWORD:?Set DB_PASSWORD in .env}@payment-db:5432/unir_payment?sslmode=disable
+    ports:
+      - "127.0.0.1:${PAYMENT_PORT:-18086}:8080"
+    depends_on:
+      payment-db:
+        condition: service_healthy
+
+  access:
+    build:
+      context: ./access
+    image: unir-access:local
+    environment:
+      PORT: 8080
+      DB_URL: postgres://unir:${DB_PASSWORD:?Set DB_PASSWORD in .env}@access-db:5432/unir_access
+    ports:
+      - "127.0.0.1:${ACCESS_PORT:-18087}:8080"
+    depends_on:
+      access-db:
+        condition: service_healthy
+
   web-bff:
     build:
       context: ./web-bff
@@ -103,6 +195,19 @@ services:
       USER_SERVICE_URL: http://user-service:8080
     ports:
       - "127.0.0.1:${WEB_BFF_PORT:-18083}:3000"
+    depends_on:
+      user-service:
+        condition: service_started
+
+  admin-bff:
+    build:
+      context: ./admin-bff
+    image: unir-admin-bff:local
+    environment:
+      PORT: 3000
+      USER_SERVICE_URL: http://user-service:8080
+    ports:
+      - "127.0.0.1:${ADMIN_BFF_PORT:-18088}:3000"
     depends_on:
       user-service:
         condition: service_started
@@ -159,6 +264,28 @@ services:
       keycloak-profile-config:
         condition: service_completed_successfully
 
+  admin-web:
+    build:
+      context: ./admin-web
+    image: unir-admin-web:local
+    environment:
+      VITE_KEYCLOAK_URL: http://localhost:${KEYCLOAK_PORT:-18081}
+      VITE_KEYCLOAK_REALM: unir
+      VITE_KEYCLOAK_CLIENT_ID: unir-web
+      VITE_ADMIN_BFF_URL: http://localhost:${ADMIN_BFF_PORT:-18088}
+    ports:
+      - "127.0.0.1:${ADMIN_WEB_PORT:-15175}:5173"
+    depends_on:
+      admin-bff:
+        condition: service_started
+      keycloak:
+        condition: service_healthy
+      keycloak-profile-config:
+        condition: service_completed_successfully
+
 volumes:
   user_data:
+  engagement_data:
+  payment_data:
+  access_data:
   keycloak_db_data:

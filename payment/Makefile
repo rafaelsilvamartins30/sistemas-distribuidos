@@ -1,0 +1,13 @@
+.DEFAULT_GOAL := quality
+
+.PHONY: quality test
+
+quality:
+	test -z "$$(gofmt -l .)"
+	go vet ./...
+	golangci-lint run
+	go test ./...
+	go build ./...
+
+test:
+	go test ./...

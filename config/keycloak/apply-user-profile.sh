@@ -10,6 +10,59 @@ KCADM_CONFIG=/tmp/kcadm.config
     --user "$KEYCLOAK_ADMIN_USERNAME" \
     --password "$KEYCLOAK_ADMIN_PASSWORD"
 
+# Collect the password during signup, before the realm's email verification step.
+REGISTRATION_PASSWORD_EXECUTION=$(
+    /opt/keycloak/bin/kcadm.sh get authentication/flows/registration/executions \
+        --config "$KCADM_CONFIG" \
+        -r unir \
+        --fields id,providerId,authenticationConfig \
+        --format csv \
+        --noquotes |
+        while IFS=, read -r EXECUTION_ID PROVIDER_ID CONFIG_ID; do
+            if [ "$PROVIDER_ID" = "registration-password-action" ]; then
+                printf '%s,%s\n' "$EXECUTION_ID" "$CONFIG_ID"
+                break
+            fi
+        done
+)
+
+if [ -z "$REGISTRATION_PASSWORD_EXECUTION" ]; then
+    echo "Keycloak registration password execution was not found." >&2
+    exit 1
+fi
+
+REGISTRATION_PASSWORD_EXECUTION_ID=${REGISTRATION_PASSWORD_EXECUTION%%,*}
+REGISTRATION_PASSWORD_CONFIG_ID=${REGISTRATION_PASSWORD_EXECUTION#*,}
+
+if [ -z "$REGISTRATION_PASSWORD_CONFIG_ID" ]; then
+    /opt/keycloak/bin/kcadm.sh create \
+        "authentication/executions/$REGISTRATION_PASSWORD_EXECUTION_ID/config" \
+        --config "$KCADM_CONFIG" \
+        -r unir \
+        -s alias=unir-registration-password \
+        -s config.always_set_password_on_register_form=true
+else
+    REGISTRATION_PASSWORD_CONFIG_ALIAS=$(
+        /opt/keycloak/bin/kcadm.sh get "authentication/config/$REGISTRATION_PASSWORD_CONFIG_ID" \
+            --config "$KCADM_CONFIG" \
+            -r unir \
+            --fields alias \
+            --format csv \
+            --noquotes
+    )
+
+    if [ -z "$REGISTRATION_PASSWORD_CONFIG_ALIAS" ]; then
+        echo "Keycloak registration password configuration was not found." >&2
+        exit 1
+    fi
+
+    /opt/keycloak/bin/kcadm.sh update "authentication/config/$REGISTRATION_PASSWORD_CONFIG_ID" \
+        --config "$KCADM_CONFIG" \
+        -r unir \
+        -s "alias=$REGISTRATION_PASSWORD_CONFIG_ALIAS" \
+        -s config.always_set_password_on_register_form=true
+fi
+
 /opt/keycloak/bin/kcadm.sh update users/profile \
     --config "$KCADM_CONFIG" \
     -r unir \
