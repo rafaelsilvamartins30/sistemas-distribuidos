@@ -15,8 +15,11 @@ interface KeycloakAppearance {
 function isAppearance(value: unknown): value is KeycloakAppearance {
   if (!value || typeof value !== "object") return false;
   const appearance = value as Partial<KeycloakAppearance>;
-  return (appearance.mode === "light" || appearance.mode === "dark") &&
-    typeof appearance.palette === "string" && Object.prototype.hasOwnProperty.call(accentByPalette, appearance.palette);
+  return (
+    (appearance.mode === "light" || appearance.mode === "dark") &&
+    typeof appearance.palette === "string" &&
+    Object.prototype.hasOwnProperty.call(accentByPalette, appearance.palette)
+  );
 }
 
 export function applyKeycloakAppearance(): void {

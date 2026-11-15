@@ -29,7 +29,9 @@ export function App({ keycloak }: AppProps) {
             path="/login"
             element={keycloak.authenticated ? <Navigate to="/" replace /> : <LoginPage keycloak={keycloak} />}
           />
-          <Route element={keycloak.authenticated ? <MainLayout keycloak={keycloak} /> : <Navigate to="/login" replace />}>
+          <Route
+            element={keycloak.authenticated ? <MainLayout keycloak={keycloak} /> : <Navigate to="/login" replace />}
+          >
             <Route path="/" element={<HomePage />} />
             <Route path="/inicio" element={<Navigate to="/" replace />} />
             <Route path="/comunidades" element={<CommunitiesPage />} />
@@ -44,7 +46,9 @@ export function App({ keycloak }: AppProps) {
             <Route path="/my-registrations" element={<MySpacePage initialSection="Inscrições" />} />
             <Route path="/admin" element={<AdminPage />} />
           </Route>
-          <Route element={keycloak.authenticated ? <AccountLayout keycloak={keycloak} /> : <Navigate to="/login" replace />}>
+          <Route
+            element={keycloak.authenticated ? <AccountLayout keycloak={keycloak} /> : <Navigate to="/login" replace />}
+          >
             <Route path="/perfil" element={<ProfilePage />} />
             <Route path="/seguranca" element={<SecurityPage />} />
             <Route path="/aparencia" element={<AppearancePage />} />

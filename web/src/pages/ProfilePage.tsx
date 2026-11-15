@@ -48,7 +48,10 @@ function formFromProfile(profile: UserProfile): ProfileForm {
 }
 
 function interestsFromForm(value: string): string[] {
-  return value.split("\n").map((interest) => interest.trim()).filter(Boolean);
+  return value
+    .split("\n")
+    .map((interest) => interest.trim())
+    .filter(Boolean);
 }
 
 function errorMessage(error: unknown): string {
@@ -94,7 +97,9 @@ export function ProfilePage() {
     }
 
     void loadProfile();
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [keycloak]);
 
   const dirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(savedForm), [form, savedForm]);
@@ -155,9 +160,13 @@ export function ProfilePage() {
         </p>
       </div>
 
-      {loading ? <p className="notice">Carregando seu perfil…</p> : loadFailed ? (
+      {loading ? (
+        <p className="notice">Carregando seu perfil…</p>
+      ) : loadFailed ? (
         <>
-          <p className="notice notice-error" role="alert">{error}</p>
+          <p className="notice notice-error" role="alert">
+            {error}
+          </p>
           <button className="button button-secondary retry-button" onClick={() => window.location.reload()}>
             Tentar novamente
           </button>
@@ -171,7 +180,10 @@ export function ProfilePage() {
               maxLength={255}
               required
               value={form.name}
-              onChange={(event) => { setForm({ ...form, name: event.target.value }); setSaved(false); }}
+              onChange={(event) => {
+                setForm({ ...form, name: event.target.value });
+                setSaved(false);
+              }}
             />
           </label>
 
@@ -218,7 +230,10 @@ export function ProfilePage() {
               required
               readOnly={Boolean(profile)}
               value={form.institutionalId}
-              onChange={(event) => { setForm({ ...form, institutionalId: event.target.value }); setSaved(false); }}
+              onChange={(event) => {
+                setForm({ ...form, institutionalId: event.target.value });
+                setSaved(false);
+              }}
             />
             {profile && <small>A matrícula fica fixa depois da criação do perfil.</small>}
           </label>
@@ -226,11 +241,27 @@ export function ProfilePage() {
           <div className="field-row">
             <label className="field">
               <span>Curso</span>
-              <input maxLength={255} required value={form.course} onChange={(event) => { setForm({ ...form, course: event.target.value }); setSaved(false); }} />
+              <input
+                maxLength={255}
+                required
+                value={form.course}
+                onChange={(event) => {
+                  setForm({ ...form, course: event.target.value });
+                  setSaved(false);
+                }}
+              />
             </label>
             <label className="field">
               <span>Departamento</span>
-              <input maxLength={255} required value={form.department} onChange={(event) => { setForm({ ...form, department: event.target.value }); setSaved(false); }} />
+              <input
+                maxLength={255}
+                required
+                value={form.department}
+                onChange={(event) => {
+                  setForm({ ...form, department: event.target.value });
+                  setSaved(false);
+                }}
+              />
             </label>
           </div>
 
@@ -240,20 +271,39 @@ export function ProfilePage() {
               rows={3}
               placeholder="Um interesse por linha"
               value={form.interests}
-              onChange={(event) => { setForm({ ...form, interests: event.target.value }); setSaved(false); }}
+              onChange={(event) => {
+                setForm({ ...form, interests: event.target.value });
+                setSaved(false);
+              }}
             />
             <small>Adicione um interesse em cada linha.</small>
           </label>
 
-          {error && <p className="notice notice-error" role="alert">{error}</p>}
-          {saved && <p className="notice notice-success" role="status">Perfil salvo.</p>}
+          {error && (
+            <p className="notice notice-error" role="alert">
+              {error}
+            </p>
+          )}
+          {saved && (
+            <p className="notice notice-success" role="status">
+              Perfil salvo.
+            </p>
+          )}
 
           <div className="form-actions">
             <button className="button button-primary" disabled={!dirty || saving} type="submit">
               {saving ? "Salvando…" : profile ? "Salvar alterações" : "Criar perfil"}
             </button>
             {dirty && !saving && (
-              <button className="button button-secondary" type="button" onClick={() => { setForm(savedForm); setError(""); setSaved(false); }}>
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={() => {
+                  setForm(savedForm);
+                  setError("");
+                  setSaved(false);
+                }}
+              >
                 Descartar
               </button>
             )}

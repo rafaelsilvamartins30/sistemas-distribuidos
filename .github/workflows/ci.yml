@@ -1,0 +1,203 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  java:
+    name: Java service
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: user-service/pom.xml
+      - name: Verify User Service
+        run: make user-service
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6.1.1
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            web/pnpm-lock.yaml
+      - name: Install quality tools
+        run: pnpm install --frozen-lockfile
+      - name: Install Web dependencies
+        run: pnpm --dir web install --frozen-lockfile
+      - name: Check Web
+        run: make web
+
+  keycloak-theme:
+    name: Keycloak theme
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6.1.1
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            keycloak-theme/pnpm-lock.yaml
+      - name: Install quality tools
+        run: pnpm install --frozen-lockfile
+      - name: Install theme dependencies
+        run: pnpm --dir keycloak-theme install --frozen-lockfile
+      - name: Check Keycloak theme
+        run: make keycloak-theme
+
+  web-bff:
+    name: Web BFF
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6.1.1
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            web-bff/pnpm-lock.yaml
+      - name: Install quality tools
+        run: pnpm install --frozen-lockfile
+      - name: Install BFF dependencies
+        run: pnpm --dir web-bff install --frozen-lockfile
+      - name: Check Web BFF
+        run: make web-bff
+
+  infrastructure:
+    name: Infrastructure and workflow
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6.1.1
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Install quality tools
+        run: pnpm install --frozen-lockfile
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            --output "$archive"
+          echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Install infrastructure tools
+        run: bash scripts/install-quality-tools.sh "$RUNNER_TEMP" infra
+      - name: Validate infrastructure and workflows
+        run: make infra
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install Gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            --output "$archive"
+          echo "${GITLEAKS_SHA256}  ${archive}" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Scan repository history with Gitleaks
+        run: bash scripts/quality.sh secrets
+
+  dependencies:
+    name: Dependency scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install OSV-Scanner
+        run: |
+          bash scripts/install-quality-tools.sh "$RUNNER_TEMP" dependencies
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Scan dependencies
+        run: bash scripts/quality.sh dependencies
+
+  discover:
+    name: Discover additional services
+    runs-on: ubuntu-latest
+    outputs:
+      components: ${{ steps.projects.outputs.components }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: projects
+        run: |
+          components=$(bash scripts/quality.sh future | jq -Rnc '[inputs]')
+          echo "components=$components" >> "$GITHUB_OUTPUT"
+
+  additional:
+    name: Quality / ${{ matrix.component }}
+    needs: discover
+    if: needs.discover.outputs.components != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJSON(needs.discover.outputs.components) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        if: matrix.component == 'gateway' || matrix.component == 'engagement'
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: pnpm/action-setup@v6.1.1
+        if: matrix.component == 'admin-bff' || matrix.component == 'admin-web'
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v7
+        if: matrix.component == 'admin-bff' || matrix.component == 'admin-web'
+        with:
+          node-version: "22"
+      - name: Install shared TypeScript tools
+        if: matrix.component == 'admin-bff' || matrix.component == 'admin-web'
+        run: pnpm install --frozen-lockfile
+      - name: Check service
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: make "$COMPONENT"

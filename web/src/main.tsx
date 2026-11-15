@@ -20,11 +20,13 @@ if (isStandaloneFrontendPreview()) {
   });
   keycloak
     .init({ onLoad: "check-sso", pkceMethod: "S256" })
-    .then(() => root.render(
-      <StrictMode>
-        <App keycloak={keycloak} />
-      </StrictMode>,
-    ))
+    .then(() =>
+      root.render(
+        <StrictMode>
+          <App keycloak={keycloak} />
+        </StrictMode>,
+      ),
+    )
     .catch(() => root.render(<ConnectionError />));
 }
 

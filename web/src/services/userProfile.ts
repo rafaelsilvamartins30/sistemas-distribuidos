@@ -87,7 +87,12 @@ export async function getMyProfile(token: string): Promise<UserProfile | null> {
 
 export function createMyProfile(token: string, input: CreateProfileInput): Promise<UserProfile> {
   if (isStandaloneFrontendPreview()) {
-    previewProfile = { ...input, id: "local-preview-profile", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    previewProfile = {
+      ...input,
+      id: "local-preview-profile",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
     return Promise.resolve(previewProfile);
   }
   return requestProfile(token, "/users", "POST", input);

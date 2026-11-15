@@ -51,7 +51,9 @@ export function AccountLayout({ keycloak }: AccountLayoutProps) {
           ))}
         </nav>
         <div className="sidebar-account">
-          <span className="avatar" aria-hidden="true">{initial}</span>
+          <span className="avatar" aria-hidden="true">
+            {initial}
+          </span>
           <div className="sidebar-account-copy">
             <strong>Conta pessoal</strong>
             <span>UNIR · sessão ativa</span>

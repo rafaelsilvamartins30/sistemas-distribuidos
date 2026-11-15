@@ -49,7 +49,8 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
     const navigation = navigationRef.current;
     const current = navigation?.querySelector<HTMLElement>('[aria-current="page"]');
     if (navigation && current && navigation.scrollWidth > navigation.clientWidth) {
-      navigation.scrollLeft = current.offsetLeft - navigation.offsetLeft - (navigation.clientWidth - current.offsetWidth) / 2;
+      navigation.scrollLeft =
+        current.offsetLeft - navigation.offsetLeft - (navigation.clientWidth - current.offsetWidth) / 2;
     }
   }, [location.pathname]);
 
@@ -64,7 +65,12 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
             </Link>
             <nav ref={navigationRef} className="product-nav" aria-label="Navegação principal">
               {mainNavigation.map((item) => (
-                <Link key={item.to} to={item.to} className={isCurrentPage(location.pathname, item.to) ? "is-current" : ""} aria-current={isCurrentPage(location.pathname, item.to) ? "page" : undefined}>
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={isCurrentPage(location.pathname, item.to) ? "is-current" : ""}
+                  aria-current={isCurrentPage(location.pathname, item.to) ? "page" : undefined}
+                >
                   <Icon name={item.icon} width="17" height="17" />
                   <span>{item.label}</span>
                 </Link>
@@ -72,19 +78,31 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
             </nav>
             <details className="account-menu">
               <summary aria-label="Abrir menu da conta">
-                <span className="avatar" aria-hidden="true">{initial}</span>
+                <span className="avatar" aria-hidden="true">
+                  {initial}
+                </span>
                 <span className="account-menu-name">{name}</span>
-                <span className="account-menu-chevron" aria-hidden="true">⌄</span>
+                <span className="account-menu-chevron" aria-hidden="true">
+                  ⌄
+                </span>
               </summary>
               <div className="account-menu-panel">
                 <div className="account-menu-identity">
                   <strong>{name}</strong>
                   {email && <span>{email}</span>}
                 </div>
-                <Link to="/perfil"><Icon name="profile" width="17" height="17" /> Minha conta</Link>
-                <Link to="/me"><Icon name="communities" width="17" height="17" /> Meu espaço</Link>
-                <Link to="/seguranca"><Icon name="shield" width="17" height="17" /> Segurança</Link>
-                <Link to="/aparencia"><Icon name="palette" width="17" height="17" /> Aparência</Link>
+                <Link to="/perfil">
+                  <Icon name="profile" width="17" height="17" /> Minha conta
+                </Link>
+                <Link to="/me">
+                  <Icon name="communities" width="17" height="17" /> Meu espaço
+                </Link>
+                <Link to="/seguranca">
+                  <Icon name="shield" width="17" height="17" /> Segurança
+                </Link>
+                <Link to="/aparencia">
+                  <Icon name="palette" width="17" height="17" /> Aparência
+                </Link>
                 <button onClick={() => void keycloak.logout({ redirectUri: `${window.location.origin}/login` })}>
                   <Icon name="logout" width="17" height="17" /> Sair
                 </button>

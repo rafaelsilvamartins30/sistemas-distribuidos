@@ -1,7 +1,7 @@
 FROM node:22-bookworm-slim AS build
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends maven default-jdk-headless \
+    && apt-get install -y --no-install-recommends maven=3.8.7-1 default-jdk-headless=2:1.17-74 \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g pnpm@11.25.0
 WORKDIR /theme

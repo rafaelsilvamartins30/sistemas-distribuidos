@@ -32,7 +32,14 @@ export class KeycloakAccountError extends Error {
 }
 
 let previewSessions: KeycloakSession[] = [
-  { id: "local-current-session", ipAddress: "Dispositivo local de desenvolvimento", started: Date.now() - 45 * 60_000, lastAccess: Date.now(), current: true, clients: ["UNIR"] },
+  {
+    id: "local-current-session",
+    ipAddress: "Dispositivo local de desenvolvimento",
+    started: Date.now() - 45 * 60_000,
+    lastAccess: Date.now(),
+    current: true,
+    clients: ["UNIR"],
+  },
 ];
 
 async function accountRequest<T>(keycloak: Keycloak, path: string, method = "GET"): Promise<T> {
@@ -75,8 +82,8 @@ export async function hasTotpCredential(keycloak: Keycloak): Promise<boolean> {
   if (isStandaloneFrontendPreview()) return false;
   const credentials = await accountRequest<KeycloakCredential[]>(keycloak, "/credentials?user-credentials=true");
   if (!Array.isArray(credentials)) throw new Error("A lista de credenciais retornada pelo Keycloak não é válida.");
-  return credentials.some((credential) =>
-    credential.type === "otp" && (credential.userCredentialMetadatas?.length ?? 0) > 0,
+  return credentials.some(
+    (credential) => credential.type === "otp" && (credential.userCredentialMetadatas?.length ?? 0) > 0,
   );
 }
 

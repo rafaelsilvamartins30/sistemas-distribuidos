@@ -20,8 +20,10 @@ interface AccountContext {
 type TotpStatus = "loading" | "configured" | "missing" | "error";
 
 function accountError(error: unknown): string {
-  if (error instanceof KeycloakAccountError && error.status === 401) return "Sua sessão expirou. Entre novamente para continuar.";
-  if (error instanceof KeycloakAccountError && error.status === 403) return "Esta sessão não tem permissão para consultar dados de segurança da conta.";
+  if (error instanceof KeycloakAccountError && error.status === 401)
+    return "Sua sessão expirou. Entre novamente para continuar.";
+  if (error instanceof KeycloakAccountError && error.status === 403)
+    return "Esta sessão não tem permissão para consultar dados de segurança da conta.";
   return "Não foi possível consultar o Keycloak. Verifique a conexão e tente novamente.";
 }
 
@@ -56,7 +58,9 @@ export function SecurityPage() {
     setSessionsLoading(false);
   }
 
-  useEffect(() => { void loadSecurityData(); }, [keycloak]);
+  useEffect(() => {
+    void loadSecurityData();
+  }, [keycloak]);
 
   function startAction(action: "CONFIGURE_TOTP" | "UPDATE_PASSWORD" | "UPDATE_EMAIL") {
     if (isStandaloneFrontendPreview()) {
@@ -104,7 +108,9 @@ export function SecurityPage() {
       <div className="card-grid">
         <section className="setting-card" aria-labelledby="email-security-title">
           <div className="setting-card-main">
-            <span className="setting-icon"><Icon name="mail" /></span>
+            <span className="setting-icon">
+              <Icon name="mail" />
+            </span>
             <div className="setting-copy">
               <h3 id="email-security-title">E-mail de acesso</h3>
               <p>{email}</p>
@@ -130,16 +136,26 @@ export function SecurityPage() {
 
         <section className="setting-card" aria-labelledby="totp-title">
           <div className="setting-card-main">
-            <span className="setting-icon"><Icon name="shield" /></span>
+            <span className="setting-icon">
+              <Icon name="shield" />
+            </span>
             <div className="setting-copy">
               <h3 id="totp-title">Autenticação em duas etapas</h3>
               <p>Use um aplicativo autenticador para confirmar ações importantes e proteger o acesso à sua conta.</p>
               <span className={`status-pill ${totpStatus === "configured" ? "is-enabled" : ""}`}>
-                {totpStatus === "loading" ? "Verificando configuração…" :
-                  totpStatus === "configured" ? "2FA ativa" :
-                    totpStatus === "missing" ? "Ainda não configurada" : "Não foi possível verificar"}
+                {totpStatus === "loading"
+                  ? "Verificando configuração…"
+                  : totpStatus === "configured"
+                    ? "2FA ativa"
+                    : totpStatus === "missing"
+                      ? "Ainda não configurada"
+                      : "Não foi possível verificar"}
               </span>
-              {totpError && <p className="notice notice-error" role="alert">{totpError}</p>}
+              {totpError && (
+                <p className="notice notice-error" role="alert">
+                  {totpError}
+                </p>
+              )}
             </div>
           </div>
           <div className="setting-card-action">
@@ -155,7 +171,9 @@ export function SecurityPage() {
 
         <section className="setting-card" aria-labelledby="password-security-title">
           <div className="setting-card-main">
-            <span className="setting-icon"><Icon name="lock" /></span>
+            <span className="setting-icon">
+              <Icon name="lock" />
+            </span>
             <div className="setting-copy">
               <h3 id="password-security-title">Senha</h3>
               <p>
@@ -177,21 +195,36 @@ export function SecurityPage() {
             </button>
           </div>
         </section>
-
       </div>
 
-      {previewAction && <p className="notice" role="status">{previewAction}</p>}
-      {totpStatus === "missing" && <p className="notice">Sem 2FA, a troca pede apenas sua senha. Configure o autenticador para exigir também o código.</p>}
-      {sessionsError && <p className="notice notice-error" role="alert">{sessionsError}</p>}
+      {previewAction && (
+        <p className="notice" role="status">
+          {previewAction}
+        </p>
+      )}
+      {totpStatus === "missing" && (
+        <p className="notice">
+          Sem 2FA, a troca pede apenas sua senha. Configure o autenticador para exigir também o código.
+        </p>
+      )}
+      {sessionsError && (
+        <p className="notice notice-error" role="alert">
+          {sessionsError}
+        </p>
+      )}
 
       <section className="appearance-section" aria-labelledby="sessions-title">
         <h3 id="sessions-title">Sessões ativas</h3>
         <p>Confira onde sua conta está conectada e encerre sessões que não reconhece.</p>
-        {sessionsLoading ? <p className="notice">Carregando sessões…</p> : sessionsError ? (
+        {sessionsLoading ? (
+          <p className="notice">Carregando sessões…</p>
+        ) : sessionsError ? (
           <button className="button button-secondary button-small retry-button" onClick={() => void loadSecurityData()}>
             Tentar novamente
           </button>
-        ) : sessions.length === 0 ? <p className="notice">Nenhuma sessão ativa encontrada.</p> : (
+        ) : sessions.length === 0 ? (
+          <p className="notice">Nenhuma sessão ativa encontrada.</p>
+        ) : (
           <div className="session-list">
             {sessions.map((session) => {
               const isCurrent = session.current === true;
@@ -199,14 +232,25 @@ export function SecurityPage() {
               return (
                 <article className="session-card" key={session.id}>
                   <div className="session-details">
-                    <span className="setting-icon"><Icon name="device" /></span>
+                    <span className="setting-icon">
+                      <Icon name="device" />
+                    </span>
                     <div className="session-copy">
                       <strong>
                         {session.ipAddress || "Dispositivo conectado"}
                         {isCurrent && <span className="session-current">Sessão atual</span>}
                       </strong>
-                      <p>Iniciada {formatSessionDate(session.started)} · Último acesso {formatSessionDate(session.lastAccess)}</p>
-                      {clients.length > 0 && <div className="session-client-list">{clients.map((client) => <span key={client}>{client}</span>)}</div>}
+                      <p>
+                        Iniciada {formatSessionDate(session.started)} · Último acesso{" "}
+                        {formatSessionDate(session.lastAccess)}
+                      </p>
+                      {clients.length > 0 && (
+                        <div className="session-client-list">
+                          {clients.map((client) => (
+                            <span key={client}>{client}</span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <button

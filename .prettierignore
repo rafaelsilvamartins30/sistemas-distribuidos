@@ -1,0 +1,4 @@
+**/node_modules/**
+**/dist/**
+**/*.css
+keycloak-theme/src/kc.gen.tsx

@@ -143,6 +143,6 @@ public class User implements Persistable<String> {
     }
 
     public List<String> getInterests() {
-        return this.interests;
+        return List.copyOf(this.interests);
     }
 }

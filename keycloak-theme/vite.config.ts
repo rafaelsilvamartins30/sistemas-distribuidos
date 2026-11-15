@@ -3,5 +3,5 @@ import react from "@vitejs/plugin-react";
 import { keycloakify } from "keycloakify/vite-plugin";
 
 export default defineConfig({
-    plugins: [react(), keycloakify({ themeName: "unir-theme", accountThemeImplementation: "none" })]
+  plugins: [react(), keycloakify({ themeName: "unir-theme", accountThemeImplementation: "none" })],
 });

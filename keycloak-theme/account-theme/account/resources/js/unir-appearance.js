@@ -9,9 +9,11 @@
   };
 
   function isAppearance(value) {
-    return value &&
+    return (
+      value &&
       (value.mode === "light" || value.mode === "dark") &&
-      Object.prototype.hasOwnProperty.call(accentByPalette, value.palette);
+      Object.prototype.hasOwnProperty.call(accentByPalette, value.palette)
+    );
   }
 
   function readAppearance() {

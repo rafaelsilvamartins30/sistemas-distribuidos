@@ -28,8 +28,22 @@ export function AppearancePage() {
           </div>
         </div>
         <div className="appearance-options">
-          <ModeChoice mode={mode} value="light" onSelect={setMode} label="Claro" description="Fundo claro e arejado" icon="sun" />
-          <ModeChoice mode={mode} value="dark" onSelect={setMode} label="Noturno" description="Mais confortável à noite" icon="moon" />
+          <ModeChoice
+            mode={mode}
+            value="light"
+            onSelect={setMode}
+            label="Claro"
+            description="Fundo claro e arejado"
+            icon="sun"
+          />
+          <ModeChoice
+            mode={mode}
+            value="dark"
+            onSelect={setMode}
+            label="Noturno"
+            description="Mais confortável à noite"
+            icon="moon"
+          />
         </div>
       </section>
 
@@ -57,13 +71,19 @@ export function AppearancePage() {
                 <strong>{option.name}</strong>
                 <span>{option.description}</span>
               </span>
-              {palette === option.id && <span className="choice-selected"><Icon name="check" width="13" height="13" /> Ativa</span>}
+              {palette === option.id && (
+                <span className="choice-selected">
+                  <Icon name="check" width="13" height="13" /> Ativa
+                </span>
+              )}
             </button>
           ))}
         </div>
       </section>
 
-      <p className="appearance-footnote"><Icon name="check" width="15" height="15" /> Suas escolhas são salvas automaticamente neste navegador.</p>
+      <p className="appearance-footnote">
+        <Icon name="check" width="15" height="15" /> Suas escolhas são salvas automaticamente neste navegador.
+      </p>
     </>
   );
 }
@@ -87,12 +107,18 @@ function ModeChoice({
 
   return (
     <button aria-pressed={selected} className="choice-card" onClick={() => onSelect(value)} type="button">
-      <span className="setting-icon"><Icon name={icon} /></span>
+      <span className="setting-icon">
+        <Icon name={icon} />
+      </span>
       <span className="choice-copy choice-copy-grow">
         <strong>{label}</strong>
         <span>{description}</span>
       </span>
-      {selected && <span className="choice-selected"><Icon name="check" width="13" height="13" /> Ativo</span>}
+      {selected && (
+        <span className="choice-selected">
+          <Icon name="check" width="13" height="13" /> Ativo
+        </span>
+      )}
     </button>
   );
 }

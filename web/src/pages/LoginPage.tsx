@@ -9,7 +9,9 @@ interface LoginPageProps {
 export function LoginPage({ keycloak }: LoginPageProps) {
   const homeUrl = `${window.location.origin}/`;
 
-  useEffect(() => { document.title = "UNIR — Entrar"; }, []);
+  useEffect(() => {
+    document.title = "UNIR — Entrar";
+  }, []);
 
   return (
     <main className="page-shell">

@@ -25,13 +25,14 @@ function readSettings(): AppearanceSettings {
     const parsed = JSON.parse(stored) as { mode?: unknown; palette?: unknown };
     return {
       mode: parsed.mode === "dark" ? "dark" : "light",
-      palette: parsed.palette === "blue"
-        ? "blue"
-        : parsed.palette === "violet"
-          ? "violet"
-          : parsed.palette === "ember" || parsed.palette === "amber"
-            ? "ember"
-            : "green",
+      palette:
+        parsed.palette === "blue"
+          ? "blue"
+          : parsed.palette === "violet"
+            ? "violet"
+            : parsed.palette === "ember" || parsed.palette === "amber"
+              ? "ember"
+              : "green",
     };
   } catch {
     return defaults;
@@ -49,11 +50,14 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     document.cookie = `${keycloakCookieKey}=${encodeURIComponent(JSON.stringify(settings))}; Path=/realms/unir/; Max-Age=31536000; SameSite=Lax${secureCookie}`;
   }, [settings]);
 
-  const value = useMemo<AppearanceContextValue>(() => ({
-    ...settings,
-    setMode: (mode) => setSettings((current) => ({ ...current, mode })),
-    setPalette: (palette) => setSettings((current) => ({ ...current, palette })),
-  }), [settings]);
+  const value = useMemo<AppearanceContextValue>(
+    () => ({
+      ...settings,
+      setMode: (mode) => setSettings((current) => ({ ...current, mode })),
+      setPalette: (palette) => setSettings((current) => ({ ...current, palette })),
+    }),
+    [settings],
+  );
 
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
 }
