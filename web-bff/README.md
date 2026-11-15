@@ -1,13 +1,20 @@
 # Web BFF
 
 Fastify service for web-specific HTTP endpoints. The BFF has no database; it
-forwards the caller's bearer token to the User Service, which validates it.
+forwards the caller's bearer token and JSON payloads to the User Service, which
+validates them.
 
 ## Endpoints
 
 - `GET /health` returns `200` while the process is running.
 - `GET /api/v1/me` forwards the bearer token to `GET /users/me` on the User
   Service and preserves its status and response body.
+- `POST /api/v1/users` forwards the bearer token and JSON payload to
+  `POST /users` on the User Service and preserves its status (`201`, `400`,
+  `409`) and response body.
+- `PATCH /api/v1/me` forwards the bearer token and JSON payload to
+  `PATCH /users/me` on the User Service and preserves its status (`200`, `400`,
+  `404`) and response body.
 
 ## Local development
 

@@ -1,3 +1,5 @@
+import { isStandaloneFrontendPreview } from "../dev/frontendPreview";
+
 export type AffiliationStatus = "STUDENT" | "PROFESSOR" | "ALUMNI";
 export type AcademicLevel = "UNDERGRADUATE" | "MASTERS" | "DOCTORATE";
 
@@ -37,12 +39,12 @@ export interface UpdateProfileInput {
 
 export class UserProfileApiError extends Error {
   constructor(public readonly status: number) {
-    super(`User Service respondeu com status ${status}.`);
+    super(`Gateway respondeu com status ${status}.`);
     this.name = "UserProfileApiError";
   }
 }
 
-const userServiceUrl = import.meta.env.VITE_USER_SERVICE_URL;
+const gatewayUrl = import.meta.env.VITE_GATEWAY_URL;
 let previewProfile: UserProfile | null = {
   id: "local-preview-profile",
   name: "Rafael Silva Martins",
@@ -57,7 +59,7 @@ let previewProfile: UserProfile | null = {
 };
 
 async function requestProfile(token: string, path: string, method = "GET", body?: object): Promise<UserProfile> {
-  const response = await fetch(`${userServiceUrl}${path}`, {
+  const response = await fetch(`${gatewayUrl}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -76,7 +78,7 @@ async function requestProfile(token: string, path: string, method = "GET", body?
 export async function getMyProfile(token: string): Promise<UserProfile | null> {
   if (isStandaloneFrontendPreview()) return previewProfile;
   try {
-    return await requestProfile(token, "/users/me");
+    return await requestProfile(token, "/api/v1/me");
   } catch (error) {
     if (error instanceof UserProfileApiError && error.status === 404) {
       return null;
@@ -95,7 +97,7 @@ export function createMyProfile(token: string, input: CreateProfileInput): Promi
     };
     return Promise.resolve(previewProfile);
   }
-  return requestProfile(token, "/users", "POST", input);
+  return requestProfile(token, "/api/v1/users", "POST", input);
 }
 
 export function updateMyProfile(token: string, input: UpdateProfileInput): Promise<UserProfile> {
@@ -104,6 +106,5 @@ export function updateMyProfile(token: string, input: UpdateProfileInput): Promi
     previewProfile = { ...previewProfile, ...input, updatedAt: new Date().toISOString() };
     return Promise.resolve(previewProfile);
   }
-  return requestProfile(token, "/users/me", "PATCH", input);
+  return requestProfile(token, "/api/v1/me", "PATCH", input);
 }
-import { isStandaloneFrontendPreview } from "../dev/frontendPreview";
