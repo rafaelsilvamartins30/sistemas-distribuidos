@@ -1,20 +1,38 @@
 # Web BFF
 
 Fastify service for web-specific HTTP endpoints. The BFF has no database; it
-forwards the caller's bearer token and JSON payloads to the User Service, which
-validates them.
+forwards the caller's bearer token and JSON payloads to Campus, which validates
+them and persists profiles.
 
 ## Endpoints
 
 - `GET /health` returns `200` while the process is running.
-- `GET /api/v1/me` forwards the bearer token to `GET /users/me` on the User
-  Service and preserves its status and response body.
+- `GET /api/v1/me` forwards the bearer token to `GET /users/me` on Campus and
+  preserves its status and response body.
 - `POST /api/v1/users` forwards the bearer token and JSON payload to
-  `POST /users` on the User Service and preserves its status (`201`, `400`,
+  `POST /users` on Campus and preserves its status (`201`, `400`,
   `409`) and response body.
 - `PATCH /api/v1/me` forwards the bearer token and JSON payload to
-  `PATCH /users/me` on the User Service and preserves its status (`200`, `400`,
+  `PATCH /users/me` on Campus and preserves its status (`200`, `400`,
   `404`) and response body.
+- `GET /api/v1/web/events` and `GET /api/v1/web/events/{eventId}` forward the
+  bearer token and list query to the Engagement Service (`/api/v1/events` and
+  `/api/v1/events/{eventId}`), preserving its status, content type, and body.
+  Connection failures return `503`.
+- `POST /api/v1/web/events/{eventId}/registrations`,
+  `GET /api/v1/web/me/activities`, and
+  `DELETE /api/v1/web/registrations/{registrationId}` forward free-event
+  registration operations to Engagement. DELETE performs a logical
+  cancellation and preserves the registration history.
+- `GET /api/v1/web/university`, `GET /api/v1/web/departments`, and
+  `GET /api/v1/web/departments/{departmentId}` forward the bearer token and
+  list query to Campus. Department responses omit `administratorUserIds` from
+  the Web contract; Campus retains those references in its model.
+- `GET /api/v1/web/entities`, `GET /api/v1/web/entities/{entityId}`,
+  `GET /api/v1/web/communities`, and
+  `GET /api/v1/web/communities/{communityId}` forward the bearer token and
+  pagination query to Campus. Responses omit `managerUserIds`, which remain
+  internal references to Keycloak users.
 
 ## Local development
 
@@ -26,6 +44,6 @@ pnpm test
 pnpm start
 ```
 
-`USER_SERVICE_URL` defaults to `http://localhost:8080`. `PORT` defaults to
-`3000`. The Compose service sets the User Service URL to
-`http://user-service:8080`.
+`CAMPUS_URL` defaults to `http://localhost:3000`; `ENGAGEMENT_SERVICE_URL`
+defaults to `http://localhost:8080`. `PORT` defaults to `3000`. Compose sets
+the service URLs to `http://campus:3000` and `http://engagement:8080`.

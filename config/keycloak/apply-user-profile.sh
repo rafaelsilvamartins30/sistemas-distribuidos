@@ -139,12 +139,13 @@ if [ -z "$CLIENT_ID" ]; then
 fi
 
 WEB_ORIGIN="http://localhost:${WEB_PORT:-15173}"
+ADMIN_WEB_ORIGIN="http://localhost:${ADMIN_WEB_PORT:-15175}"
 
 /opt/keycloak/bin/kcadm.sh update "clients/$CLIENT_ID" \
     --config "$KCADM_CONFIG" \
     -r unir \
-    -s "redirectUris=[\"$WEB_ORIGIN/*\"]" \
-    -s "webOrigins=[\"$WEB_ORIGIN\"]"
+    -s "redirectUris=[\"$WEB_ORIGIN/*\",\"$ADMIN_WEB_ORIGIN/*\"]" \
+    -s "webOrigins=[\"$WEB_ORIGIN\",\"$ADMIN_WEB_ORIGIN\"]"
 
 PROFILE_SCOPE_ID=$(
     /opt/keycloak/bin/kcadm.sh get "clients/$CLIENT_ID/default-client-scopes" \

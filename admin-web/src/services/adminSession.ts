@@ -1,8 +1,29 @@
+export type AffiliationStatus = "STUDENT" | "PROFESSOR" | "ALUMNI";
+export type AcademicLevel = "UNDERGRADUATE" | "MASTERS" | "DOCTORATE";
+
 export interface AdminProfile {
   id: string;
-  email: string;
-  displayName: string;
-  status: string;
+  name: string;
+  institutionalId: string;
+  affiliationStatus: AffiliationStatus | null;
+  academicLevel: AcademicLevel | null;
+  course: string;
+  department: string;
+  interests: string[];
+  createdAt: string;
+  updatedAt: string;
+  email?: string | null;
+  emailVerified?: boolean | null;
+}
+
+export class AdminApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AdminApiError";
+  }
 }
 
 export interface TokenPayload {
@@ -29,11 +50,11 @@ export function hasPlatformAdminRole(tokenParsed: TokenPayload | undefined): boo
 }
 
 export async function fetchAdminProfile(
-  adminBffUrl: string,
+  gatewayUrl: string,
   token: string,
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<AdminProfile | null> {
-  const baseUrl = adminBffUrl.replace(/\/+$/, "");
+  const baseUrl = gatewayUrl.replace(/\/+$/, "");
   const response = await fetchImpl(`${baseUrl}/api/v1/admin/me`, {
     method: "GET",
     headers: {
@@ -45,8 +66,12 @@ export async function fetchAdminProfile(
     return null;
   }
 
+  if (response.status === 403) {
+    throw new AdminApiError(403, "Acesso negado (403): papel PLATFORM_ADMIN é obrigatório.");
+  }
+
   if (!response.ok) {
-    throw new Error(`Falha ao consultar perfil administrativo (${response.status})`);
+    throw new AdminApiError(response.status, `Falha ao consultar perfil administrativo (${response.status})`);
   }
 
   return (await response.json()) as AdminProfile;

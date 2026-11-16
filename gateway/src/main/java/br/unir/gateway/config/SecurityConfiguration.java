@@ -27,6 +27,9 @@ public class SecurityConfiguration {
     @Value("${WEB_ORIGIN:http://localhost:15173}")
     private String webOrigin;
 
+    @Value("${ADMIN_WEB_ORIGIN:http://localhost:15175}")
+    private String adminWebOrigin;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http.cors(cors -> cors.configurationSource(this.corsConfigurationSource()))
@@ -37,7 +40,21 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/v1/users")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/me")
-                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN).anyRequest().denyAll())
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/web/university", "/api/v1/web/departments",
+                                "/api/v1/web/departments/*", "/api/v1/web/entities", "/api/v1/web/entities/*",
+                                "/api/v1/web/communities", "/api/v1/web/communities/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/web/events", "/api/v1/web/events/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/web/events/*/registrations")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/web/me/activities")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/web/registrations/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/me").hasRole(GlobalRoles.PLATFORM_ADMIN)
+                        .anyRequest().denyAll())
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(this.jwtAuthenticationConverter())))
                 .build();
@@ -45,13 +62,21 @@ public class SecurityConfiguration {
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of(this.webOrigin));
-        configuration.setAllowedMethods(List.of("GET", "POST", "PATCH", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+        CorsConfiguration webConfiguration = new CorsConfiguration();
+        webConfiguration.setAllowedOrigins(List.of(this.webOrigin));
+        webConfiguration.setAllowedMethods(List.of("GET", "POST", "PATCH", "DELETE", "OPTIONS"));
+        webConfiguration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+
+        CorsConfiguration adminConfiguration = new CorsConfiguration();
+        adminConfiguration.setAllowedOrigins(List.of(this.adminWebOrigin));
+        adminConfiguration.setAllowedMethods(List.of("GET", "OPTIONS"));
+        adminConfiguration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/api/v1/me", configuration);
-        source.registerCorsConfiguration("/api/v1/users", configuration);
+        source.registerCorsConfiguration("/api/v1/me", webConfiguration);
+        source.registerCorsConfiguration("/api/v1/users", webConfiguration);
+        source.registerCorsConfiguration("/api/v1/web/**", webConfiguration);
+        source.registerCorsConfiguration("/api/v1/admin/me", adminConfiguration);
         return source;
     }
 

@@ -29,17 +29,25 @@ test("GET /api/v1/admin/me requires a bearer token", async (t) => {
   assert.equal(called, false);
 });
 
-test("GET /api/v1/admin/me forwards bearer token to User Service", async (t) => {
+test("GET /api/v1/admin/me forwards bearer token to Campus", async (t) => {
   let forwardedUrl;
   let forwardedHeaders;
   const profile = {
     id: "00000000-0000-0000-0000-000000000001",
+    name: "Ana Silva",
+    institutionalId: "202420228",
+    affiliationStatus: "PROFESSOR",
+    academicLevel: "DOCTORATE",
+    course: "Ciência da Computação",
+    department: "Departamento de Ciência da Computação",
+    interests: ["Sistemas Distribuídos"],
+    createdAt: "2026-10-14T12:00:00Z",
+    updatedAt: "2026-10-14T12:00:00Z",
     email: "admin@unir.edu.br",
-    displayName: "Admin UNIR",
-    status: "ACTIVE",
+    emailVerified: true,
   };
   const server = createServer({
-    userServiceUrl: "http://user-service:8080/",
+    campusUrl: "http://campus:3000/",
     fetch: async (url, init) => {
       forwardedUrl = url;
       forwardedHeaders = init?.headers;
@@ -57,13 +65,13 @@ test("GET /api/v1/admin/me forwards bearer token to User Service", async (t) => 
     headers: { authorization: "Bearer valid.jwt.token" },
   });
 
-  assert.equal(forwardedUrl, "http://user-service:8080/users/me");
+  assert.equal(forwardedUrl, "http://campus:3000/users/me");
   assert.deepEqual(forwardedHeaders, { authorization: "Bearer valid.jwt.token" });
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), profile);
 });
 
-test("GET /api/v1/admin/me returns 503 when User Service is unavailable", async (t) => {
+test("GET /api/v1/admin/me returns 503 when Campus is unavailable", async (t) => {
   const server = createServer({
     fetch: async () => {
       throw new Error("connect ECONNREFUSED");

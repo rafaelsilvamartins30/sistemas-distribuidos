@@ -47,7 +47,7 @@ export function App() {
 
         const tokenParsed = client.tokenParsed as TokenPayload | undefined;
         try {
-          const profile = await fetchAdminProfile(env.adminBffUrl, client.token);
+          const profile = await fetchAdminProfile(env.gatewayUrl, client.token);
           if (!active) return;
           setSession({
             status: "authenticated",
@@ -60,7 +60,7 @@ export function App() {
             status: "authenticated",
             tokenParsed,
             profile: null,
-            errorMessage: error instanceof Error ? error.message : "Indisponibilidade no Admin BFF",
+            errorMessage: error instanceof Error ? error.message : "Indisponibilidade no Gateway",
           });
         }
       })
@@ -113,7 +113,23 @@ export function App() {
             <dl className="admin-details">
               <div>
                 <dt>Usuário autenticado</dt>
-                <dd>{session.profile?.displayName ?? session.tokenParsed?.email ?? session.tokenParsed?.sub}</dd>
+                <dd>{session.profile?.name ?? session.tokenParsed?.email ?? session.tokenParsed?.sub}</dd>
+              </div>
+              <div>
+                <dt>E-mail</dt>
+                <dd>{session.profile?.email ?? session.tokenParsed?.email ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>Matrícula / Registro</dt>
+                <dd>{session.profile?.institutionalId ?? "Perfil UNIR não cadastrado"}</dd>
+              </div>
+              <div>
+                <dt>Departamento / Curso</dt>
+                <dd>
+                  {session.profile
+                    ? `${session.profile.department} · ${session.profile.course}`
+                    : "Perfil UNIR não cadastrado"}
+                </dd>
               </div>
               <div>
                 <dt>Permissão administrativa</dt>

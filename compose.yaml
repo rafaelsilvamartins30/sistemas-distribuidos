@@ -1,18 +1,16 @@
 name: unir
 
 services:
-  user-db:
+  campus-db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: unir_users
+      POSTGRES_DB: unir_campus
       POSTGRES_USER: unir
       POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
-    ports:
-      - "127.0.0.1:${USER_DB_PORT:-15433}:5432"
     volumes:
-      - user_data:/var/lib/postgresql/data
+      - campus_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U unir -d unir_users"]
+      test: ["CMD-SHELL", "pg_isready -U unir -d unir_campus"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -64,6 +62,19 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4.4.0-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-unir}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-unir-local-only}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
 
   keycloak-db:
     image: postgres:16-alpine
@@ -123,24 +134,35 @@ services:
       retries: 30
       start_period: 15s
 
-  user-service:
+  campus:
     build:
-      context: ./user-service
-    image: unir-user-service:local
+      context: ./campus
+    image: unir-campus:local
     environment:
-      DB_URL: jdbc:postgresql://user-db:5432/unir_users
+      RAILS_ENV: development
+      DB_HOST: campus-db
+      DB_NAME: unir_campus
       DB_USERNAME: unir
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
-      WEB_ORIGIN: http://localhost:${WEB_PORT:-15173}
       KEYCLOAK_ISSUER_URI: http://localhost:${KEYCLOAK_PORT:-18081}/realms/unir
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/unir/protocol/openid-connect/certs
-    ports:
-      - "127.0.0.1:${USER_SERVICE_PORT:-18082}:8080"
+      PORT: 3000
     depends_on:
-      user-db:
+      campus-db:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - ruby
+        - -rnet/http
+        - -e
+        - "exit(Net::HTTP.get_response(URI('http://127.0.0.1:3000/health/ready')).is_a?(Net::HTTPSuccess) ? 0 : 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   engagement:
     build:
@@ -152,6 +174,10 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       KEYCLOAK_ISSUER_URI: http://localhost:${KEYCLOAK_PORT:-18081}/realms/unir
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/unir/protocol/openid-connect/certs
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-unir}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-unir-local-only}
     ports:
       - "127.0.0.1:${ENGAGEMENT_PORT:-18085}:8080"
     depends_on:
@@ -159,6 +185,8 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+      rabbitmq:
+        condition: service_started
 
   payment:
     build:
@@ -167,10 +195,16 @@ services:
     environment:
       PORT: 8080
       DB_URL: postgres://unir:${DB_PASSWORD:?Set DB_PASSWORD in .env}@payment-db:5432/unir_payment?sslmode=disable
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-unir}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-unir-local-only}
     ports:
       - "127.0.0.1:${PAYMENT_PORT:-18086}:8080"
     depends_on:
       payment-db:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   access:
@@ -192,11 +226,14 @@ services:
     image: unir-web-bff:local
     environment:
       PORT: 3000
-      USER_SERVICE_URL: http://user-service:8080
+      CAMPUS_URL: http://campus:3000
+      ENGAGEMENT_SERVICE_URL: http://engagement:8080
     ports:
       - "127.0.0.1:${WEB_BFF_PORT:-18083}:3000"
     depends_on:
-      user-service:
+      campus:
+        condition: service_healthy
+      engagement:
         condition: service_started
 
   admin-bff:
@@ -205,12 +242,10 @@ services:
     image: unir-admin-bff:local
     environment:
       PORT: 3000
-      USER_SERVICE_URL: http://user-service:8080
-    ports:
-      - "127.0.0.1:${ADMIN_BFF_PORT:-18088}:3000"
+      CAMPUS_URL: http://campus:3000
     depends_on:
-      user-service:
-        condition: service_started
+      campus:
+        condition: service_healthy
 
   gateway:
     build:
@@ -218,7 +253,9 @@ services:
     image: unir-gateway:local
     environment:
       WEB_ORIGIN: http://localhost:${WEB_PORT:-15173}
+      ADMIN_WEB_ORIGIN: http://localhost:${ADMIN_WEB_PORT:-15175}
       WEB_BFF_URL: http://web-bff:3000
+      ADMIN_BFF_URL: http://admin-bff:3000
       KEYCLOAK_ISSUER_URI: http://localhost:${KEYCLOAK_PORT:-18081}/realms/unir
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/unir/protocol/openid-connect/certs
     ports:
@@ -228,6 +265,8 @@ services:
         condition: service_healthy
       web-bff:
         condition: service_started
+      admin-bff:
+        condition: service_started
 
   keycloak-profile-config:
     image: unir-keycloak:local
@@ -236,6 +275,7 @@ services:
       KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
       WEB_PORT: ${WEB_PORT:-15173}
+      ADMIN_WEB_PORT: ${ADMIN_WEB_PORT:-15175}
       RECOVERY_CODES_ENABLED: "true"
     volumes:
       - ./config/keycloak/user-profile.json:/config/user-profile.json:ro
@@ -272,11 +312,11 @@ services:
       VITE_KEYCLOAK_URL: http://localhost:${KEYCLOAK_PORT:-18081}
       VITE_KEYCLOAK_REALM: unir
       VITE_KEYCLOAK_CLIENT_ID: unir-web
-      VITE_ADMIN_BFF_URL: http://localhost:${ADMIN_BFF_PORT:-18088}
+      VITE_GATEWAY_URL: http://localhost:${GATEWAY_PORT:-18084}
     ports:
       - "127.0.0.1:${ADMIN_WEB_PORT:-15175}:5173"
     depends_on:
-      admin-bff:
+      gateway:
         condition: service_started
       keycloak:
         condition: service_healthy
@@ -284,8 +324,9 @@ services:
         condition: service_completed_successfully
 
 volumes:
-  user_data:
+  campus_data:
   engagement_data:
   payment_data:
   access_data:
   keycloak_db_data:
+  rabbitmq_data:

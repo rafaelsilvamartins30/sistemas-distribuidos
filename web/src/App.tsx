@@ -8,6 +8,7 @@ import { AdminPage } from "./pages/AdminPage";
 import { CommunitiesPage } from "./pages/CommunitiesPage";
 import { EntitiesPage, EntityDetailPage } from "./pages/EntitiesPage";
 import { EventDetailPage, EventsPage } from "./pages/EventsPage";
+import { DepartmentDetailPage, DepartmentsPage } from "./pages/DepartmentsPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { MySpacePage } from "./pages/MySpacePage";
@@ -35,7 +36,10 @@ export function App({ keycloak }: AppProps) {
             <Route path="/" element={<HomePage />} />
             <Route path="/inicio" element={<Navigate to="/" replace />} />
             <Route path="/comunidades" element={<CommunitiesPage />} />
+            <Route path="/departamentos" element={<DepartmentsPage />} />
+            <Route path="/departamentos/:departmentId" element={<DepartmentDetailPage />} />
             <Route path="/espacos/:spaceId" element={<EntityDetailPage />} />
+            <Route path="/comunidades/:communityId" element={<EntityDetailPage />} />
             <Route path="/entidades" element={<EntitiesPage />} />
             <Route path="/entidades/:entityId" element={<EntityDetailPage />} />
             <Route path="/eventos" element={<EventsPage />} />

@@ -1,28 +1,82 @@
-import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useOutletContext, useParams } from "react-router-dom";
+import type Keycloak from "keycloak-js";
+import { EventCard } from "../components/EventCard";
 import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
 import { SearchField } from "../components/SearchField";
 import { Section } from "../components/Section";
-import { addMockRegistration, events, findEntity, findEvent, type RegistrationMode } from "../data/demoContent";
+import { useEventList } from "../hooks/useEventList";
+import { EventApiError, getEvent, type Event } from "../services/events";
+import {
+  cancelRegistration,
+  getMyRegistrations,
+  registerForEvent,
+  RegistrationApiError,
+  type Registration,
+} from "../services/registrations";
 
-const eventFilters = ["Todos", "Acadêmicos", "Esportivos"] as const;
-type EventFilter = (typeof eventFilters)[number];
+interface WebContext {
+  keycloak: Keycloak;
+}
+
+function dateTime(value: string): string {
+  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "long", timeStyle: "short" }).format(new Date(value));
+}
+
+function registrationModeLabel(event: Event): string {
+  switch (event.registrationMode) {
+    case "INTERNAL_FREE":
+      return "Inscrição gratuita pela UNIR";
+    case "INTERNAL_PAID":
+      return "Inscrição paga pela UNIR";
+    case "EXTERNAL_PAID":
+      return "Inscrição paga em plataforma externa";
+  }
+}
+
+function priceLabel(event: Event): string {
+  if (event.registrationMode === "INTERNAL_FREE") return "Gratuito";
+  if (event.price == null) return "Valor a consultar";
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(event.price / 100);
+}
+
+function canCancel(registration: Registration): boolean {
+  return Date.now() <= new Date(registration.event.startsAt).getTime() - 24 * 60 * 60 * 1000;
+}
+
+function registrationErrorMessage(error: unknown): string {
+  if (!(error instanceof RegistrationApiError)) return "Não foi possível concluir a operação. Tente novamente.";
+  switch (error.detail) {
+    case "EVENT_FULL":
+      return "As vagas deste evento já foram preenchidas.";
+    case "ALREADY_REGISTERED":
+      return "Você já tem uma inscrição confirmada neste evento.";
+    case "EVENT_CANCELLED":
+      return "Este evento foi cancelado e não aceita novas inscrições.";
+    case "REGISTRATION_CLOSED":
+      return "O prazo de inscrição deste evento terminou.";
+    case "CANCELLATION_WINDOW_CLOSED":
+      return "O cancelamento só pode ser feito até 24 horas antes do evento.";
+    case "REGISTRATION_NOT_ACTIVE":
+      return "Esta inscrição não está mais ativa.";
+    default:
+      return `Não foi possível concluir a operação (${error.status}).`;
+  }
+}
 
 export function EventsPage() {
+  const { keycloak } = useOutletContext<WebContext>();
+  const { events, loading, error } = useEventList(keycloak);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<EventFilter>("Todos");
-  const visibleEvents = useMemo(
-    () =>
-      events.filter((event) => {
-        const organizer = findEntity(event.organizerId)?.name ?? "";
-        const matchesQuery = `${event.title} ${event.type} ${organizer} ${event.description}`
-          .toLocaleLowerCase("pt-BR")
-          .includes(query.trim().toLocaleLowerCase("pt-BR"));
-        return matchesQuery && (filter === "Todos" || (filter === "Esportivos") === Boolean(event.sports));
-      }),
-    [filter, query],
-  );
+  const visibleEvents = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
+    return events.filter((event) =>
+      `${event.title} ${event.category} ${event.organizerType} ${event.description} ${event.location}`
+        .toLocaleLowerCase("pt-BR")
+        .includes(normalizedQuery),
+    );
+  }, [events, query]);
 
   return (
     <div className="browse-page">
@@ -39,75 +93,28 @@ export function EventsPage() {
           value={query}
           onChange={setQuery}
         />
-        <label className="page-filter">
-          <span>Categoria</span>
-          <select value={filter} onChange={(event) => setFilter(event.target.value as EventFilter)}>
-            {eventFilters.map((item) => (
-              <option key={item}>{item}</option>
-            ))}
-          </select>
-        </label>
       </div>
 
-      <Section
-        title="Programação"
-        description={`${visibleEvents.length} eventos de exemplo`}
-        action={
-          <Link className="text-link" to="/esportes">
-            Ver área de esportes <Icon name="arrowUpRight" width="15" height="15" />
-          </Link>
-        }
-      >
-        {visibleEvents.length ? (
+      <Section title="Programação" description={loading ? "Carregando eventos…" : `${visibleEvents.length} eventos`}>
+        {loading ? (
+          <p className="notice" role="status">
+            Carregando eventos…
+          </p>
+        ) : error ? (
+          <p className="notice notice-error" role="alert">
+            Não foi possível carregar os eventos. Verifique a conexão com a plataforma e tente novamente.
+          </p>
+        ) : visibleEvents.length ? (
           <div className="content-grid">
-            {visibleEvents.map((event) => {
-              const organizer = findEntity(event.organizerId)!;
-              return (
-                <article className="content-card event-catalog-card" key={event.id}>
-                  <div className="event-catalog-card-top">
-                    <div className="event-date">
-                      <strong>{event.day}</strong>
-                      <span>{event.month}</span>
-                    </div>
-                    <span className="event-kind-tag">{event.type}</span>
-                  </div>
-                  <h3>
-                    <Link to={`/eventos/${event.id}`}>{event.title}</Link>
-                  </h3>
-                  <p className="event-catalog-description">{event.description}</p>
-                  <div className="event-catalog-meta">
-                    <span>
-                      <Icon name="calendar" width="15" height="15" />
-                      {event.date} · {event.time}
-                    </span>
-                    <span>
-                      <Icon name="pin" width="15" height="15" />
-                      {event.location}
-                    </span>
-                  </div>
-                  <div className="event-catalog-organizer">
-                    <span className={`entity-avatar entity-avatar-${organizer.tone}`}>{organizer.initials}</span>
-                    <span>
-                      Organizado por <Link to={`/entidades/${organizer.id}`}>{organizer.name}</Link>
-                    </span>
-                  </div>
-                  <div className="event-catalog-footer">
-                    <span className={event.registration === "none" ? "event-status-muted" : "event-status"}>
-                      {event.status} · {event.vacancies}
-                    </span>
-                    <Link className="button button-secondary" to={`/eventos/${event.id}`}>
-                      Ver evento
-                    </Link>
-                  </div>
-                </article>
-              );
-            })}
+            {visibleEvents.map((event) => (
+              <EventCard key={event.id} event={event} />
+            ))}
           </div>
         ) : (
           <div className="empty-state">
             <Icon name="search" />
-            <strong>Nenhum evento encontrado</strong>
-            <span>Tente outro termo ou filtro.</span>
+            <strong>{events.length ? "Nenhum evento encontrado" : "Nenhum evento disponível"}</strong>
+            <span>{events.length ? "Tente outro termo." : "Os próximos eventos aparecerão aqui."}</span>
           </div>
         )}
       </Section>
@@ -116,24 +123,96 @@ export function EventsPage() {
 }
 
 export function EventDetailPage() {
+  const { keycloak } = useOutletContext<WebContext>();
   const { eventId } = useParams();
-  const event = findEvent(eventId);
-  const [message, setMessage] = useState("");
-  const organizer = event ? findEntity(event.organizerId) : undefined;
+  const [event, setEvent] = useState<Event | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [failure, setFailure] = useState<"not-found" | "unavailable" | null>(null);
+  const [registration, setRegistration] = useState<Registration | null>(null);
+  const [registrationLoading, setRegistrationLoading] = useState(true);
+  const [registrationBusy, setRegistrationBusy] = useState(false);
+  const [registrationError, setRegistrationError] = useState<string | null>(null);
 
-  if (!event || !organizer)
+  useEffect(() => {
+    let active = true;
+
+    async function loadEvent() {
+      try {
+        await keycloak.updateToken(30);
+        if (!keycloak.token || !eventId) throw new Error("Evento indisponível.");
+        const result = await getEvent(keycloak.token, eventId);
+        if (active) setEvent(result);
+        if (result.registrationMode === "INTERNAL_FREE") {
+          const page = await getMyRegistrations(keycloak.token);
+          const ownRegistration = page.items.find((item) => item.eventId === result.id) ?? null;
+          if (active) setRegistration(ownRegistration);
+        }
+      } catch (error) {
+        if (active) {
+          if (error instanceof EventApiError) {
+            setFailure(error.status === 404 ? "not-found" : "unavailable");
+          } else if (error instanceof RegistrationApiError) {
+            setRegistrationError("Não foi possível consultar sua inscrição neste momento.");
+          } else {
+            setFailure("unavailable");
+          }
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+          setRegistrationLoading(false);
+        }
+      }
+    }
+
+    void loadEvent();
+    return () => {
+      active = false;
+    };
+  }, [eventId, keycloak]);
+
+  async function handleRegister() {
+    if (!event) return;
+    setRegistrationBusy(true);
+    setRegistrationError(null);
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+      setRegistration(await registerForEvent(keycloak.token, event.id));
+    } catch (error) {
+      setRegistrationError(registrationErrorMessage(error));
+    } finally {
+      setRegistrationBusy(false);
+    }
+  }
+
+  async function handleCancel() {
+    if (!registration) return;
+    setRegistrationBusy(true);
+    setRegistrationError(null);
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+      setRegistration(await cancelRegistration(keycloak.token, registration.id));
+    } catch (error) {
+      setRegistrationError(registrationErrorMessage(error));
+    } finally {
+      setRegistrationBusy(false);
+    }
+  }
+
+  if (loading)
     return (
-      <div className="empty-state">
-        <strong>Evento não encontrado</strong>
+      <p className="notice" role="status">
+        Carregando evento…
+      </p>
+    );
+  if (failure || !event) {
+    return (
+      <div className="empty-state" role={failure === "unavailable" ? "alert" : undefined}>
+        <strong>{failure === "not-found" ? "Evento não encontrado" : "Não foi possível carregar o evento"}</strong>
         <Link to="/eventos">Voltar aos eventos</Link>
       </div>
-    );
-  const currentEvent = event;
-
-  function register(mode: RegistrationMode) {
-    const added = addMockRegistration(currentEvent.id, mode);
-    setMessage(
-      added ? "Inscrição adicionada à sua lista de demonstração." : "Já existe uma inscrição ativa para este evento.",
     );
   }
 
@@ -144,9 +223,9 @@ export function EventDetailPage() {
       </Link>
       <div className="detail-layout">
         <article className="detail-main-card">
+          {event.imageUrl && <img className="event-detail-image" src={event.imageUrl} alt="" />}
           <span className="eyebrow">
-            {event.type}
-            {event.sports ? ` · Esportivo · ${event.sportsLevel ?? "Todos os níveis"}` : ""}
+            {event.category} · {event.status === "ACTIVE" ? "Ativo" : "Cancelado"}
           </span>
           <h1>{event.title}</h1>
           <p className="detail-lead">{event.description}</p>
@@ -154,91 +233,116 @@ export function EventDetailPage() {
             <div>
               <Icon name="calendar" />
               <span>
-                <small>Quando</small>
-                <strong>{event.date}</strong>
-                <span>{event.time}</span>
+                <small>Começa</small>
+                <strong>{dateTime(event.startsAt)}</strong>
+              </span>
+            </div>
+            <div>
+              <Icon name="calendar" />
+              <span>
+                <small>Termina</small>
+                <strong>{dateTime(event.endsAt)}</strong>
               </span>
             </div>
             <div>
               <Icon name="pin" />
               <span>
-                <small>Onde</small>
+                <small>Local</small>
                 <strong>{event.location}</strong>
               </span>
             </div>
             <div>
               <Icon name="communities" />
               <span>
-                <small>Responsável</small>
-                <Link to={`/entidades/${organizer.id}`}>{organizer.name}</Link>
-              </span>
-            </div>
-            <div>
-              <Icon name="check" />
-              <span>
-                <small>Participação</small>
-                <strong>{event.status}</strong>
-                <span>{event.vacancies}</span>
+                <small>Organizador</small>
+                <strong>{event.organizerType}</strong>
               </span>
             </div>
             <div>
               <Icon name="bookmark" />
               <span>
-                <small>Valor</small>
-                <strong>{event.price ?? "Gratuito"}</strong>
+                <small>Inscrição</small>
+                <strong>{registrationModeLabel(event)}</strong>
+                <span>Prazo: {dateTime(event.registrationDeadline)}</span>
+              </span>
+            </div>
+            <div>
+              <Icon name="check" />
+              <span>
+                <small>Valor e capacidade</small>
+                <strong>{priceLabel(event)}</strong>
+                <span>{event.capacity ? `Capacidade total: ${event.capacity}` : "Capacidade não informada"}</span>
               </span>
             </div>
           </div>
+          {event.registrationMode === "EXTERNAL_PAID" && event.externalUrl && (
+            <p className="event-external-link">
+              <a href={event.externalUrl} target="_blank" rel="noreferrer">
+                Informações da organização externa
+              </a>
+            </p>
+          )}
           <section className="detail-copy-section">
-            <h2>Sobre o evento</h2>
+            <h2>Presença</h2>
             <p>
-              {event.description} A organização é responsável pelas informações e orientações apresentadas nesta página.
+              {event.attendanceEnabled
+                ? `Validação habilitada${event.attendanceMode ? ` · ${event.attendanceMode}` : ""}.`
+                : "Validação de presença não habilitada."}
             </p>
           </section>
-          {event.registration !== "none" && (
-            <section className="detail-copy-section">
-              <h2>Como participar</h2>
-              <p>
-                {event.registration === "team-or-free-agent"
-                  ? "Você pode inscrever uma equipe ou se cadastrar como agente livre para encontrar um time."
-                  : "Faça sua inscrição individual enquanto houver vagas."}
-              </p>
-              {event.registration === "team-or-free-agent" ? (
-                <div className="detail-actions">
-                  <button className="button button-primary" onClick={() => register("Equipe")}>
-                    Inscrever equipe
-                  </button>
-                  <button className="button button-secondary" onClick={() => register("Agente livre")}>
-                    Entrar como agente livre
-                  </button>
-                </div>
-              ) : (
-                <button className="button button-primary" onClick={() => register("Individual")}>
-                  Inscrever-se
-                </button>
-              )}
-              {message && (
-                <p className="inline-confirmation" role="status">
-                  {message} <Link to="/my-registrations">Ver minhas inscrições</Link>
-                </p>
-              )}
-            </section>
-          )}
         </article>
         <aside className="detail-aside-card">
-          <span className="eyebrow">Quem organiza</span>
-          <Link className="entity-feature-link" to={`/entidades/${organizer.id}`}>
-            <span className={`entity-avatar entity-avatar-${organizer.tone}`}>{organizer.initials}</span>
-            <span>
-              <strong>{organizer.name}</strong>
-              <small>{organizer.type}</small>
-            </span>
-            <Icon name="arrowUpRight" width="16" height="16" />
-          </Link>
-          <p>{organizer.description}</p>
-          <Link className="text-link" to={`/entidades/${organizer.id}`}>
-            Ver página da entidade <Icon name="arrowUpRight" width="15" height="15" />
-          </Link>
+          <section className="registration-action-panel" aria-labelledby="registration-action-title">
+            <h2 id="registration-action-title">Minha inscrição</h2>
+            {event.registrationMode !== "INTERNAL_FREE" ? (
+              <p>Inscrições pagas não estão disponíveis nesta etapa.</p>
+            ) : registrationLoading ? (
+              <p role="status">Consultando sua inscrição…</p>
+            ) : registration?.status === "CONFIRMED" ? (
+              <>
+                <p className="registration-confirmed" role="status">
+                  Inscrição confirmada
+                </p>
+                <p>Confirmada em {dateTime(registration.confirmedAt ?? registration.registeredAt)}.</p>
+                {canCancel(registration) ? (
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    disabled={registrationBusy}
+                    onClick={() => void handleCancel()}
+                  >
+                    {registrationBusy ? "Cancelando…" : "Cancelar inscrição"}
+                  </button>
+                ) : (
+                  <p>O prazo para cancelamento (24 horas antes do evento) terminou.</p>
+                )}
+              </>
+            ) : (
+              <>
+                {registration?.status === "CANCELLED_BY_USER" && (
+                  <p role="status">Sua inscrição anterior foi cancelada.</p>
+                )}
+                <p>Inscreva-se gratuitamente usando sua conta UNIR.</p>
+                <button
+                  className="button button-primary"
+                  type="button"
+                  disabled={registrationBusy || event.status !== "ACTIVE"}
+                  onClick={() => void handleRegister()}
+                >
+                  {registrationBusy ? "Inscrevendo…" : "Inscrever-se gratuitamente"}
+                </button>
+              </>
+            )}
+            {registrationError && (
+              <p className="notice notice-error" role="alert">
+                {registrationError}
+              </p>
+            )}
+          </section>
+          <span className="eyebrow">Evento</span>
+          <p>Identificador do evento</p>
+          <code>{event.id}</code>
+          <p>Organizador: {event.organizerId}</p>
         </aside>
       </div>
     </div>

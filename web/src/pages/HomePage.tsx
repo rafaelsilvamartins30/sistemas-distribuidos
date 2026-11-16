@@ -1,166 +1,277 @@
-import { useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useOutletContext } from "react-router-dom";
+import type Keycloak from "keycloak-js";
 import { Icon } from "../components/Icon";
+import { useEventList } from "../hooks/useEventList";
 import {
-  events,
-  findEntity,
-  findSpace,
-  mockAnnouncements,
-  mockCurrentUser,
-  mockFollowedSpaceIds,
-  mockUniversity,
-  opportunities,
-  spacePath,
-} from "../data/demoContent";
+  getAcademicEntities,
+  getCommunities,
+  getDepartments,
+  getUniversity,
+  type AcademicEntity,
+  type Community,
+  type Department,
+  type University,
+} from "../services/campus";
+
+interface WebContext {
+  keycloak: Keycloak;
+}
+
+interface HomeCampusData {
+  university: University;
+  departments: Department[];
+  entities: AcademicEntity[];
+  communities: Community[];
+}
+
+function eventDay(value: string): string {
+  return new Intl.DateTimeFormat("pt-BR", { day: "2-digit" }).format(new Date(value));
+}
+
+function eventMonth(value: string): string {
+  return new Intl.DateTimeFormat("pt-BR", { month: "short" })
+    .format(new Date(value))
+    .replace(".", "")
+    .toLocaleUpperCase("pt-BR");
+}
+
+function eventTime(value: string): string {
+  return new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+}
 
 export function HomePage() {
-  const location = useLocation();
-  const followedSpaces = mockFollowedSpaceIds.map(findSpace).filter((space) => space !== undefined);
+  const { keycloak } = useOutletContext<WebContext>();
+  const { events, loading: eventsLoading, error: eventsError } = useEventList(keycloak);
+  const [campusData, setCampusData] = useState<HomeCampusData | null>(null);
+  const [campusLoading, setCampusLoading] = useState(true);
+  const [campusError, setCampusError] = useState(false);
 
   useEffect(() => {
     document.title = "UNIR — Início";
-    if (location.hash) requestAnimationFrame(() => document.getElementById(location.hash.slice(1))?.scrollIntoView());
-  }, [location.hash]);
+    let active = true;
+
+    Promise.all([
+      getUniversity(keycloak.token ?? ""),
+      getDepartments(keycloak.token ?? ""),
+      getAcademicEntities(keycloak.token ?? ""),
+      getCommunities(keycloak.token ?? ""),
+    ])
+      .then(([university, departments, entities, communities]) => {
+        if (!active) return;
+        setCampusData({
+          university,
+          departments: departments.items,
+          entities: entities.items,
+          communities: communities.items,
+        });
+        setCampusLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setCampusError(true);
+        setCampusLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [keycloak]);
+
+  const university = campusData?.university;
 
   return (
     <div className="home-page">
       <section className="university-hero" id="inicio" aria-labelledby="home-title">
         <div className="university-hero-copy">
           <span className="university-label">
-            <span className="university-label-dot" /> {mockUniversity.shortName} · {mockUniversity.location}
+            <span className="university-label-dot" />{" "}
+            {university ? `${university.acronym} · Rede universitária` : "REDE UNIVERSITÁRIA"}
           </span>
-          <p className="home-greeting">Olá, {mockCurrentUser.name.split(" ")[0]}.</p>
           <h1 id="home-title">
-            O que está acontecendo na <span>{mockUniversity.shortName}?</span>
+            Conheça a <span>{university?.name ?? "UNIR"}</span>
           </h1>
-          <p className="university-hero-description">{mockUniversity.message}</p>
-          <div className="home-user-context">
-            <span>{mockCurrentUser.course}</span>
-            <span className="context-divider" aria-hidden="true" />
-            <span>{mockCurrentUser.department}</span>
-          </div>
-          <div className="home-interest-list" aria-label="Seus interesses">
-            {mockCurrentUser.interests.map((interest) => (
-              <span key={interest}>{interest}</span>
-            ))}
-          </div>
+          <p className="university-hero-description">
+            {university?.description ?? "Consulte as informações e os espaços cadastrados no Campus."}
+          </p>
+          {university && (
+            <div className="home-user-context">
+              <span>{university.acronym}</span>
+              <span className="context-divider" aria-hidden="true" />
+              <span>Semestre {university.currentTerm}</span>
+            </div>
+          )}
         </div>
         <div className="university-hero-art" aria-hidden="true">
           <div className="hero-art-orbit hero-art-orbit-one" />
           <div className="hero-art-orbit hero-art-orbit-two" />
           <div className="hero-art-card">
-            <span className="hero-art-overline">UNIVERSIDADE FEDERAL DE LAVRAS</span>
-            <strong>{mockUniversity.shortName}</strong>
-            <span>Universidade que conecta</span>
+            <span className="hero-art-overline">REDE UNIVERSITÁRIA</span>
+            <strong>{university?.acronym ?? "UNIR"}</strong>
+            <span>{university?.currentTerm ? `Semestre ${university.currentTerm}` : "Campus"}</span>
           </div>
           <span className="hero-art-spark hero-art-spark-one">✳</span>
           <span className="hero-art-spark hero-art-spark-two">✳</span>
         </div>
-        <span className="university-hero-caption">{mockUniversity.name}</span>
+        {university && <span className="university-hero-caption">{university.name}</span>}
       </section>
 
       <div className="home-section-grid">
         <div className="home-main-column">
-          <section className="home-section announcements-section" aria-labelledby="announcements-title">
+          <section className="home-section" aria-labelledby="departments-title">
             <div className="home-section-heading">
               <div>
-                <p className="home-section-eyebrow">Da universidade</p>
-                <h2 id="announcements-title">Comunicados importantes</h2>
+                <p className="home-section-eyebrow">Estrutura universitária</p>
+                <h2 id="departments-title">Departamentos</h2>
               </div>
-              <span className="institutional-label">
-                <Icon name="check" width="14" height="14" /> Institucional
-              </span>
-            </div>
-            <div className="announcement-list">
-              {mockAnnouncements.map((announcement, index) => (
-                <article
-                  className={`announcement-item${index === 0 ? " announcement-item-featured" : ""}`}
-                  key={announcement.id}
-                >
-                  <span className={`announcement-marker announcement-marker-${index}`}>
-                    <Icon name={index === 2 ? "calendar" : "message"} width="17" height="17" />
-                  </span>
-                  <div className="announcement-copy">
-                    <span className="announcement-category">{announcement.category}</span>
-                    <h3>{announcement.title}</h3>
-                    <p>{announcement.summary}</p>
-                  </div>
-                  <time>{announcement.date}</time>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="home-section entities-section" id="entidades" aria-labelledby="spaces-title">
-            <div className="home-section-heading">
-              <div>
-                <p className="home-section-eyebrow">O que você acompanha</p>
-                <h2 id="spaces-title">Entidades e comunidades</h2>
-              </div>
-              <Link className="section-anchor-link" to="/entidades">
-                Explorar espaços <Icon name="arrowUpRight" width="15" height="15" />
+              <Link className="section-anchor-link" to="/departamentos">
+                Ver todos <Icon name="arrowUpRight" width="15" height="15" />
               </Link>
             </div>
-            <div className="followed-entities-grid">
-              {followedSpaces.map((space) => (
-                <article className="followed-entity-card" key={space.id}>
-                  <Link
-                    className="entity-avatar-link"
-                    to={spacePath(space)}
-                    aria-label={`Abrir página de ${space.name}`}
-                  >
-                    <div className={`entity-avatar entity-avatar-${space.tone}`}>{space.initials}</div>
-                  </Link>
-                  <div className="entity-card-copy">
-                    <span>{space.spaceKind === "community" ? "Comunidade" : space.type}</span>
-                    <h3>
-                      <Link to={spacePath(space)}>{space.name}</Link>
-                    </h3>
-                    <p>{space.category}</p>
-                  </div>
-                  {space.posts.filter((post) => !post.pinned).length > 0 && (
-                    <span className="entity-update-count" aria-label="Há publicações novas">
-                      {space.posts.filter((post) => !post.pinned).length}
+            {campusLoading ? (
+              <p className="notice" role="status">
+                Carregando dados do Campus…
+              </p>
+            ) : campusError ? (
+              <p className="notice notice-error" role="alert">
+                Não foi possível carregar os dados do Campus.
+              </p>
+            ) : campusData?.departments.length ? (
+              <div className="home-record-list">
+                {campusData.departments.slice(0, 3).map((department) => (
+                  <Link className="home-record-link" key={department.id} to={`/departamentos/${department.id}`}>
+                    <span className="home-record-mark">{department.acronym}</span>
+                    <span>
+                      <strong>{department.name}</strong>
+                      <small>{department.description}</small>
                     </span>
-                  )}
-                </article>
-              ))}
-            </div>
-            <p className="section-footnote">
-              Novas publicações aparecem no seu feed conforme você acompanha cada espaço.
-            </p>
+                    <Icon name="arrowUpRight" width="15" height="15" />
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="notice">Ainda não há departamentos cadastrados.</p>
+            )}
           </section>
 
-          <section className="home-section events-section" id="eventos" aria-labelledby="events-title">
+          <section className="home-section" aria-labelledby="entities-title">
             <div className="home-section-heading">
               <div>
-                <p className="home-section-eyebrow">Anote na agenda</p>
+                <p className="home-section-eyebrow">Espaços acadêmicos</p>
+                <h2 id="entities-title">Entidades acadêmicas</h2>
+              </div>
+              <Link className="section-anchor-link" to="/entidades">
+                Explorar <Icon name="arrowUpRight" width="15" height="15" />
+              </Link>
+            </div>
+            {campusLoading ? (
+              <p className="notice" role="status">
+                Carregando entidades…
+              </p>
+            ) : campusError ? (
+              <p className="notice notice-error" role="alert">
+                Não foi possível carregar as entidades.
+              </p>
+            ) : campusData?.entities.length ? (
+              <div className="home-record-list">
+                {campusData.entities.slice(0, 3).map((entity) => (
+                  <Link className="home-record-link" key={entity.id} to={`/entidades/${entity.id}`}>
+                    <span className="home-record-mark">
+                      <Icon name="profile" width="17" height="17" />
+                    </span>
+                    <span>
+                      <strong>{entity.name}</strong>
+                      <small>
+                        {entity.entityType} · {entity.description}
+                      </small>
+                    </span>
+                    <Icon name="arrowUpRight" width="15" height="15" />
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="notice">Ainda não há entidades acadêmicas cadastradas.</p>
+            )}
+          </section>
+        </div>
+
+        <aside className="home-side-column">
+          <section className="home-section" aria-labelledby="communities-title">
+            <div className="home-section-heading">
+              <div>
+                <p className="home-section-eyebrow">Espaços universitários</p>
+                <h2 id="communities-title">Comunidades</h2>
+              </div>
+              <Link className="section-anchor-link" to="/comunidades">
+                Explorar <Icon name="arrowUpRight" width="15" height="15" />
+              </Link>
+            </div>
+            {campusLoading ? (
+              <p className="notice" role="status">
+                Carregando comunidades…
+              </p>
+            ) : campusError ? (
+              <p className="notice notice-error" role="alert">
+                Não foi possível carregar as comunidades.
+              </p>
+            ) : campusData?.communities.length ? (
+              <div className="home-record-list">
+                {campusData.communities.slice(0, 3).map((community) => (
+                  <Link className="home-record-link" key={community.id} to={`/comunidades/${community.id}`}>
+                    <span className="home-record-mark">
+                      <Icon name="communities" width="17" height="17" />
+                    </span>
+                    <span>
+                      <strong>{community.name}</strong>
+                      <small>
+                        {community.category || "Comunidade"} · {community.description}
+                      </small>
+                    </span>
+                    <Icon name="arrowUpRight" width="15" height="15" />
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="notice">Ainda não há comunidades cadastradas.</p>
+            )}
+          </section>
+
+          <section className="home-section" id="eventos" aria-labelledby="events-title">
+            <div className="home-section-heading">
+              <div>
+                <p className="home-section-eyebrow">Agenda</p>
                 <h2 id="events-title">Próximos eventos</h2>
               </div>
               <Link className="section-anchor-link" to="/eventos">
                 Ver eventos <Icon name="arrowUpRight" width="15" height="15" />
               </Link>
             </div>
-            <div className="event-list">
-              {events.slice(0, 3).map((event) => {
-                const organizer = findEntity(event.organizerId);
-                return (
+            {eventsLoading ? (
+              <p className="notice" role="status">
+                Carregando eventos…
+              </p>
+            ) : eventsError ? (
+              <p className="notice notice-error" role="alert">
+                Não foi possível carregar os eventos.
+              </p>
+            ) : events.length ? (
+              <div className="event-list">
+                {events.slice(0, 3).map((event) => (
                   <article className="event-row" key={event.id}>
                     <div className="event-date">
-                      <strong>{event.day}</strong>
-                      <span>{event.month}</span>
+                      <strong>{eventDay(event.startsAt)}</strong>
+                      <span>{eventMonth(event.startsAt)}</span>
                     </div>
                     <div className="event-details">
                       <div className="event-title-line">
                         <h3>
                           <Link to={`/eventos/${event.id}`}>{event.title}</Link>
                         </h3>
-                        <span className="event-status">{event.vacancies}</span>
                       </div>
-                      <p>{organizer?.name ?? mockUniversity.shortName}</p>
+                      <p>{event.category}</p>
                       <div className="event-meta">
                         <span>
-                          <Icon name="calendar" width="14" height="14" /> {event.time}
+                          <Icon name="calendar" width="14" height="14" /> {eventTime(event.startsAt)}
                         </span>
                         <span>
                           <Icon name="pin" width="14" height="14" /> {event.location}
@@ -169,100 +280,17 @@ export function HomePage() {
                     </div>
                     <Icon className="event-arrow" name="arrowUpRight" width="17" height="17" />
                   </article>
-                );
-              })}
-            </div>
-          </section>
-        </div>
-
-        <aside className="home-side-column">
-          <section className="home-section sports-section" id="esportes" aria-labelledby="sports-title">
-            <div className="home-section-heading">
-              <div>
-                <p className="home-section-eyebrow">Movimente-se</p>
-                <h2 id="sports-title">Esportes na UFLA</h2>
+                ))}
               </div>
-              <Link className="section-anchor-link" to="/esportes">
-                Explorar <Icon name="arrowUpRight" width="15" height="15" />
-              </Link>
-            </div>
-            <div className="sports-highlight">
-              <span className="sports-tag">Inscrições abertas</span>
-              <h3>Intercursos de Futsal</h3>
-              <p>Monte sua equipe ou se inscreva como agente livre.</p>
-              <div className="sports-event-meta">
-                <span>
-                  <Icon name="calendar" width="15" height="15" /> Até 20 out.
-                </span>
-                <span>
-                  <Icon name="pin" width="15" height="15" /> Ginásio da UFLA
-                </span>
-              </div>
-            </div>
-            <div className="next-game-row">
-              <span className="next-game-icon">
-                <Icon name="opportunity" width="17" height="17" />
-              </span>
-              <div>
-                <small>Atividade recreativa</small>
-                <strong>Treino aberto de vôlei</strong>
-                <span>27 out. · Quadra coberta</span>
-              </div>
-            </div>
-          </section>
-
-          <section
-            className="home-section opportunities-section"
-            id="oportunidades"
-            aria-labelledby="opportunities-title"
-          >
-            <div className="home-section-heading">
-              <div>
-                <p className="home-section-eyebrow">Seu próximo passo</p>
-                <h2 id="opportunities-title">Oportunidades</h2>
-              </div>
-              <Link className="section-anchor-link" to="/oportunidades">
-                Ver todas <Icon name="arrowUpRight" width="15" height="15" />
-              </Link>
-            </div>
-            <div className="opportunity-preview-list">
-              {opportunities.slice(0, 3).map((opportunity) => (
-                <article className="opportunity-preview" key={opportunity.id}>
-                  <span className="opportunity-preview-type">{opportunity.type}</span>
-                  <h3>{opportunity.title}</h3>
-                  <p className="opportunity-preview-owner">{opportunity.publisher}</p>
-                  <p>{opportunity.description}</p>
-                  <span className="opportunity-deadline">
-                    <Icon name="calendar" width="14" height="14" /> {opportunity.deadline}
-                  </span>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="home-assistant-card" aria-labelledby="assistant-title">
-            <span className="assistant-icon">
-              <Icon name="message" width="19" height="19" />
-            </span>
-            <div>
-              <p className="home-section-eyebrow">Assistente UNIR</p>
-              <h2 id="assistant-title">Uma dúvida sobre a universidade?</h2>
-              <p>Pergunte sobre eventos, oportunidades e recursos da UFLA.</p>
-              <button type="button" className="assistant-prompt" disabled>
-                O que acontece esta semana? <Icon name="arrowUpRight" width="15" height="15" />
-              </button>
-              <small>Prévia visual · respostas ainda não estão conectadas</small>
-            </div>
+            ) : (
+              <p className="notice">Ainda não há eventos publicados.</p>
+            )}
           </section>
         </aside>
       </div>
-
       <footer className="home-footer">
-        <span>
-          {mockUniversity.shortName} · {mockUniversity.location}
-        </span>
-        <span>Uma comunidade para viver a universidade.</span>
-        <Link to="/me">Meu espaço</Link>
+        <span>{university ? `${university.acronym} · ${university.name}` : "UNIR · Rede universitária"}</span>
+        <Link to="/perfil">Meu perfil</Link>
       </footer>
     </div>
   );

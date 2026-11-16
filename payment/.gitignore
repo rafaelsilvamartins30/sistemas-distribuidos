@@ -1,4 +1,4 @@
-payment
+/payment
 *.exe
 *.test
 *.out

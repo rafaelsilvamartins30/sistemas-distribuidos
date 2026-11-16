@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useOutletContext } from "react-router-dom";
+import type Keycloak from "keycloak-js";
 import { Icon } from "../components/Icon";
 import {
   events,
@@ -10,26 +11,115 @@ import {
   mockRegistrations,
   spaces,
   type Entity,
-  type RegistrationStatus,
   spacePath,
 } from "../data/demoContent";
+import {
+  cancelRegistration,
+  getMyRegistrations,
+  RegistrationApiError,
+  type Registration,
+  type RegistrationStatus,
+} from "../services/registrations";
 
 const sections = ["Dados da conta", "Preferências", "Notificações", "Inscrições", "Acessos e QR"] as const;
 type Section = (typeof sections)[number];
-const statuses: (RegistrationStatus | "Todas")[] = ["Todas", "Pendente", "Confirmada", "Cancelada", "Concluída"];
+const statuses = ["Todas", "Confirmadas", "Canceladas"] as const;
+type RegistrationFilter = (typeof statuses)[number];
+
+function registrationStatusLabel(status: RegistrationStatus): string {
+  switch (status) {
+    case "CONFIRMED":
+      return "Confirmada";
+    case "PENDING_PAYMENT":
+      return "Pendente de pagamento";
+    case "CANCELLED_BY_USER":
+      return "Cancelada por você";
+    case "CANCELLED_BY_EVENT":
+      return "Evento cancelado";
+    case "PAYMENT_FAILED":
+      return "Pagamento não concluído";
+    case "PAYMENT_EXPIRED":
+      return "Inscrição expirada";
+  }
+}
+
+function registrationDate(value: string): string {
+  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function registrationCanBeCancelled(registration: Registration): boolean {
+  return Date.now() <= new Date(registration.event.startsAt).getTime() - 24 * 60 * 60 * 1000;
+}
 
 export function MySpacePage({ initialSection = "Dados da conta" }: { initialSection?: Section }) {
+  const { keycloak } = useOutletContext<{ keycloak: Keycloak }>();
   const [section, setSection] = useState<Section>(initialSection);
   const [notifications, setNotifications] = useState(mockNotifications.map((item) => ({ ...item })));
   const [interests, setInterests] = useState(mockCurrentUser.interests.join("\n"));
-  const [statusFilter, setStatusFilter] = useState<RegistrationStatus | "Todas">("Todas");
+  const [statusFilter, setStatusFilter] = useState<RegistrationFilter>("Todas");
+  const [myRegistrations, setMyRegistrations] = useState<Registration[]>([]);
+  const [registrationsLoaded, setRegistrationsLoaded] = useState(false);
+  const [registrationsLoading, setRegistrationsLoading] = useState(false);
+  const [registrationsError, setRegistrationsError] = useState<string | null>(null);
+  const [registrationBusy, setRegistrationBusy] = useState<string | null>(null);
   const [qrEventId, setQrEventId] = useState<string | null>(null);
   const followedSpaces = mockFollowedSpaceIds.map(findSpace).filter((space): space is Entity => Boolean(space));
   const qrRegistration = mockRegistrations.find((registration) => registration.eventId === qrEventId);
   const qrEvent = events.find((event) => event.id === qrEventId);
-  const registrations = mockRegistrations.filter(
-    (registration) => statusFilter === "Todas" || registration.status === statusFilter,
-  );
+  const registrations = myRegistrations.filter((registration) => {
+    if (statusFilter === "Confirmadas") return registration.status === "CONFIRMED";
+    if (statusFilter === "Canceladas") return registration.status.startsWith("CANCELLED_");
+    return true;
+  });
+
+  useEffect(() => {
+    if (section !== "Inscrições") return;
+    let active = true;
+
+    async function loadRegistrations() {
+      setRegistrationsLoading(true);
+      setRegistrationsLoaded(false);
+      setRegistrationsError(null);
+      try {
+        await keycloak.updateToken(30);
+        if (!keycloak.token) throw new Error("Token indisponível.");
+        const page = await getMyRegistrations(keycloak.token);
+        if (active) {
+          setMyRegistrations(page.items);
+          setRegistrationsLoaded(true);
+        }
+      } catch {
+        if (active) setRegistrationsError("Não foi possível carregar suas inscrições.");
+      } finally {
+        if (active) setRegistrationsLoading(false);
+      }
+    }
+
+    void loadRegistrations();
+    return () => {
+      active = false;
+    };
+  }, [keycloak, section]);
+
+  async function handleCancelRegistration(registration: Registration) {
+    setRegistrationBusy(registration.id);
+    setRegistrationsError(null);
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token indisponível.");
+      const updated = await cancelRegistration(keycloak.token, registration.id);
+      setMyRegistrations((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    } catch (error) {
+      const detail = error instanceof RegistrationApiError ? error.detail : "Tente novamente mais tarde.";
+      setRegistrationsError(
+        detail === "CANCELLATION_WINDOW_CLOSED"
+          ? "O cancelamento só pode ser feito até 24 horas antes do evento."
+          : `Não foi possível cancelar a inscrição: ${detail}`,
+      );
+    } finally {
+      setRegistrationBusy(null);
+    }
+  }
 
   function toggleNotification(id: string) {
     setNotifications((current) => current.map((item) => (item.id === id ? { ...item, enabled: !item.enabled } : item)));
@@ -43,9 +133,11 @@ export function MySpacePage({ initialSection = "Dados da conta" }: { initialSect
           <h1>Meu espaço</h1>
           <p>Reúna seu perfil, suas preferências e o que você acompanha na UNIR.</p>
         </div>
-        <span className="preview-badge">
-          <span aria-hidden="true" /> Prévia visual
-        </span>
+        {section !== "Inscrições" && (
+          <span className="preview-badge">
+            <span aria-hidden="true" /> Prévia visual
+          </span>
+        )}
       </div>
       <div className="my-space-layout">
         <nav className="my-space-tabs" aria-label="Seções do meu espaço">
@@ -58,7 +150,7 @@ export function MySpacePage({ initialSection = "Dados da conta" }: { initialSect
               onClick={() => setSection(item)}
             >
               <span>{item}</span>
-              {item === "Inscrições" && <small>{mockRegistrations.length}</small>}
+              {item === "Inscrições" && registrationsLoaded && <small>{myRegistrations.length}</small>}
             </button>
           ))}
         </nav>
@@ -191,7 +283,7 @@ export function MySpacePage({ initialSection = "Dados da conta" }: { initialSect
               <div className="mock-panel-heading">
                 <span className="eyebrow">Sua agenda</span>
                 <h2>Minhas inscrições</h2>
-                <p>Acompanhe a situação das atividades em que você demonstrou interesse.</p>
+                <p>Acompanhe as inscrições de eventos vinculadas à sua conta UNIR.</p>
               </div>
               <div className="registration-filters" role="group" aria-label="Filtrar inscrições">
                 {statuses.map((status) => (
@@ -206,54 +298,65 @@ export function MySpacePage({ initialSection = "Dados da conta" }: { initialSect
                 ))}
               </div>
               <div className="registration-list">
-                {registrations.map((registration) => {
-                  const event = events.find((item) => item.id === registration.eventId);
-                  if (!event) return null;
-                  return (
-                    <article className="registration-card" key={registration.id}>
-                      <div className="event-date">
-                        <strong>{event.day}</strong>
-                        <span>{event.month}</span>
-                      </div>
-                      <div className="registration-card-copy">
-                        <span
-                          className={`registration-status status-${registration.status.toLocaleLowerCase("pt-BR")}`}
-                        >
-                          {registration.status}
-                        </span>
-                        <h3>
-                          <Link to={`/eventos/${event.id}`}>{event.title}</Link>
-                        </h3>
-                        <p>
-                          {event.date} · {event.time}
-                          {registration.mode ? ` · ${registration.mode}` : ""}
-                        </p>
-                        <span>{event.location}</span>
-                      </div>
-                      <div className="registration-card-actions">
-                        <Link className="button button-secondary" to={`/eventos/${event.id}`}>
-                          Ver evento
-                        </Link>
-                        {registration.access === "Ativo" && (
-                          <button
-                            className="button button-primary"
-                            type="button"
-                            onClick={() => setQrEventId(event.id)}
+                {registrationsLoading ? (
+                  <p className="notice" role="status">
+                    Carregando inscrições…
+                  </p>
+                ) : (
+                  registrations.map((registration) => {
+                    const event = registration.event;
+                    const date = new Date(event.startsAt);
+                    return (
+                      <article className="registration-card" key={registration.id}>
+                        <div className="event-date">
+                          <strong>{new Intl.DateTimeFormat("pt-BR", { day: "2-digit" }).format(date)}</strong>
+                          <span>
+                            {new Intl.DateTimeFormat("pt-BR", { month: "short" }).format(date).replace(".", "")}
+                          </span>
+                        </div>
+                        <div className="registration-card-copy">
+                          <span
+                            className={`registration-status ${registration.status === "CONFIRMED" ? "status-confirmada" : ""}`}
                           >
-                            Ver QR
-                          </button>
-                        )}
-                      </div>
-                    </article>
-                  );
-                })}
-                {registrations.length === 0 && (
+                            {registrationStatusLabel(registration.status)}
+                          </span>
+                          <h3>
+                            <Link to={`/eventos/${event.id}`}>{event.title}</Link>
+                          </h3>
+                          <p>{registrationDate(event.startsAt)}</p>
+                          <span>{event.location}</span>
+                        </div>
+                        <div className="registration-card-actions">
+                          <Link className="button button-secondary" to={`/eventos/${event.id}`}>
+                            Ver evento
+                          </Link>
+                          {registration.status === "CONFIRMED" && registrationCanBeCancelled(registration) && (
+                            <button
+                              className="button button-secondary"
+                              type="button"
+                              disabled={registrationBusy === registration.id}
+                              onClick={() => void handleCancelRegistration(registration)}
+                            >
+                              {registrationBusy === registration.id ? "Cancelando…" : "Cancelar inscrição"}
+                            </button>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })
+                )}
+                {!registrationsLoading && registrations.length === 0 && (
                   <div className="empty-state">
                     <strong>Nenhuma inscrição neste estado</strong>
-                    <span>Escolha outro filtro para consultar.</span>
+                    <span>Eventos em que você se inscrever aparecerão aqui.</span>
                   </div>
                 )}
               </div>
+              {registrationsError && (
+                <p className="notice notice-error" role="alert">
+                  {registrationsError}
+                </p>
+              )}
             </section>
           )}
 

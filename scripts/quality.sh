@@ -14,12 +14,11 @@ future_components() {
 
 component() {
   case "$1" in
-    user-service) mvn --batch-mode -f user-service/pom.xml verify ;;
     web|keycloak-theme|web-bff)
       pnpm run "lint:$1"
       pnpm run "format:check:$1"
       case "$1" in
-        web) pnpm --dir web build ;;
+        web) pnpm --dir web test; pnpm --dir web build ;;
         keycloak-theme) CI=true pnpm --dir keycloak-theme build-keycloak-theme ;;
         web-bff) pnpm --dir web-bff test ;;
       esac
@@ -93,9 +92,9 @@ case "${1:-}" in
     shift
     for project in "$@"; do
       case "$project" in
-        user-service) mvn --batch-mode -f user-service/pom.xml test ;;
         web-bff) pnpm --dir web-bff test ;;
-        web|keycloak-theme) printf '%s: sem suíte de testes própria.\n' "$project" ;;
+        web) pnpm --dir web test ;;
+        keycloak-theme) printf '%s: sem suíte de testes própria.\n' "$project" ;;
         *) future_target "$project" test ;;
       esac
     done

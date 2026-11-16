@@ -34,10 +34,12 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "redirectUris": [
-        "http://localhost:15173/*"
+        "http://localhost:15173/*",
+        "http://localhost:15175/*"
       ],
       "webOrigins": [
-        "http://localhost:15173"
+        "http://localhost:15173",
+        "http://localhost:15175"
       ],
       "defaultClientScopes": [
         "basic",

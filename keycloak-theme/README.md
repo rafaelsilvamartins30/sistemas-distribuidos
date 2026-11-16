@@ -12,7 +12,7 @@ docker compose up --build -d
 
 As credenciais locais ficam no `.env` da raiz; em um clone novo, use `config/local.env.example` como modelo.
 
-Acesse http://localhost:18081/realms/unir/account ou inicie a autorização OIDC conforme `user-service/README.md`. O `accountTheme` e o `loginTheme` são definidos em `config/keycloak/unir-realm.json` para instalações novas. Como o importador não sobrescreve um realm existente, `config/keycloak/apply-user-profile.sh` também aplica a configuração ao realm local existente.
+Acesse http://localhost:18081/realms/unir/account ou inicie a autorização OIDC conforme o [README da raiz](../README.md). O `accountTheme` e o `loginTheme` são definidos em `config/keycloak/unir-realm.json` para instalações novas. Como o importador não sobrescreve um realm existente, `config/keycloak/apply-user-profile.sh` também aplica a configuração ao realm local existente.
 
 ## Desenvolvimento
 

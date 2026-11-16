@@ -11,6 +11,7 @@ interface MainLayoutProps {
 const mainNavigation: { to: string; label: string; icon: IconName }[] = [
   { to: "/", label: "Início", icon: "sun" },
   { to: "/comunidades", label: "Comunidades", icon: "communities" },
+  { to: "/departamentos", label: "Departamentos", icon: "profile" },
   { to: "/entidades", label: "Entidades", icon: "profile" },
   { to: "/eventos", label: "Eventos", icon: "calendar" },
   { to: "/esportes", label: "Esportes", icon: "opportunity" },
@@ -111,7 +112,7 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
           </div>
         </header>
         <main className="product-page">
-          <Outlet />
+          <Outlet context={{ keycloak }} />
         </main>
       </div>
     </div>

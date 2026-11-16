@@ -63,10 +63,15 @@ class GatewayRoutingAndSecurityTest {
     private static final RSAKey OTHER_JWK;
     private static final HttpServer KEYCLOAK_SERVER;
     private static final HttpServer WEB_BFF_SERVER;
+    private static final HttpServer ADMIN_BFF_SERVER;
     private static final AtomicReference<String> LAST_METHOD = new AtomicReference<>();
     private static final AtomicReference<String> LAST_PATH = new AtomicReference<>();
+    private static final AtomicReference<String> LAST_QUERY = new AtomicReference<>();
     private static final AtomicReference<String> LAST_AUTHORIZATION = new AtomicReference<>();
     private static final AtomicReference<String> LAST_REQUEST_BODY = new AtomicReference<>();
+    private static final AtomicReference<String> LAST_ADMIN_METHOD = new AtomicReference<>();
+    private static final AtomicReference<String> LAST_ADMIN_PATH = new AtomicReference<>();
+    private static final AtomicReference<String> LAST_ADMIN_AUTHORIZATION = new AtomicReference<>();
     private static final AtomicReference<Integer> BFF_STATUS = new AtomicReference<>(200);
     private static final AtomicReference<String> BFF_CONTENT_TYPE = new AtomicReference<>(
             MediaType.APPLICATION_JSON_VALUE);
@@ -78,6 +83,7 @@ class GatewayRoutingAndSecurityTest {
             OTHER_JWK = generateRsaJwk(KEY_ID);
             KEYCLOAK_SERVER = startKeycloakServer();
             WEB_BFF_SERVER = startWebBffServer();
+            ADMIN_BFF_SERVER = startAdminBffServer();
         } catch (Exception exception) {
             throw new ExceptionInInitializerError(exception);
         }
@@ -90,25 +96,32 @@ class GatewayRoutingAndSecurityTest {
     static void registerProperties(DynamicPropertyRegistry registry) {
         int keycloakPort = KEYCLOAK_SERVER.getAddress().getPort();
         int webBffPort = WEB_BFF_SERVER.getAddress().getPort();
+        int adminBffPort = ADMIN_BFF_SERVER.getAddress().getPort();
         registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri",
                 () -> "http://127.0.0.1:" + keycloakPort + ISSUER_PATH);
         registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri",
                 () -> "http://127.0.0.1:" + keycloakPort + JWKS_PATH);
         registry.add("WEB_BFF_URL", () -> "http://127.0.0.1:" + webBffPort);
+        registry.add("ADMIN_BFF_URL", () -> "http://127.0.0.1:" + adminBffPort);
     }
 
     @AfterAll
     static void stopServers() {
         KEYCLOAK_SERVER.stop(0);
         WEB_BFF_SERVER.stop(0);
+        ADMIN_BFF_SERVER.stop(0);
     }
 
     @BeforeEach
     void resetBffState() {
         LAST_METHOD.set(null);
         LAST_PATH.set(null);
+        LAST_QUERY.set(null);
         LAST_AUTHORIZATION.set(null);
         LAST_REQUEST_BODY.set(null);
+        LAST_ADMIN_METHOD.set(null);
+        LAST_ADMIN_PATH.set(null);
+        LAST_ADMIN_AUTHORIZATION.set(null);
         BFF_STATUS.set(200);
         BFF_CONTENT_TYPE.set(MediaType.APPLICATION_JSON_VALUE);
         BFF_BODY.set(PROFILE_JSON);
@@ -117,11 +130,23 @@ class GatewayRoutingAndSecurityTest {
     @Test
     void rejectsRequestsWithoutBearerToken() throws Exception {
         this.mockMvc.perform(get("/api/v1/me")).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(get("/api/v1/web/university")).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(get("/api/v1/web/departments")).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(get("/api/v1/web/departments/department-1")).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(get("/api/v1/web/me/activities")).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(post("/api/v1/web/events/event-1/registrations")).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(delete("/api/v1/web/registrations/registration-1")).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(get("/api/v1/web/entities")).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(get("/api/v1/web/entities/entity-1")).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(get("/api/v1/web/communities")).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(get("/api/v1/web/communities/community-1")).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(get("/api/v1/admin/me")).andExpect(status().isUnauthorized());
         this.mockMvc.perform(post("/api/v1/users").contentType(MediaType.APPLICATION_JSON).content(PROFILE_JSON))
                 .andExpect(status().isUnauthorized());
         this.mockMvc.perform(patch("/api/v1/me").contentType(MediaType.APPLICATION_JSON).content(PROFILE_JSON))
                 .andExpect(status().isUnauthorized());
         assertThat(LAST_AUTHORIZATION.get()).isNull();
+        assertThat(LAST_ADMIN_AUTHORIZATION.get()).isNull();
     }
 
     @Test
@@ -174,6 +199,12 @@ class GatewayRoutingAndSecurityTest {
                 .perform(patch("/api/v1/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON).content(PROFILE_JSON))
                 .andExpect(status().isForbidden());
+        this.mockMvc.perform(
+                post("/api/v1/web/events/event-1/registrations").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isForbidden());
+        this.mockMvc.perform(
+                delete("/api/v1/web/registrations/registration-1").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isForbidden());
         assertThat(LAST_AUTHORIZATION.get()).isNull();
     }
 
@@ -188,6 +219,8 @@ class GatewayRoutingAndSecurityTest {
         this.mockMvc.perform(delete("/api/v1/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isForbidden());
         this.mockMvc.perform(get("/users/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isForbidden());
+        this.mockMvc.perform(post("/api/v1/web/events").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isForbidden());
         assertThat(LAST_AUTHORIZATION.get()).isNull();
     }
@@ -275,12 +308,11 @@ class GatewayRoutingAndSecurityTest {
 
         BFF_STATUS.set(503);
         BFF_CONTENT_TYPE.set(MediaType.APPLICATION_JSON_VALUE);
-        BFF_BODY.set("{\"error\":\"User Service unavailable\"}");
+        BFF_BODY.set("{\"error\":\"Campus unavailable\"}");
         this.mockMvc
                 .perform(patch("/api/v1/me").header(HttpHeaders.AUTHORIZATION, authorizationHeader)
                         .contentType(MediaType.APPLICATION_JSON).content(PROFILE_JSON))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.error").value("User Service unavailable"));
+                .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.error").value("Campus unavailable"));
     }
 
     @Test
@@ -294,6 +326,234 @@ class GatewayRoutingAndSecurityTest {
                     .andExpect(status().isOk())
                     .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://localhost:15173"));
         }
+    }
+
+    @Test
+    void forwardsEventListAndDetailToWebBffWithUserBearerToken() throws Exception {
+        String eventId = "10000000-0000-4000-8000-000000000001";
+        String eventJson = "{\"id\":\"" + eventId + "\",\"title\":\"Encontro UNIR\","
+                + "\"description\":\"Evento persistido\",\"organizerType\":\"UNIVERSITY\","
+                + "\"organizerId\":\"20000000-0000-4000-8000-000000000001\","
+                + "\"location\":\"Auditório Central\",\"startsAt\":\"2027-06-15T17:00:00Z\","
+                + "\"endsAt\":\"2027-06-15T19:00:00Z\",\"category\":\"ACADEMIC\",\"capacity\":120,"
+                + "\"registrationDeadline\":\"2027-06-14T23:59:00Z\","
+                + "\"registrationMode\":\"INTERNAL_FREE\",\"price\":null,\"externalUrl\":null,"
+                + "\"attendanceEnabled\":true,\"attendanceMode\":\"PARTICIPANT_SCANS_EVENT\","
+                + "\"status\":\"ACTIVE\",\"createdAt\":\"2027-01-15T12:00:00Z\"}";
+        String token = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300), List.of("USER"));
+        String authorizationHeader = "Bearer " + token;
+        BFF_BODY.set(
+                "{\"items\":[" + eventJson + "],\"page\":0,\"size\":10,\"totalElements\":1," + "\"totalPages\":1}");
+
+        this.mockMvc
+                .perform(
+                        get("/api/v1/web/events?page=0&size=10").header(HttpHeaders.AUTHORIZATION, authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].id").value(eventId))
+                .andExpect(jsonPath("$.items[0].title").value("Encontro UNIR"));
+        assertThat(LAST_METHOD.get()).isEqualTo("GET");
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/events");
+        assertThat(LAST_QUERY.get()).isEqualTo("page=0&size=10");
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+
+        BFF_BODY.set(eventJson);
+        this.mockMvc.perform(
+                get("/api/v1/web/events/{eventId}", eventId).header(HttpHeaders.AUTHORIZATION, authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(eventId));
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/events/" + eventId);
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+    }
+
+    @Test
+    void forwardsRegistrationCreationListingAndCancellationToWebBffWithBearerToken() throws Exception {
+        String eventId = "10000000-0000-4000-8000-000000000001";
+        String registrationId = "30000000-0000-4000-8000-000000000001";
+        String token = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300), List.of("USER"));
+        String authorizationHeader = "Bearer " + token;
+        BFF_BODY.set("{\"id\":\"" + registrationId + "\",\"eventId\":\"" + eventId + "\",\"status\":\"CONFIRMED\"}");
+        BFF_STATUS.set(201);
+
+        this.mockMvc
+                .perform(post("/api/v1/web/events/{eventId}/registrations", eventId).header(HttpHeaders.AUTHORIZATION,
+                        authorizationHeader))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("CONFIRMED"));
+        assertThat(LAST_METHOD.get()).isEqualTo("POST");
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/events/" + eventId + "/registrations");
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+
+        BFF_STATUS.set(409);
+        BFF_CONTENT_TYPE.set(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+        BFF_BODY.set("{\"status\":409,\"detail\":\"ALREADY_REGISTERED\"}");
+        this.mockMvc
+                .perform(post("/api/v1/web/events/{eventId}/registrations", eventId).header(HttpHeaders.AUTHORIZATION,
+                        authorizationHeader))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.detail").value("ALREADY_REGISTERED"));
+
+        BFF_STATUS.set(200);
+        BFF_BODY.set("{\"items\":[{\"id\":\"" + registrationId + "\",\"status\":\"CONFIRMED\"}],"
+                + "\"page\":0,\"size\":20,\"totalElements\":1,\"totalPages\":1}");
+        this.mockMvc
+                .perform(get("/api/v1/web/me/activities?page=0&size=20").header(HttpHeaders.AUTHORIZATION,
+                        authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].id").value(registrationId));
+        assertThat(LAST_METHOD.get()).isEqualTo("GET");
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/me/activities");
+        assertThat(LAST_QUERY.get()).isEqualTo("page=0&size=20");
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+
+        BFF_BODY.set("{\"id\":\"" + registrationId + "\",\"status\":\"CANCELLED_BY_USER\"}");
+        this.mockMvc
+                .perform(delete("/api/v1/web/registrations/{registrationId}", registrationId)
+                        .header(HttpHeaders.AUTHORIZATION, authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELLED_BY_USER"));
+        assertThat(LAST_METHOD.get()).isEqualTo("DELETE");
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/registrations/" + registrationId);
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+    }
+
+    @Test
+    void forwardsUniversityAndDepartmentQueriesToWebBffWithUserBearerToken() throws Exception {
+        String departmentId = "10000000-0000-4000-8000-000000000001";
+        String token = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300), List.of("USER"));
+        String authorizationHeader = "Bearer " + token;
+
+        BFF_BODY.set("{\"id\":\"university-1\",\"acronym\":\"UFRJ\"}");
+        this.mockMvc.perform(get("/api/v1/web/university").header(HttpHeaders.AUTHORIZATION, authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.acronym").value("UFRJ"));
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/university");
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+
+        BFF_BODY.set("{\"items\":[{\"id\":\"" + departmentId + "\",\"acronym\":\"DCC\"}],"
+                + "\"page\":0,\"size\":20,\"totalElements\":1,\"totalPages\":1}");
+        this.mockMvc
+                .perform(get("/api/v1/web/departments?page=0&size=20&sort=name").header(HttpHeaders.AUTHORIZATION,
+                        authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].id").value(departmentId))
+                .andExpect(jsonPath("$.items[0].acronym").value("DCC"));
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/departments");
+        assertThat(LAST_QUERY.get().split("&")).containsExactlyInAnyOrder("page=0", "size=20", "sort=name");
+
+        BFF_BODY.set("{\"id\":\"" + departmentId + "\",\"acronym\":\"DCC\"}");
+        this.mockMvc
+                .perform(get("/api/v1/web/departments/{departmentId}", departmentId).header(HttpHeaders.AUTHORIZATION,
+                        authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(departmentId));
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/departments/" + departmentId);
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+    }
+
+    @Test
+    void forwardsAcademicEntityAndCommunityQueriesToWebBffForUsers() throws Exception {
+        String entityId = "10000000-0000-4000-8000-000000000101";
+        String communityId = "10000000-0000-4000-8000-000000000201";
+        String token = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300), List.of("USER"));
+        String authorizationHeader = "Bearer " + token;
+
+        BFF_BODY.set("{\"items\":[{\"id\":\"" + entityId + "\",\"entityType\":\"Demonstração\"}],"
+                + "\"page\":0,\"size\":20,\"totalElements\":1,\"totalPages\":1}");
+        this.mockMvc
+                .perform(get("/api/v1/web/entities?page=0&size=20&sort=name").header(HttpHeaders.AUTHORIZATION,
+                        authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].id").value(entityId));
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/entities");
+        assertThat(LAST_QUERY.get().split("&")).containsExactlyInAnyOrder("page=0", "size=20", "sort=name");
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+
+        BFF_BODY.set("{\"id\":\"" + entityId + "\",\"entityType\":\"Demonstração\"}");
+        this.mockMvc.perform(
+                get("/api/v1/web/entities/{entityId}", entityId).header(HttpHeaders.AUTHORIZATION, authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(entityId));
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/entities/" + entityId);
+
+        BFF_BODY.set("{\"items\":[{\"id\":\"" + communityId + "\",\"name\":\"Comunidade de Demonstração\"}],"
+                + "\"page\":0,\"size\":20,\"totalElements\":1,\"totalPages\":1}");
+        this.mockMvc
+                .perform(get("/api/v1/web/communities?page=0&size=20&sort=name").header(HttpHeaders.AUTHORIZATION,
+                        authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].id").value(communityId));
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/communities");
+
+        BFF_BODY.set("{\"id\":\"" + communityId + "\",\"name\":\"Comunidade de Demonstração\"}");
+        this.mockMvc.perform(get("/api/v1/web/communities/{communityId}", communityId).header(HttpHeaders.AUTHORIZATION,
+                authorizationHeader)).andExpect(status().isOk()).andExpect(jsonPath("$.id").value(communityId));
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/communities/" + communityId);
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+
+        String guestToken = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300), List.of("GUEST"));
+        this.mockMvc.perform(get("/api/v1/web/entities").header(HttpHeaders.AUTHORIZATION, "Bearer " + guestToken))
+                .andExpect(status().isForbidden());
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/communities/" + communityId);
+    }
+
+    @Test
+    void allowsCorsPreflightForEventQueriesFromConfiguredWebOrigin() throws Exception {
+        for (String path : List.of("/api/v1/web/events", "/api/v1/web/events/10000000-0000-4000-8000-000000000001")) {
+            this.mockMvc
+                    .perform(options(path).header(HttpHeaders.ORIGIN, "http://localhost:15173")
+                            .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                            .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "Authorization"))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://localhost:15173"));
+        }
+    }
+
+    @Test
+    void allowsCorsPreflightForRegistrationOperationsFromConfiguredWebOrigin() throws Exception {
+        List<Map.Entry<String, String>> requests = List.of(
+                Map.entry("/api/v1/web/events/10000000-0000-4000-8000-000000000001/registrations", "POST"),
+                Map.entry("/api/v1/web/me/activities", "GET"),
+                Map.entry("/api/v1/web/registrations/30000000-0000-4000-8000-000000000001", "DELETE"));
+        for (Map.Entry<String, String> request : requests) {
+            this.mockMvc
+                    .perform(options(request.getKey()).header(HttpHeaders.ORIGIN, "http://localhost:15173")
+                            .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, request.getValue())
+                            .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "Authorization"))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://localhost:15173"));
+        }
+    }
+
+    @Test
+    void allowsCorsPreflightForUniversityAndDepartmentQueriesFromConfiguredWebOrigin() throws Exception {
+        for (String path : List.of("/api/v1/web/university", "/api/v1/web/departments",
+                "/api/v1/web/departments/10000000-0000-4000-8000-000000000001", "/api/v1/web/entities",
+                "/api/v1/web/entities/entity-1", "/api/v1/web/communities", "/api/v1/web/communities/community-1")) {
+            this.mockMvc
+                    .perform(options(path).header(HttpHeaders.ORIGIN, "http://localhost:15173")
+                            .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                            .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "Authorization"))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://localhost:15173"));
+        }
+    }
+
+    @Test
+    void rejectsAdminMeForCommonUserWith403AndForwardsForPlatformAdminToAdminBff() throws Exception {
+        String userToken = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300), List.of("USER"));
+        this.mockMvc.perform(get("/api/v1/admin/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + userToken))
+                .andExpect(status().isForbidden());
+        assertThat(LAST_ADMIN_AUTHORIZATION.get()).isNull();
+
+        String adminToken = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300),
+                List.of("USER", "PLATFORM_ADMIN"));
+        String authorizationHeader = "Bearer " + adminToken;
+        this.mockMvc.perform(get("/api/v1/admin/me").header(HttpHeaders.AUTHORIZATION, authorizationHeader))
+                .andExpect(status().isOk()).andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.id").value("user-123")).andExpect(jsonPath("$.name").value("Ana Silva"))
+                .andExpect(jsonPath("$.institutionalId").value("12345"));
+
+        assertThat(LAST_ADMIN_METHOD.get()).isEqualTo("GET");
+        assertThat(LAST_ADMIN_PATH.get()).isEqualTo("/api/v1/admin/me");
+        assertThat(LAST_ADMIN_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+    }
+
+    @Test
+    void allowsCorsPreflightForAdminMeFromConfiguredAdminWebOrigin() throws Exception {
+        this.mockMvc
+                .perform(options("/api/v1/admin/me").header(HttpHeaders.ORIGIN, "http://localhost:15175")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "Authorization, Content-Type"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://localhost:15175"));
     }
 
     private static String expectedIssuer() {
@@ -334,8 +594,21 @@ class GatewayRoutingAndSecurityTest {
         server.createContext("/api/v1", exchange -> {
             LAST_METHOD.set(exchange.getRequestMethod());
             LAST_PATH.set(exchange.getRequestURI().getPath());
+            LAST_QUERY.set(exchange.getRequestURI().getRawQuery());
             LAST_AUTHORIZATION.set(exchange.getRequestHeaders().getFirst(HttpHeaders.AUTHORIZATION));
             LAST_REQUEST_BODY.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            respondJson(exchange, BFF_STATUS.get(), BFF_CONTENT_TYPE.get(), BFF_BODY.get());
+        });
+        server.start();
+        return server;
+    }
+
+    private static HttpServer startAdminBffServer() throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/v1/admin/me", exchange -> {
+            LAST_ADMIN_METHOD.set(exchange.getRequestMethod());
+            LAST_ADMIN_PATH.set(exchange.getRequestURI().getPath());
+            LAST_ADMIN_AUTHORIZATION.set(exchange.getRequestHeaders().getFirst(HttpHeaders.AUTHORIZATION));
             respondJson(exchange, BFF_STATUS.get(), BFF_CONTENT_TYPE.get(), BFF_BODY.get());
         });
         server.start();

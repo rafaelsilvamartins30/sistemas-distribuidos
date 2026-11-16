@@ -58,7 +58,7 @@ function errorMessage(error: unknown): string {
   if (error instanceof UserProfileApiError && error.status === 401) {
     return "Sua sessão expirou. Entre novamente para continuar.";
   }
-  return "Não foi possível carregar ou salvar seu perfil. Verifique o User Service e tente novamente.";
+  return "Não foi possível carregar ou salvar seu perfil. Verifique o serviço Campus e tente novamente.";
 }
 
 export function ProfilePage() {

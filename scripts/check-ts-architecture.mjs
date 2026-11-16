@@ -8,7 +8,6 @@ const projectRoots = [
   "web",
   "keycloak-theme",
   "web-bff",
-  "user-service",
   "admin-bff",
   "admin-web",
   "campus",

@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := quality
 
-CURRENT := user-service web keycloak-theme web-bff
+CURRENT := web keycloak-theme web-bff
 FUTURE := $(shell bash scripts/quality.sh future)
 COMPONENTS := $(CURRENT) $(FUTURE)
 
