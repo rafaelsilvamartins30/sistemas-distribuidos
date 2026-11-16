@@ -1,0 +1,943 @@
+use chrono::{DateTime, Utc};
+use futures_util::StreamExt;
+use lapin::{
+    options::{
+        BasicAckOptions, BasicConsumeOptions, BasicNackOptions, BasicQosOptions,
+        BasicRejectOptions, ExchangeDeclareOptions, QueueBindOptions, QueueDeclareOptions,
+    },
+    types::FieldTable,
+    Connection, ConnectionProperties, ExchangeKind,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+use sqlx::{postgres::PgPool, Postgres, Row, Transaction};
+use std::{error::Error, fmt};
+use tokio::time::{sleep, Duration};
+use uuid::Uuid;
+
+pub const EXCHANGE: &str = "unir.events";
+pub const QUEUE: &str = "access.registration-confirmed";
+pub const ROUTING_KEY: &str = "engagement.registration.confirmed.v1";
+pub const EVENT_CANCELLED_ROUTING_KEY: &str = "engagement.event.cancelled.v1";
+
+const EVENT_TYPE: &str = "RegistrationConfirmed";
+const AGGREGATE_TYPE: &str = "Registration";
+const EVENT_CANCELLED_TYPE: &str = "EventCancelled";
+const EVENT_AGGREGATE_TYPE: &str = "Event";
+const SESSION_SOURCE_TYPE: &str = "EVENT";
+const PARTICIPANT_SCANS_EVENT: &str = "PARTICIPANT_SCANS_EVENT";
+
+#[derive(Debug)]
+pub enum ProcessError {
+    Invalid(String),
+    Database(sqlx::Error),
+}
+
+impl fmt::Display for ProcessError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Invalid(reason) => {
+                write!(formatter, "invalid RegistrationConfirmed v1: {reason}")
+            }
+            Self::Database(error) => write!(
+                formatter,
+                "could not persist RegistrationConfirmed: {error}"
+            ),
+        }
+    }
+}
+
+impl Error for ProcessError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Invalid(_) => None,
+            Self::Database(error) => Some(error),
+        }
+    }
+}
+
+impl From<sqlx::Error> for ProcessError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Database(error)
+    }
+}
+
+#[derive(Debug)]
+pub enum CheckInError {
+    InvalidToken,
+    SessionUnavailable,
+    OutsideWindow,
+    NotEligible,
+    EntryUnavailable,
+    Database(sqlx::Error),
+}
+
+impl fmt::Display for CheckInError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidToken => write!(formatter, "INVALID_QR_TOKEN"),
+            Self::SessionUnavailable => write!(formatter, "ATTENDANCE_SESSION_UNAVAILABLE"),
+            Self::OutsideWindow => write!(formatter, "CHECK_IN_WINDOW_CLOSED"),
+            Self::NotEligible => write!(formatter, "ATTENDANCE_NOT_ELIGIBLE"),
+            Self::EntryUnavailable => write!(formatter, "ATTENDANCE_ENTRY_NOT_ELIGIBLE"),
+            Self::Database(error) => write!(formatter, "could not persist check-in: {error}"),
+        }
+    }
+}
+
+impl Error for CheckInError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<sqlx::Error> for CheckInError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Database(error)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckInResult {
+    pub check_in_id: Uuid,
+    pub session_id: Uuid,
+    pub attendance_entry_id: Uuid,
+    pub status: String,
+    pub checked_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MyAttendance {
+    pub event_id: Uuid,
+    pub session_id: Uuid,
+    pub attendance_entry_id: Uuid,
+    pub status: String,
+    pub registered_at: DateTime<Utc>,
+    pub checked_at: Option<DateTime<Utc>>,
+}
+
+fn shared_token_hash(token: &str) -> String {
+    format!("{:x}", Sha256::digest(token.as_bytes()))
+}
+
+/// Records the authenticated participant's check-in under the session row lock.
+/// Repeated requests for an already checked-in user return the original CheckIn.
+pub async fn record_participant_check_in(
+    pool: &PgPool,
+    token: &str,
+    user_id: &str,
+) -> Result<CheckInResult, CheckInError> {
+    if token.trim().is_empty() || user_id.trim().is_empty() || user_id.len() > 255 {
+        return Err(CheckInError::InvalidToken);
+    }
+
+    let mut transaction = pool.begin().await?;
+    let row = sqlx::query(
+        "SELECT id, mode, status, check_in_opens_at, check_in_closes_at \
+         FROM attendance_sessions WHERE shared_token_hash = $1 FOR UPDATE",
+    )
+    .bind(shared_token_hash(token))
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or(CheckInError::InvalidToken)?;
+
+    let session_id: Uuid = row.try_get("id")?;
+    let mode: String = row.try_get("mode")?;
+    let status: String = row.try_get("status")?;
+    let opens_at: DateTime<Utc> = row.try_get("check_in_opens_at")?;
+    let closes_at: DateTime<Utc> = row.try_get("check_in_closes_at")?;
+    if mode != PARTICIPANT_SCANS_EVENT || status != "OPEN" {
+        return Err(CheckInError::SessionUnavailable);
+    }
+
+    let checked_at = Utc::now();
+    if checked_at < opens_at || checked_at > closes_at {
+        return Err(CheckInError::OutsideWindow);
+    }
+
+    if let Some(existing) = sqlx::query(
+        "SELECT c.id, c.session_id, c.attendance_entry_id, c.checked_at \
+         FROM check_ins c JOIN attendance_entries e ON e.id = c.attendance_entry_id \
+         WHERE c.session_id = $1 AND e.user_id = $2",
+    )
+    .bind(session_id)
+    .bind(user_id)
+    .fetch_optional(&mut *transaction)
+    .await?
+    {
+        let result = CheckInResult {
+            check_in_id: existing.try_get("id")?,
+            session_id: existing.try_get("session_id")?,
+            attendance_entry_id: existing.try_get("attendance_entry_id")?,
+            status: "ATTENDED".to_string(),
+            checked_at: existing.try_get("checked_at")?,
+        };
+        transaction.commit().await?;
+        return Ok(result);
+    }
+
+    let entry = sqlx::query(
+        "SELECT id, status FROM attendance_entries WHERE session_id = $1 AND user_id = $2 \
+         ORDER BY registered_at DESC LIMIT 1 FOR UPDATE",
+    )
+    .bind(session_id)
+    .bind(user_id)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or(CheckInError::NotEligible)?;
+    let entry_id: Uuid = entry.try_get("id")?;
+    let entry_status: String = entry.try_get("status")?;
+    if entry_status != "ELIGIBLE" {
+        return Err(CheckInError::EntryUnavailable);
+    }
+
+    let check_in_id = Uuid::new_v4();
+    let inserted = sqlx::query(
+        "INSERT INTO check_ins (id, session_id, attendance_entry_id, method, validated_by_user_id, checked_at) \
+         VALUES ($1, $2, $3, $4, NULL, $5) RETURNING checked_at",
+    )
+    .bind(check_in_id)
+    .bind(session_id)
+    .bind(entry_id)
+    .bind(PARTICIPANT_SCANS_EVENT)
+    .bind(checked_at)
+    .fetch_one(&mut *transaction)
+    .await?;
+    let persisted_checked_at: DateTime<Utc> = inserted.try_get("checked_at")?;
+
+    let updated = sqlx::query(
+        "UPDATE attendance_entries SET status = 'ATTENDED', attended_at = $2 \
+         WHERE id = $1 AND status = 'ELIGIBLE'",
+    )
+    .bind(entry_id)
+    .bind(persisted_checked_at)
+    .execute(&mut *transaction)
+    .await?;
+    if updated.rows_affected() != 1 {
+        return Err(CheckInError::EntryUnavailable);
+    }
+
+    transaction.commit().await?;
+    Ok(CheckInResult {
+        check_in_id,
+        session_id,
+        attendance_entry_id: entry_id,
+        status: "ATTENDED".to_string(),
+        checked_at: persisted_checked_at,
+    })
+}
+
+/// Returns the authenticated user's persisted attendance state for an event.
+pub async fn get_my_attendance(
+    pool: &PgPool,
+    event_id: Uuid,
+    user_id: &str,
+) -> Result<Option<MyAttendance>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT s.source_id AS event_id, s.id AS session_id, e.id AS attendance_entry_id, \
+         e.status, e.registered_at, c.checked_at \
+         FROM attendance_sessions s JOIN attendance_entries e ON e.session_id = s.id \
+         LEFT JOIN check_ins c ON c.attendance_entry_id = e.id \
+         WHERE s.source_type = $1 AND s.source_id = $2 AND e.user_id = $3 \
+         ORDER BY e.registered_at DESC LIMIT 1",
+    )
+    .bind(SESSION_SOURCE_TYPE)
+    .bind(event_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+
+    row.map(|row| {
+        Ok(MyAttendance {
+            event_id: row.try_get("event_id")?,
+            session_id: row.try_get("session_id")?,
+            attendance_entry_id: row.try_get("attendance_entry_id")?,
+            status: row.try_get("status")?,
+            registered_at: row.try_get("registered_at")?,
+            checked_at: row.try_get("checked_at")?,
+        })
+    })
+    .transpose()
+}
+
+/// Issues a new shared QR token for an event and invalidates any previous token.
+/// Only the token hash is persisted; the returned plaintext is displayed once by the CLI.
+pub async fn issue_event_qr_token(pool: &PgPool, event_id: Uuid) -> Result<String, CheckInError> {
+    let mut transaction = pool.begin().await?;
+    let row = sqlx::query(
+        "SELECT id, mode, status FROM attendance_sessions \
+         WHERE source_type = $1 AND source_id = $2 FOR UPDATE",
+    )
+    .bind(SESSION_SOURCE_TYPE)
+    .bind(event_id)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or(CheckInError::SessionUnavailable)?;
+    let session_id: Uuid = row.try_get("id")?;
+    let mode: String = row.try_get("mode")?;
+    let status: String = row.try_get("status")?;
+    if mode != PARTICIPANT_SCANS_EVENT || status != "OPEN" {
+        return Err(CheckInError::SessionUnavailable);
+    }
+
+    // UUID v4 is backed by the operating system CSPRNG; two UUIDs provide 244 random bits.
+    let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    sqlx::query("UPDATE attendance_sessions SET shared_token_hash = $2 WHERE id = $1")
+        .bind(session_id)
+        .bind(shared_token_hash(&token))
+        .execute(&mut *transaction)
+        .await?;
+    transaction.commit().await?;
+    Ok(token)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Envelope {
+    message_id: Uuid,
+    event_type: String,
+    aggregate_type: String,
+    aggregate_id: Uuid,
+    occurred_at: DateTime<Utc>,
+    schema_version: i32,
+    payload_json: Value,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RegistrationConfirmed {
+    registration_id: Uuid,
+    event_id: Uuid,
+    user_id: String,
+    attendance_enabled: bool,
+    attendance_mode: Option<AttendanceMode>,
+    event_title: String,
+    starts_at: DateTime<Utc>,
+    ends_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum AttendanceMode {
+    ParticipantScansEvent,
+    OrganizerScansParticipant,
+}
+
+impl AttendanceMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ParticipantScansEvent => "PARTICIPANT_SCANS_EVENT",
+            Self::OrganizerScansParticipant => "ORGANIZER_SCANS_PARTICIPANT",
+        }
+    }
+}
+
+struct ValidatedMessage {
+    envelope: Envelope,
+    payload: RegistrationConfirmed,
+    payload_hash: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EventCancelledEnvelope {
+    message_id: Uuid,
+    event_type: String,
+    aggregate_type: String,
+    aggregate_id: Uuid,
+    occurred_at: DateTime<Utc>,
+    schema_version: i32,
+    payload_json: Value,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EventCancelled {
+    event_id: Uuid,
+    cancelled_at: DateTime<Utc>,
+}
+
+struct ValidatedCancellation {
+    envelope: EventCancelledEnvelope,
+    payload: EventCancelled,
+    payload_hash: String,
+}
+
+fn decode_message(body: &[u8]) -> Result<ValidatedMessage, ProcessError> {
+    let envelope: Envelope = serde_json::from_slice(body)
+        .map_err(|error| ProcessError::Invalid(format!("invalid envelope JSON: {error}")))?;
+    if envelope.message_id.is_nil()
+        || envelope.event_type != EVENT_TYPE
+        || envelope.aggregate_type != AGGREGATE_TYPE
+        || envelope.aggregate_id.is_nil()
+        || envelope.schema_version != 1
+    {
+        return Err(ProcessError::Invalid(
+            "unsupported envelope identity or version".into(),
+        ));
+    }
+
+    let payload: RegistrationConfirmed = serde_json::from_value(envelope.payload_json.clone())
+        .map_err(|error| ProcessError::Invalid(format!("invalid payload JSON: {error}")))?;
+    if payload.registration_id.is_nil()
+        || payload.event_id.is_nil()
+        || payload.registration_id != envelope.aggregate_id
+        || payload.user_id.trim().is_empty()
+        || payload.user_id.len() > 255
+        || payload.event_title.trim().is_empty()
+        || payload.event_title.chars().count() > 200
+        || payload.ends_at <= payload.starts_at
+        || (payload.attendance_enabled && payload.attendance_mode.is_none())
+    {
+        return Err(ProcessError::Invalid(
+            "payload fields are inconsistent or incomplete".into(),
+        ));
+    }
+
+    let serialized = serde_json::to_vec(&payload)
+        .map_err(|error| ProcessError::Invalid(format!("could not normalize payload: {error}")))?;
+    let payload_hash = format!("{:x}", Sha256::digest(serialized));
+    Ok(ValidatedMessage {
+        envelope,
+        payload,
+        payload_hash,
+    })
+}
+
+pub async fn process_message(pool: &PgPool, body: &[u8]) -> Result<(), ProcessError> {
+    let header: Value = serde_json::from_slice(body)
+        .map_err(|error| ProcessError::Invalid(format!("invalid envelope JSON: {error}")))?;
+    match header.get("eventType").and_then(Value::as_str) {
+        Some(EVENT_TYPE) => process_registration_confirmed(pool, body).await,
+        Some(EVENT_CANCELLED_TYPE) => process_event_cancelled(pool, body).await,
+        _ => Err(ProcessError::Invalid(
+            "unsupported Access event type".into(),
+        )),
+    }
+}
+
+async fn process_registration_confirmed(pool: &PgPool, body: &[u8]) -> Result<(), ProcessError> {
+    let message = decode_message(body)?;
+    let mut transaction = pool.begin().await?;
+
+    if !message.payload.attendance_enabled {
+        transaction.commit().await?;
+        return Ok(());
+    }
+
+    let event_cancelled = lock_event_state(
+        &mut transaction,
+        message.payload.event_id,
+        message.envelope.occurred_at,
+    )
+    .await?;
+
+    if let Some(row) = sqlx::query(
+        "SELECT registration_id, payload_hash FROM processed_messages WHERE message_id = $1",
+    )
+    .bind(message.envelope.message_id)
+    .fetch_optional(&mut *transaction)
+    .await?
+    {
+        let existing_registration_id: Uuid = row.try_get("registration_id")?;
+        let existing_hash: String = row.try_get("payload_hash")?;
+        if existing_registration_id != message.payload.registration_id
+            || existing_hash != message.payload_hash
+        {
+            return Err(ProcessError::Invalid(
+                "messageId was reused with different content".into(),
+            ));
+        }
+        transaction.commit().await?;
+        return Ok(());
+    }
+
+    let claimed = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO processed_registrations (registration_id, payload_hash, processed_at) \
+         VALUES ($1, $2, $3) ON CONFLICT (registration_id) DO NOTHING RETURNING registration_id",
+    )
+    .bind(message.payload.registration_id)
+    .bind(&message.payload_hash)
+    .bind(message.envelope.occurred_at)
+    .fetch_optional(&mut *transaction)
+    .await?;
+
+    if claimed.is_none() {
+        let existing_hash = sqlx::query_scalar::<_, String>(
+            "SELECT payload_hash FROM processed_registrations WHERE registration_id = $1 FOR UPDATE",
+        )
+        .bind(message.payload.registration_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or_else(|| ProcessError::Invalid("registration idempotency record disappeared".into()))?;
+        if existing_hash != message.payload_hash {
+            return Err(ProcessError::Invalid(
+                "registrationId was reused with different attendance data".into(),
+            ));
+        }
+        record_processed_message(&mut transaction, &message).await?;
+        transaction.commit().await?;
+        return Ok(());
+    }
+
+    if event_cancelled {
+        record_processed_message(&mut transaction, &message).await?;
+        transaction.commit().await?;
+        return Ok(());
+    }
+
+    let session_id = ensure_session(&mut transaction, &message).await?;
+    let entry_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO attendance_entries (id, session_id, user_id, status, registered_at) \
+         VALUES ($1, $2, $3, 'ELIGIBLE', $4)",
+    )
+    .bind(entry_id)
+    .bind(session_id)
+    .bind(&message.payload.user_id)
+    .bind(message.envelope.occurred_at)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE processed_registrations SET attendance_entry_id = $1 WHERE registration_id = $2",
+    )
+    .bind(entry_id)
+    .bind(message.payload.registration_id)
+    .execute(&mut *transaction)
+    .await?;
+    record_processed_message(&mut transaction, &message).await?;
+    transaction.commit().await?;
+    Ok(())
+}
+
+async fn lock_event_state(
+    transaction: &mut Transaction<'_, Postgres>,
+    event_id: Uuid,
+    created_at: DateTime<Utc>,
+) -> Result<bool, ProcessError> {
+    sqlx::query(
+        "INSERT INTO attendance_event_states (event_id, status, created_at) \
+         VALUES ($1, 'ACTIVE', $2) ON CONFLICT (event_id) DO NOTHING",
+    )
+    .bind(event_id)
+    .bind(created_at)
+    .execute(&mut **transaction)
+    .await?;
+    let status: String = sqlx::query_scalar(
+        "SELECT status FROM attendance_event_states WHERE event_id = $1 FOR UPDATE",
+    )
+    .bind(event_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(status == "CANCELLED")
+}
+
+fn decode_event_cancelled(body: &[u8]) -> Result<ValidatedCancellation, ProcessError> {
+    let envelope: EventCancelledEnvelope = serde_json::from_slice(body).map_err(|error| {
+        ProcessError::Invalid(format!("invalid EventCancelled envelope JSON: {error}"))
+    })?;
+    if envelope.message_id.is_nil()
+        || envelope.event_type != EVENT_CANCELLED_TYPE
+        || envelope.aggregate_type != EVENT_AGGREGATE_TYPE
+        || envelope.aggregate_id.is_nil()
+        || envelope.schema_version != 1
+    {
+        return Err(ProcessError::Invalid(
+            "unsupported EventCancelled envelope identity or version".into(),
+        ));
+    }
+    let payload: EventCancelled =
+        serde_json::from_value(envelope.payload_json.clone()).map_err(|error| {
+            ProcessError::Invalid(format!("invalid EventCancelled payload JSON: {error}"))
+        })?;
+    if payload.event_id.is_nil()
+        || payload.event_id != envelope.aggregate_id
+        || payload.cancelled_at > envelope.occurred_at
+    {
+        return Err(ProcessError::Invalid(
+            "inconsistent EventCancelled payload".into(),
+        ));
+    }
+    let serialized = serde_json::to_vec(&payload).map_err(|error| {
+        ProcessError::Invalid(format!(
+            "could not normalize EventCancelled payload: {error}"
+        ))
+    })?;
+    let payload_hash = format!("{:x}", Sha256::digest(serialized));
+    Ok(ValidatedCancellation {
+        envelope,
+        payload,
+        payload_hash,
+    })
+}
+
+#[cfg(test)]
+fn cancellation_message(event_id: Uuid, message_id: Uuid) -> Vec<u8> {
+    serde_json::json!({
+        "messageId": message_id,
+        "eventType": EVENT_CANCELLED_TYPE,
+        "aggregateType": EVENT_AGGREGATE_TYPE,
+        "aggregateId": event_id,
+        "occurredAt": "2026-11-16T15:00:00Z",
+        "schemaVersion": 1,
+        "payloadJson": {
+            "eventId": event_id,
+            "cancelledAt": "2026-11-16T15:00:00Z"
+        }
+    })
+    .to_string()
+    .into_bytes()
+}
+
+pub async fn process_event_cancelled(pool: &PgPool, body: &[u8]) -> Result<(), ProcessError> {
+    let cancellation = decode_event_cancelled(body)?;
+    let mut transaction = pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO attendance_event_states \
+         (event_id, status, created_at) \
+         VALUES ($1, 'ACTIVE', $2) ON CONFLICT (event_id) DO NOTHING",
+    )
+    .bind(cancellation.payload.event_id)
+    .bind(cancellation.envelope.occurred_at)
+    .execute(&mut *transaction)
+    .await?;
+
+    let row = sqlx::query(
+        "SELECT status, cancellation_message_id, cancellation_hash FROM attendance_event_states \
+         WHERE event_id = $1 FOR UPDATE",
+    )
+    .bind(cancellation.payload.event_id)
+    .fetch_one(&mut *transaction)
+    .await?;
+    let status: String = row.try_get("status")?;
+    let existing_message_id: Option<Uuid> = row.try_get("cancellation_message_id")?;
+    let existing_hash: Option<String> = row.try_get("cancellation_hash")?;
+    if status == "CANCELLED" {
+        if existing_message_id != Some(cancellation.envelope.message_id)
+            || existing_hash.as_deref() != Some(cancellation.payload_hash.as_str())
+        {
+            return Err(ProcessError::Invalid(
+                "event already has a different cancellation message".into(),
+            ));
+        }
+        transaction.commit().await?;
+        return Ok(());
+    }
+
+    sqlx::query(
+        "UPDATE attendance_event_states SET status = 'CANCELLED', cancellation_message_id = $2, \
+         cancellation_hash = $3, cancelled_at = $4 WHERE event_id = $1",
+    )
+    .bind(cancellation.payload.event_id)
+    .bind(cancellation.envelope.message_id)
+    .bind(&cancellation.payload_hash)
+    .bind(cancellation.payload.cancelled_at)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE attendance_sessions SET status = 'CANCELLED', shared_token_hash = NULL, cancelled_at = $2 \
+         WHERE source_type = $1 AND source_id = $3 AND status <> 'CANCELLED'",
+    )
+    .bind(SESSION_SOURCE_TYPE)
+    .bind(cancellation.payload.cancelled_at)
+    .bind(cancellation.payload.event_id)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE attendance_entries SET status = 'CANCELLED', cancelled_at = $2 \
+         WHERE session_id IN (SELECT id FROM attendance_sessions WHERE source_type = $1 AND source_id = $3) \
+           AND status = 'ELIGIBLE'",
+    )
+    .bind(SESSION_SOURCE_TYPE)
+    .bind(cancellation.payload.cancelled_at)
+    .bind(cancellation.payload.event_id)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(())
+}
+
+async fn ensure_session(
+    transaction: &mut Transaction<'_, Postgres>,
+    message: &ValidatedMessage,
+) -> Result<Uuid, ProcessError> {
+    let mode = message.payload.attendance_mode.ok_or_else(|| {
+        ProcessError::Invalid("attendanceMode is required when attendance is enabled".into())
+    })?;
+    let candidate_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO attendance_sessions \
+         (id, source_type, source_id, source_title, starts_at, ends_at, mode, status, \
+          check_in_opens_at, check_in_closes_at, shared_token_hash, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'OPEN', $5, $6, NULL, $8) \
+         ON CONFLICT (source_type, source_id) DO NOTHING",
+    )
+    .bind(candidate_id)
+    .bind(SESSION_SOURCE_TYPE)
+    .bind(message.payload.event_id)
+    .bind(&message.payload.event_title)
+    .bind(message.payload.starts_at)
+    .bind(message.payload.ends_at)
+    .bind(mode.as_str())
+    .bind(message.envelope.occurred_at)
+    .execute(&mut **transaction)
+    .await?;
+
+    let row = sqlx::query(
+        "SELECT id, source_title, starts_at, ends_at, mode FROM attendance_sessions \
+         WHERE source_type = $1 AND source_id = $2",
+    )
+    .bind(SESSION_SOURCE_TYPE)
+    .bind(message.payload.event_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let session_id: Uuid = row.try_get("id")?;
+    let source_title: String = row.try_get("source_title")?;
+    let starts_at: DateTime<Utc> = row.try_get("starts_at")?;
+    let ends_at: DateTime<Utc> = row.try_get("ends_at")?;
+    let stored_mode: String = row.try_get("mode")?;
+    if source_title != message.payload.event_title
+        || starts_at.timestamp_micros() != message.payload.starts_at.timestamp_micros()
+        || ends_at.timestamp_micros() != message.payload.ends_at.timestamp_micros()
+        || stored_mode != mode.as_str()
+    {
+        return Err(ProcessError::Invalid(
+            "event attendance data differs from the existing session".into(),
+        ));
+    }
+    Ok(session_id)
+}
+
+async fn record_processed_message(
+    transaction: &mut Transaction<'_, Postgres>,
+    message: &ValidatedMessage,
+) -> Result<(), ProcessError> {
+    let inserted = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO processed_messages (message_id, registration_id, payload_hash, processed_at) \
+         VALUES ($1, $2, $3, $4) ON CONFLICT (message_id) DO NOTHING RETURNING message_id",
+    )
+    .bind(message.envelope.message_id)
+    .bind(message.payload.registration_id)
+    .bind(&message.payload_hash)
+    .bind(message.envelope.occurred_at)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if inserted.is_none() {
+        let row = sqlx::query(
+            "SELECT registration_id, payload_hash FROM processed_messages WHERE message_id = $1",
+        )
+        .bind(message.envelope.message_id)
+        .fetch_one(&mut **transaction)
+        .await?;
+        let registration_id: Uuid = row.try_get("registration_id")?;
+        let payload_hash: String = row.try_get("payload_hash")?;
+        if registration_id != message.payload.registration_id
+            || payload_hash != message.payload_hash
+        {
+            return Err(ProcessError::Invalid(
+                "messageId was reused with different content".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub async fn run_consumer(pool: PgPool, rabbitmq_url: String) {
+    let mut retry_delay = Duration::from_secs(1);
+    loop {
+        match consume_once(&pool, &rabbitmq_url).await {
+            Ok(()) => eprintln!("Access RabbitMQ consumer stopped; reconnecting"),
+            Err(error) => eprintln!("Access RabbitMQ consumer unavailable: {error}"),
+        }
+        sleep(retry_delay).await;
+        retry_delay = (retry_delay * 2).min(Duration::from_secs(30));
+    }
+}
+
+async fn consume_once(
+    pool: &PgPool,
+    rabbitmq_url: &str,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let connection_properties = ConnectionProperties::default()
+        .with_executor(tokio_executor_trait::Tokio::current())
+        .with_reactor(tokio_reactor_trait::Tokio);
+    let connection = Connection::connect(rabbitmq_url, connection_properties).await?;
+    let channel = connection.create_channel().await?;
+    channel
+        .exchange_declare(
+            EXCHANGE,
+            ExchangeKind::Topic,
+            ExchangeDeclareOptions {
+                durable: true,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await?;
+    channel.basic_qos(1, BasicQosOptions::default()).await?;
+    channel
+        .queue_declare(
+            QUEUE,
+            QueueDeclareOptions {
+                durable: true,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await?;
+    channel
+        .queue_bind(
+            QUEUE,
+            EXCHANGE,
+            ROUTING_KEY,
+            QueueBindOptions::default(),
+            FieldTable::default(),
+        )
+        .await?;
+    channel
+        .queue_bind(
+            QUEUE,
+            EXCHANGE,
+            EVENT_CANCELLED_ROUTING_KEY,
+            QueueBindOptions::default(),
+            FieldTable::default(),
+        )
+        .await?;
+    let mut consumer = channel
+        .basic_consume(
+            QUEUE,
+            "access-registration-confirmed",
+            BasicConsumeOptions::default(),
+            FieldTable::default(),
+        )
+        .await?;
+
+    while let Some(delivery) = consumer.next().await {
+        let delivery = delivery?;
+        match process_message(pool, &delivery.data).await {
+            Ok(()) => delivery.ack(BasicAckOptions::default()).await?,
+            Err(ProcessError::Invalid(reason)) => {
+                eprintln!(
+                    "Rejecting invalid RegistrationConfirmed {}: {reason}",
+                    delivery.delivery_tag
+                );
+                delivery
+                    .reject(BasicRejectOptions { requeue: false })
+                    .await?;
+            }
+            Err(ProcessError::Database(error)) => {
+                eprintln!(
+                    "RegistrationConfirmed {} could not commit; requeueing: {error}",
+                    delivery.delivery_tag
+                );
+                sleep(Duration::from_secs(1)).await;
+                delivery
+                    .nack(BasicNackOptions {
+                        multiple: false,
+                        requeue: true,
+                    })
+                    .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn envelope(payload: Value) -> Value {
+        json!({
+            "messageId": "2ae1fc3b-ea4e-45ba-a5d2-8a583138a7e0",
+            "eventType": EVENT_TYPE,
+            "aggregateType": AGGREGATE_TYPE,
+            "aggregateId": "c264db58-2b89-4ae3-bc2b-94da25b0693b",
+            "occurredAt": "2026-11-16T15:00:00Z",
+            "schemaVersion": 1,
+            "payloadJson": payload
+        })
+    }
+
+    fn payload(attendance_enabled: bool) -> Value {
+        json!({
+            "registrationId": "c264db58-2b89-4ae3-bc2b-94da25b0693b",
+            "eventId": "e07f7cd3-b13f-4b17-9284-96f33e37b942",
+            "userId": "keycloak-subject",
+            "attendanceEnabled": attendance_enabled,
+            "attendanceMode": "PARTICIPANT_SCANS_EVENT",
+            "eventTitle": "Encontro de Boas-vindas",
+            "startsAt": "2027-06-15T17:00:00Z",
+            "endsAt": "2027-06-15T19:00:00Z"
+        })
+    }
+
+    #[test]
+    fn decodes_attendance_enabled_contract_and_keeps_keycloak_subject() {
+        let message = decode_message(envelope(payload(true)).to_string().as_bytes()).unwrap();
+        assert!(message.payload.attendance_enabled);
+        assert_eq!(message.payload.user_id, "keycloak-subject");
+        assert_eq!(
+            message.payload.attendance_mode,
+            Some(AttendanceMode::ParticipantScansEvent)
+        );
+    }
+
+    #[test]
+    fn accepts_disabled_attendance_without_creating_an_attendance_mode_requirement() {
+        let mut disabled = payload(false);
+        disabled["attendanceMode"] = Value::Null;
+        let message = decode_message(envelope(disabled).to_string().as_bytes()).unwrap();
+        assert!(!message.payload.attendance_enabled);
+    }
+
+    #[test]
+    fn rejects_wrong_schema_and_payload_registration_mismatch() {
+        let mut wrong_version = envelope(payload(true));
+        wrong_version["schemaVersion"] = json!(2);
+        assert!(matches!(
+            decode_message(wrong_version.to_string().as_bytes()),
+            Err(ProcessError::Invalid(_))
+        ));
+
+        let mut mismatched = payload(true);
+        mismatched["registrationId"] = json!("a18a5f64-c834-47e1-9248-1167cedb41aa");
+        assert!(matches!(
+            decode_message(envelope(mismatched).to_string().as_bytes()),
+            Err(ProcessError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_missing_attendance_mode_when_presence_is_enabled() {
+        let mut missing_mode = payload(true);
+        missing_mode["attendanceMode"] = Value::Null;
+        assert!(matches!(
+            decode_message(envelope(missing_mode).to_string().as_bytes()),
+            Err(ProcessError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn decodes_event_cancellation_and_rejects_wrong_aggregate() {
+        let event_id = Uuid::new_v4();
+        let message =
+            decode_event_cancelled(&cancellation_message(event_id, Uuid::new_v4())).unwrap();
+        assert_eq!(message.payload.event_id, event_id);
+
+        let mut malformed: Value =
+            serde_json::from_slice(&cancellation_message(event_id, Uuid::new_v4())).unwrap();
+        malformed["aggregateType"] = json!("Registration");
+        assert!(matches!(
+            decode_event_cancelled(malformed.to_string().as_bytes()),
+            Err(ProcessError::Invalid(_))
+        ));
+    }
+}

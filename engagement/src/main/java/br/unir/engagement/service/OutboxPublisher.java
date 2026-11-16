@@ -2,11 +2,18 @@ package br.unir.engagement.service;
 
 import br.unir.engagement.config.RabbitMqConfiguration;
 import br.unir.engagement.dto.IntegrationEventEnvelope;
+import br.unir.engagement.dto.PaymentConfirmedPayload;
+import br.unir.engagement.dto.RefundRequestedPayload;
+import br.unir.engagement.dto.RegistrationConfirmedPayload;
 import br.unir.engagement.dto.RegistrationPaymentRequestedPayload;
+import br.unir.engagement.dto.EventCancelledPayload;
+import br.unir.engagement.dto.RegistrationCancelledByEventPayload;
 import br.unir.engagement.entity.OutboxEvent;
 import br.unir.engagement.repository.OutboxRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,11 +62,16 @@ public class OutboxPublisher {
                     .setMessageId(event.getId().toString()).build();
             CorrelationData correlationData = new CorrelationData(event.getId().toString());
 
-            if (!RegistrationPaymentRequestedPayload.EVENT_TYPE.equals(event.getEventType())) {
-                throw new IllegalArgumentException("Unsupported Outbox event type: " + event.getEventType());
-            }
-            this.rabbitTemplate.send(RabbitMqConfiguration.EXCHANGE_NAME,
-                    RegistrationPaymentRequestedPayload.ROUTING_KEY, message, correlationData);
+            String routingKey = switch (event.getEventType()) {
+                case RegistrationPaymentRequestedPayload.EVENT_TYPE -> RegistrationPaymentRequestedPayload.ROUTING_KEY;
+                case PaymentConfirmedPayload.EVENT_TYPE -> PaymentConfirmedPayload.ROUTING_KEY;
+                case RefundRequestedPayload.EVENT_TYPE -> RefundRequestedPayload.ROUTING_KEY;
+                case RegistrationConfirmedPayload.EVENT_TYPE -> RegistrationConfirmedPayload.ROUTING_KEY;
+                case EventCancelledPayload.EVENT_TYPE -> EventCancelledPayload.ROUTING_KEY;
+                case RegistrationCancelledByEventPayload.EVENT_TYPE -> RegistrationCancelledByEventPayload.ROUTING_KEY;
+                default -> throw new IllegalArgumentException("Unsupported Outbox event type: " + event.getEventType());
+            };
+            this.rabbitTemplate.send(RabbitMqConfiguration.EXCHANGE_NAME, routingKey, message, correlationData);
             CorrelationData.Confirm confirm = correlationData.getFuture().get(CONFIRM_TIMEOUT_SECONDS,
                     TimeUnit.SECONDS);
             if (!confirm.isAck() || correlationData.getReturned() != null) {
@@ -68,7 +80,11 @@ public class OutboxPublisher {
 
             event.markPublished(Instant.now());
             this.outboxRepository.saveAndFlush(event);
-        } catch (Exception exception) {
+        } catch (com.fasterxml.jackson.core.JsonProcessingException | InterruptedException | ExecutionException
+                | TimeoutException | RuntimeException exception) {
+            if (exception instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
             LOGGER.warn("Outbox event {} remains unpublished and will be retried: {}", event.getId(),
                     exception.getMessage());
         }

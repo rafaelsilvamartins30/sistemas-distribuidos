@@ -1067,6 +1067,13 @@ html { scroll-behavior: smooth; scroll-padding-top: 92px; }
 .event-detail-page .detail-copy-section h2 { font-size: 16px; font-weight: 710; }
 .event-detail-page .detail-copy-section p { font-size: 12px; }
 .event-detail-page .detail-info-grid small, .event-detail-page .detail-info-grid strong, .event-detail-page .detail-info-grid a, .event-detail-page .detail-info-grid span > span { font-size: 11px; line-height: 1.5; }
+.attendance-action-panel { margin-top: 14px; }
+.attendance-window { color: var(--muted); font-size: 11px; }
+.attendance-scanner { display: grid; gap: 12px; margin-top: 12px; }
+.attendance-scanner-video { width: 100%; max-height: 260px; border-radius: 12px; background: #111827; object-fit: cover; }
+.attendance-token-form { display: grid; gap: 8px; }
+.attendance-token-form label { font-size: 11px; font-weight: 650; }
+.attendance-token-form input { min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; color: var(--text); background: var(--surface); font: inherit; }
 @media (max-width: 760px) {
   .content-grid { grid-template-columns: 1fr; }
 }

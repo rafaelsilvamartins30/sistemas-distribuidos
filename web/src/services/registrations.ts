@@ -11,6 +11,8 @@ export interface Registration {
   registeredAt: string;
   confirmedAt: string | null;
   cancelledAt: string | null;
+  paymentDeadlineAt: string | null;
+  reservationExpiresAt: string | null;
   event: Event;
 }
 

@@ -21,7 +21,7 @@ type MessageProcessor interface {
 type Consumer struct {
 	url        string
 	queue      string
-	processor  MessageProcessor
+	process    func(context.Context, []byte) error
 	logger     *slog.Logger
 	retryDelay time.Duration
 }
@@ -30,13 +30,36 @@ func NewConsumer(url string, processor MessageProcessor, logger *slog.Logger) *C
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Consumer{
-		url:        url,
-		queue:      RegistrationPaymentQueue,
-		processor:  processor,
-		logger:     logger,
-		retryDelay: time.Second,
+	return newConsumer(url, RegistrationPaymentQueue, processor.Process, logger)
+}
+
+// RefundMessageProcessor consumes refund requests from Engagement.
+type RefundMessageProcessor interface {
+	ProcessRefund(context.Context, []byte) error
+}
+
+func NewRefundConsumer(url string, processor RefundMessageProcessor, logger *slog.Logger) *Consumer {
+	if logger == nil {
+		logger = slog.Default()
 	}
+	return newConsumer(url, RefundRequestQueue, processor.ProcessRefund, logger)
+}
+
+// RegistrationCancellationProcessor consumes cancellation decisions from Engagement.
+type RegistrationCancellationProcessor interface {
+	ProcessRegistrationCancelledByEvent(context.Context, []byte) error
+}
+
+func NewRegistrationCancellationConsumer(url string, processor RegistrationCancellationProcessor,
+	logger *slog.Logger) *Consumer {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return newConsumer(url, RegistrationCancelledByEventQueue, processor.ProcessRegistrationCancelledByEvent, logger)
+}
+
+func newConsumer(url, queue string, process func(context.Context, []byte) error, logger *slog.Logger) *Consumer {
+	return &Consumer{url: url, queue: queue, process: process, logger: logger, retryDelay: time.Second}
 }
 
 // Run keeps reconnecting when RabbitMQ is unavailable. It returns only after
@@ -69,14 +92,14 @@ func (c *Consumer) consume(ctx context.Context) error {
 	}
 	defer func() { _ = channel.Close() }()
 
-	queue, err := channel.QueueDeclare(RegistrationPaymentQueue, true, false, false, false, nil)
+	queue, err := channel.QueueDeclare(c.queue, true, false, false, false, nil)
 	if err != nil {
-		return fmt.Errorf("declare Payment request queue: %w", err)
+		return fmt.Errorf("declare Payment queue %s: %w", c.queue, err)
 	}
 	if err := channel.Qos(1, 0, false); err != nil {
 		return fmt.Errorf("configure Payment consumer prefetch: %w", err)
 	}
-	deliveries, err := channel.ConsumeWithContext(ctx, queue.Name, "payment-registration-requested-v1", false,
+	deliveries, err := channel.ConsumeWithContext(ctx, queue.Name, c.queue+"-consumer", false,
 		false, false, false, nil)
 	if err != nil {
 		return fmt.Errorf("subscribe to Payment request queue: %w", err)
@@ -98,9 +121,9 @@ func (c *Consumer) consume(ctx context.Context) error {
 }
 
 func (c *Consumer) handleDelivery(ctx context.Context, delivery amqp.Delivery) error {
-	if err := c.processor.Process(ctx, delivery.Body); err != nil {
+	if err := c.process(ctx, delivery.Body); err != nil {
 		if errors.Is(err, ErrInvalidMessage) {
-			c.logger.Error("Rejecting invalid RegistrationPaymentRequested message", "messageId",
+			c.logger.Error("Rejecting invalid Payment integration message", "queue", c.queue, "messageId",
 				delivery.MessageId, "error", err)
 			if nackErr := delivery.Nack(false, false); nackErr != nil {
 				return fmt.Errorf("reject invalid RabbitMQ message: %w", nackErr)

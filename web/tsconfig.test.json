@@ -19,6 +19,7 @@
     "src/services/campus.ts",
     "src/services/events.ts",
     "src/services/registrations.ts",
+    "src/services/attendance.ts",
     "test/**/*.ts",
     "test/**/*.tsx"
   ]

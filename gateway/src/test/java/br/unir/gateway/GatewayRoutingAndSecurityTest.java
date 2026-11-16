@@ -134,6 +134,8 @@ class GatewayRoutingAndSecurityTest {
         this.mockMvc.perform(get("/api/v1/web/departments")).andExpect(status().isUnauthorized());
         this.mockMvc.perform(get("/api/v1/web/departments/department-1")).andExpect(status().isUnauthorized());
         this.mockMvc.perform(get("/api/v1/web/me/activities")).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(get("/api/v1/web/attendance/me")).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(post("/api/v1/web/attendance/check-ins")).andExpect(status().isUnauthorized());
         this.mockMvc.perform(post("/api/v1/web/events/event-1/registrations")).andExpect(status().isUnauthorized());
         this.mockMvc.perform(delete("/api/v1/web/registrations/registration-1")).andExpect(status().isUnauthorized());
         this.mockMvc.perform(get("/api/v1/web/entities")).andExpect(status().isUnauthorized());
@@ -411,6 +413,39 @@ class GatewayRoutingAndSecurityTest {
     }
 
     @Test
+    void forwardsAttendanceQueriesAndCheckInToWebBffWithUserBearerToken() throws Exception {
+        String eventId = "10000000-0000-4000-8000-000000000001";
+        String token = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300), List.of("USER"));
+        String authorizationHeader = "Bearer " + token;
+
+        BFF_BODY.set("{\"eventId\":\"" + eventId + "\",\"status\":\"ELIGIBLE\",\"checkedAt\":null}");
+        this.mockMvc
+                .perform(get("/api/v1/web/attendance/me?eventId=" + eventId).header(HttpHeaders.AUTHORIZATION,
+                        authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ELIGIBLE"));
+        assertThat(LAST_METHOD.get()).isEqualTo("GET");
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/attendance/me");
+        assertThat(LAST_QUERY.get()).isEqualTo("eventId=" + eventId);
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+
+        BFF_BODY.set("{\"checkInId\":\"check-in-1\",\"status\":\"ATTENDED\"}");
+        this.mockMvc
+                .perform(post("/api/v1/web/attendance/check-ins").header(HttpHeaders.AUTHORIZATION, authorizationHeader)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"token\":\"opaque-token\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ATTENDED"));
+        assertThat(LAST_METHOD.get()).isEqualTo("POST");
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/attendance/check-ins");
+        assertThat(LAST_REQUEST_BODY.get()).isEqualTo("{\"token\":\"opaque-token\"}");
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+
+        String guest = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300), List.of("GUEST"));
+        this.mockMvc
+                .perform(post("/api/v1/web/attendance/check-ins").header(HttpHeaders.AUTHORIZATION, "Bearer " + guest)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"token\":\"opaque-token\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void forwardsUniversityAndDepartmentQueriesToWebBffWithUserBearerToken() throws Exception {
         String departmentId = "10000000-0000-4000-8000-000000000001";
         String token = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300), List.of("USER"));
@@ -491,6 +526,21 @@ class GatewayRoutingAndSecurityTest {
                     .perform(options(path).header(HttpHeaders.ORIGIN, "http://localhost:15173")
                             .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")
                             .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "Authorization"))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://localhost:15173"));
+        }
+    }
+
+    @Test
+    void allowsCorsPreflightForAttendanceFromConfiguredWebOrigin() throws Exception {
+        List<Map.Entry<String, String>> requests = List.of(
+                Map.entry("/api/v1/web/attendance/me?eventId=10000000-0000-4000-8000-000000000001", "GET"),
+                Map.entry("/api/v1/web/attendance/check-ins", "POST"));
+        for (Map.Entry<String, String> request : requests) {
+            this.mockMvc
+                    .perform(options(request.getKey()).header(HttpHeaders.ORIGIN, "http://localhost:15173")
+                            .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, request.getValue())
+                            .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "Authorization, Content-Type"))
                     .andExpect(status().isOk())
                     .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://localhost:15173"));
         }

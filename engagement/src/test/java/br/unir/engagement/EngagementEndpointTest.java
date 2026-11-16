@@ -16,10 +16,18 @@ import br.unir.engagement.entity.OutboxEvent;
 import br.unir.engagement.entity.Registration;
 import br.unir.engagement.entity.RegistrationMode;
 import br.unir.engagement.entity.RegistrationStatus;
+import br.unir.engagement.dto.IntegrationEventEnvelope;
+import br.unir.engagement.dto.PaymentConfirmedPayload;
+import br.unir.engagement.dto.RefundFailedPayload;
+import br.unir.engagement.dto.RefundRequestedPayload;
+import br.unir.engagement.dto.RefundSucceededPayload;
 import br.unir.engagement.repository.EventRepository;
 import br.unir.engagement.repository.OutboxRepository;
 import br.unir.engagement.repository.RegistrationRepository;
 import br.unir.engagement.service.RegistrationExpirationService;
+import br.unir.engagement.service.EventCancellationService;
+import br.unir.engagement.service.PaymentConfirmationService;
+import br.unir.engagement.service.RefundResultService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
@@ -39,6 +47,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
@@ -62,13 +71,118 @@ class EngagementEndpointTest {
     private RegistrationExpirationService registrationExpirationService;
 
     @Autowired
+    private EventCancellationService eventCancellationService;
+
+    @Autowired
+    private PaymentConfirmationService paymentConfirmationService;
+
+    @Autowired
+    private RefundResultService refundResultService;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void clearEvents() {
+        this.jdbcTemplate.update("DELETE FROM event_cancellation_refunds");
+        this.jdbcTemplate.update("DELETE FROM processed_refund_results");
+        this.jdbcTemplate.update("DELETE FROM payment_compensation_cases");
+        this.jdbcTemplate.update("DELETE FROM processed_payment_confirmations");
         this.outboxRepository.deleteAllInBatch();
         this.registrationRepository.deleteAllInBatch();
         this.eventRepository.deleteAllInBatch();
+    }
+
+    @Test
+    void institutionalCancellationIsTerminalAndWritesPaymentAndAccessOutboxAtomically() throws Exception {
+        Instant now = Instant.now();
+        Event event = futurePaidEvent(4, Duration.ofDays(3), 2500L);
+        this.eventRepository.saveAndFlush(event);
+        UUID registrationId = UUID.randomUUID();
+        UUID chargeId = UUID.randomUUID();
+        UUID paymentMessageId = UUID.randomUUID();
+        Registration registration = new Registration(registrationId, event.getId(), "keycloak-cancelled-user",
+                RegistrationStatus.CONFIRMED, now.minusSeconds(300), now.minusSeconds(240), null, null, null);
+        this.registrationRepository.saveAndFlush(registration);
+        this.jdbcTemplate.update(
+                """
+                        INSERT INTO processed_payment_confirmations (message_id, registration_id, message_hash, processed_at, charge_id)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                paymentMessageId, registrationId, "a".repeat(64), now.minusSeconds(240), chargeId);
+
+        this.eventCancellationService.cancel(event.getId());
+
+        org.junit.jupiter.api.Assertions.assertEquals(EventStatus.CANCELLED,
+                this.eventRepository.findById(event.getId()).orElseThrow().getStatus());
+        org.junit.jupiter.api.Assertions.assertEquals(RegistrationStatus.CANCELLED_BY_EVENT,
+                this.registrationRepository.findById(registrationId).orElseThrow().getStatus());
+        List<OutboxEvent> messages = this.outboxRepository.findAll();
+        org.junit.jupiter.api.Assertions.assertEquals(2, messages.size());
+        OutboxEvent eventCancellation = messages.stream()
+                .filter(message -> "EventCancelled".equals(message.getEventType())).findFirst().orElseThrow();
+        JsonNode eventCancellationPayload = this.objectMapper.readTree(eventCancellation.getPayloadJson());
+        org.junit.jupiter.api.Assertions.assertEquals(eventCancellation.getCreatedAt(),
+                Instant.parse(eventCancellationPayload.get("cancelledAt").asText()));
+        OutboxEvent registrationCancellation = messages.stream()
+                .filter(message -> "RegistrationCancelledByEvent".equals(message.getEventType())).findFirst()
+                .orElseThrow();
+        JsonNode cancellationPayload = this.objectMapper.readTree(registrationCancellation.getPayloadJson());
+        org.junit.jupiter.api.Assertions.assertEquals("keycloak-cancelled-user",
+                cancellationPayload.get("userId").asText());
+        String trackedMessage = this.jdbcTemplate.queryForObject(
+                "SELECT cancellation_message_id FROM event_cancellation_refunds WHERE registration_id = ?",
+                String.class, registrationId);
+        org.junit.jupiter.api.Assertions.assertEquals(registrationCancellation.getId().toString(), trackedMessage);
+        org.junit.jupiter.api.Assertions.assertEquals("PENDING",
+                this.jdbcTemplate.queryForObject(
+                        "SELECT refund_status FROM event_cancellation_refunds WHERE registration_id = ?", String.class,
+                        registrationId));
+
+        this.eventCancellationService.cancel(event.getId());
+        org.junit.jupiter.api.Assertions.assertEquals(2, this.outboxRepository.count());
+    }
+
+    @Test
+    void cancellationRefundResultCanArriveBeforeTheLatePaymentConfirmation() throws Exception {
+        Instant now = Instant.now();
+        Event event = futurePaidEvent(2, Duration.ofDays(3), 2500L);
+        this.eventRepository.saveAndFlush(event);
+        UUID registrationId = UUID.randomUUID();
+        Registration registration = new Registration(registrationId, event.getId(), "keycloak-late-payment-user",
+                RegistrationStatus.PENDING_PAYMENT, now.minusSeconds(30), null, null, now.plusSeconds(570),
+                now.plusSeconds(870));
+        this.registrationRepository.saveAndFlush(registration);
+
+        this.eventCancellationService.cancel(event.getId());
+
+        OutboxEvent cancellation = this.outboxRepository.findByAggregateIdOrderByCreatedAtAsc(registrationId).stream()
+                .filter(message -> "RegistrationCancelledByEvent".equals(message.getEventType())).findFirst()
+                .orElseThrow();
+        org.junit.jupiter.api.Assertions.assertEquals(0,
+                this.jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM event_cancellation_refunds WHERE registration_id = ?", Integer.class,
+                        registrationId));
+
+        UUID chargeId = UUID.randomUUID();
+        this.refundResultService.consume(refundSucceededMessage(chargeId, registrationId, cancellation.getId(),
+                UUID.randomUUID(), 2500L, Instant.now()));
+        this.paymentConfirmationService
+                .consume(paymentConfirmedMessage(registration, event, chargeId, UUID.randomUUID(), now, Instant.now()));
+
+        org.junit.jupiter.api.Assertions.assertEquals(RegistrationStatus.CANCELLED_BY_EVENT,
+                this.registrationRepository.findById(registrationId).orElseThrow().getStatus());
+        org.junit.jupiter.api.Assertions.assertEquals("COMPLETED",
+                this.jdbcTemplate.queryForObject(
+                        "SELECT refund_status FROM event_cancellation_refunds WHERE registration_id = ?", String.class,
+                        registrationId));
+        org.junit.jupiter.api.Assertions.assertEquals(chargeId.toString(),
+                this.jdbcTemplate.queryForObject(
+                        "SELECT charge_id FROM event_cancellation_refunds WHERE registration_id = ?", String.class,
+                        registrationId));
     }
 
     @Test
@@ -256,6 +370,143 @@ class EngagementEndpointTest {
     }
 
     @Test
+    void freeAttendanceEnabledRegistrationWritesRegistrationConfirmedV1ToOutbox() throws Exception {
+        Event event = futureFreeEvent(2, Duration.ofDays(3));
+        this.eventRepository.saveAndFlush(event);
+
+        this.mockMvc
+                .perform(post("/api/v1/events/{eventId}/registrations", event.getId()).with(userJwt("keycloak-sub")))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("CONFIRMED"));
+
+        Registration registration = this.registrationRepository.findAll().getFirst();
+        List<OutboxEvent> events = this.outboxRepository.findByAggregateIdOrderByCreatedAtAsc(registration.getId());
+        org.junit.jupiter.api.Assertions.assertEquals(1, events.size());
+        OutboxEvent outboxEvent = events.getFirst();
+        org.junit.jupiter.api.Assertions.assertEquals("RegistrationConfirmed", outboxEvent.getEventType());
+        JsonNode payload = this.objectMapper.readTree(outboxEvent.getPayloadJson());
+        org.junit.jupiter.api.Assertions.assertEquals(registration.getId().toString(),
+                payload.get("registrationId").asText());
+        org.junit.jupiter.api.Assertions.assertEquals(event.getId().toString(), payload.get("eventId").asText());
+        org.junit.jupiter.api.Assertions.assertEquals("keycloak-sub", payload.get("userId").asText());
+        org.junit.jupiter.api.Assertions.assertTrue(payload.get("attendanceEnabled").asBoolean());
+        org.junit.jupiter.api.Assertions.assertEquals("PARTICIPANT_SCANS_EVENT",
+                payload.get("attendanceMode").asText());
+        org.junit.jupiter.api.Assertions.assertEquals(event.getTitle(), payload.get("eventTitle").asText());
+    }
+
+    @Test
+    void freeRegistrationWithoutAttendanceDoesNotWriteRegistrationConfirmed() throws Exception {
+        Instant now = Instant.now();
+        Event event = new Event(UUID.randomUUID(), "Evento sem presença", "Descrição", "UNIVERSITY", UUID.randomUUID(),
+                null, "Auditório Central", now.plus(Duration.ofDays(3)), now.plus(Duration.ofDays(3)).plusSeconds(3600),
+                "ACADEMIC", 20, now.plus(Duration.ofDays(2)), RegistrationMode.INTERNAL_FREE, null, null, false, null,
+                EventStatus.ACTIVE, now);
+        this.eventRepository.saveAndFlush(event);
+
+        this.mockMvc
+                .perform(post("/api/v1/events/{eventId}/registrations", event.getId()).with(userJwt("keycloak-sub")))
+                .andExpect(status().isCreated());
+
+        org.junit.jupiter.api.Assertions.assertEquals(0, this.outboxRepository.count());
+    }
+
+    @Test
+    void consumesPaymentConfirmationOnceAndPersistsConfirmedRegistration() throws Exception {
+        Instant now = Instant.now();
+        Event event = futurePaidEvent(2, Duration.ofDays(3), 2500L);
+        this.eventRepository.saveAndFlush(event);
+        Instant paymentDeadline = now.plus(Duration.ofMinutes(8));
+        Instant reservationExpires = now.plus(Duration.ofMinutes(13));
+        Instant paidAt = now.minusSeconds(5);
+        Registration registration = new Registration(UUID.randomUUID(), event.getId(), "kc-paid-user",
+                RegistrationStatus.PENDING_PAYMENT, now.minus(Duration.ofMinutes(2)), null, null, paymentDeadline,
+                reservationExpires);
+        this.registrationRepository.saveAndFlush(registration);
+        byte[] body = paymentConfirmedMessage(registration, event, UUID.randomUUID(), UUID.randomUUID(), paidAt, now);
+
+        this.paymentConfirmationService.consume(body);
+        this.paymentConfirmationService.consume(body);
+
+        Registration confirmed = this.registrationRepository.findById(registration.getId()).orElseThrow();
+        org.junit.jupiter.api.Assertions.assertEquals(RegistrationStatus.CONFIRMED, confirmed.getStatus());
+        org.junit.jupiter.api.Assertions.assertEquals(paidAt, confirmed.getConfirmedAt());
+        org.junit.jupiter.api.Assertions.assertEquals(1, this.jdbcTemplate
+                .queryForObject("SELECT count(*) FROM processed_payment_confirmations", Integer.class));
+        org.junit.jupiter.api.Assertions.assertEquals(0,
+                this.jdbcTemplate.queryForObject("SELECT count(*) FROM payment_compensation_cases", Integer.class));
+        List<OutboxEvent> outboxEvents = this.outboxRepository
+                .findByAggregateIdOrderByCreatedAtAsc(registration.getId());
+        org.junit.jupiter.api.Assertions.assertEquals(1, outboxEvents.size());
+        org.junit.jupiter.api.Assertions.assertEquals("RegistrationConfirmed", outboxEvents.getFirst().getEventType());
+        JsonNode attendancePayload = this.objectMapper.readTree(outboxEvents.getFirst().getPayloadJson());
+        org.junit.jupiter.api.Assertions.assertEquals("kc-paid-user", attendancePayload.get("userId").asText());
+    }
+
+    @Test
+    void lateConfirmationQueuesRefundAndResultEventsPreserveTerminalRegistration() throws Exception {
+        Instant now = Instant.now();
+        Event event = futurePaidEvent(2, Duration.ofDays(3), 2500L);
+        this.eventRepository.saveAndFlush(event);
+        Instant registeredAt = now.minus(Duration.ofMinutes(20));
+        Instant paymentDeadline = registeredAt.plus(Duration.ofMinutes(10));
+        Instant reservationExpires = registeredAt.plus(Duration.ofMinutes(15));
+        Registration registration = new Registration(UUID.randomUUID(), event.getId(), "kc-late-user",
+                RegistrationStatus.PENDING_PAYMENT, registeredAt, null, null, paymentDeadline, reservationExpires);
+        this.registrationRepository.saveAndFlush(registration);
+        UUID chargeId = UUID.randomUUID();
+        UUID paymentMessageId = UUID.randomUUID();
+        byte[] body = paymentConfirmedMessage(registration, event, chargeId, paymentMessageId,
+                paymentDeadline.minusSeconds(30), now);
+
+        this.paymentConfirmationService.consume(body);
+
+        Registration expired = this.registrationRepository.findById(registration.getId()).orElseThrow();
+        org.junit.jupiter.api.Assertions.assertEquals(RegistrationStatus.PAYMENT_EXPIRED, expired.getStatus());
+        org.junit.jupiter.api.Assertions.assertEquals(1,
+                this.jdbcTemplate.queryForObject("SELECT count(*) FROM payment_compensation_cases", Integer.class));
+        org.junit.jupiter.api.Assertions.assertEquals("RESERVATION_EXPIRED",
+                this.jdbcTemplate.queryForObject(
+                        "SELECT reason FROM payment_compensation_cases WHERE registration_id = ?", String.class,
+                        registration.getId()));
+        org.junit.jupiter.api.Assertions.assertEquals("PENDING", this.jdbcTemplate.queryForObject(
+                "SELECT refund_status FROM payment_compensation_cases WHERE charge_id = ?", String.class, chargeId));
+        List<OutboxEvent> refundRequests = this.outboxRepository.findByAggregateIdOrderByCreatedAtAsc(chargeId);
+        org.junit.jupiter.api.Assertions.assertEquals(1, refundRequests.size());
+        OutboxEvent refundRequest = refundRequests.getFirst();
+        org.junit.jupiter.api.Assertions.assertEquals(RefundRequestedPayload.EVENT_TYPE, refundRequest.getEventType());
+        JsonNode requestPayload = this.objectMapper.readTree(refundRequest.getPayloadJson());
+        org.junit.jupiter.api.Assertions.assertEquals(paymentMessageId.toString(),
+                requestPayload.get("paymentMessageId").asText());
+        org.junit.jupiter.api.Assertions.assertEquals("RESERVATION_EXPIRED", requestPayload.get("reason").asText());
+
+        byte[] failure = refundFailedMessage(chargeId, registration.getId(), refundRequest.getId(), UUID.randomUUID(),
+                now.plusSeconds(1));
+        this.refundResultService.consume(failure);
+        this.refundResultService.consume(failure);
+        org.junit.jupiter.api.Assertions.assertEquals("FAILED", this.jdbcTemplate.queryForObject(
+                "SELECT refund_status FROM payment_compensation_cases WHERE charge_id = ?", String.class, chargeId));
+        org.junit.jupiter.api.Assertions.assertEquals(1,
+                this.jdbcTemplate.queryForObject("SELECT count(*) FROM processed_refund_results", Integer.class));
+
+        byte[] success = refundSucceededMessage(chargeId, registration.getId(), refundRequest.getId(),
+                UUID.randomUUID(), 2500, now.plusSeconds(2));
+        this.refundResultService.consume(success);
+        org.junit.jupiter.api.Assertions.assertEquals("COMPLETED", this.jdbcTemplate.queryForObject(
+                "SELECT refund_status FROM payment_compensation_cases WHERE charge_id = ?", String.class, chargeId));
+        this.refundResultService.consume(refundFailedMessage(chargeId, registration.getId(), refundRequest.getId(),
+                UUID.randomUUID(), now.plusSeconds(3)));
+        org.junit.jupiter.api.Assertions.assertEquals("COMPLETED", this.jdbcTemplate.queryForObject(
+                "SELECT refund_status FROM payment_compensation_cases WHERE charge_id = ?", String.class, chargeId));
+        org.junit.jupiter.api.Assertions.assertEquals(RegistrationStatus.PAYMENT_EXPIRED,
+                this.registrationRepository.findById(registration.getId()).orElseThrow().getStatus());
+        org.junit.jupiter.api.Assertions.assertEquals(0,
+                this.outboxRepository.findByAggregateIdOrderByCreatedAtAsc(registration.getId()).stream()
+                        .filter(eventOutbox -> "RegistrationConfirmed".equals(eventOutbox.getEventType())).count());
+        org.junit.jupiter.api.Assertions.assertEquals(1, this.jdbcTemplate
+                .queryForObject("SELECT count(*) FROM processed_payment_confirmations", Integer.class));
+    }
+
+    @Test
     void expiresDuePaymentReservationUnderEventLockAndAllowsAnotherUserToReserve() throws Exception {
         Event event = futurePaidEvent(1, Duration.ofDays(3), 1000L);
         this.eventRepository.saveAndFlush(event);
@@ -379,6 +630,33 @@ class EngagementEndpointTest {
                 UUID.randomUUID(), null, "Auditório Central", startsAt, startsAt.plusSeconds(3600), "ACADEMIC",
                 capacity, startsAt.minusSeconds(60), RegistrationMode.INTERNAL_PAID, amountMinor, null, true,
                 AttendanceMode.PARTICIPANT_SCANS_EVENT, EventStatus.ACTIVE, now);
+    }
+
+    private byte[] paymentConfirmedMessage(Registration registration, Event event, UUID chargeId, UUID messageId,
+            Instant paidAt, Instant occurredAt) throws Exception {
+        PaymentConfirmedPayload payload = new PaymentConfirmedPayload(chargeId, registration.getId(), event.getId(),
+                registration.getUserId(), 2500, PaymentConfirmedPayload.CURRENCY, paidAt);
+        IntegrationEventEnvelope envelope = new IntegrationEventEnvelope(messageId, PaymentConfirmedPayload.EVENT_TYPE,
+                "Charge", chargeId, occurredAt, 1, this.objectMapper.valueToTree(payload));
+        return this.objectMapper.writeValueAsBytes(envelope);
+    }
+
+    private byte[] refundFailedMessage(UUID chargeId, UUID registrationId, UUID requestMessageId, UUID messageId,
+            Instant occurredAt) throws Exception {
+        RefundFailedPayload payload = new RefundFailedPayload(chargeId, registrationId, requestMessageId,
+                "PROVIDER_ERROR", occurredAt);
+        IntegrationEventEnvelope envelope = new IntegrationEventEnvelope(messageId, RefundFailedPayload.EVENT_TYPE,
+                "Charge", chargeId, occurredAt, 1, this.objectMapper.valueToTree(payload));
+        return this.objectMapper.writeValueAsBytes(envelope);
+    }
+
+    private byte[] refundSucceededMessage(UUID chargeId, UUID registrationId, UUID requestMessageId, UUID messageId,
+            long amountMinor, Instant refundedAt) throws Exception {
+        RefundSucceededPayload payload = new RefundSucceededPayload(chargeId, registrationId, requestMessageId,
+                amountMinor, RefundSucceededPayload.CURRENCY, refundedAt);
+        IntegrationEventEnvelope envelope = new IntegrationEventEnvelope(messageId, RefundSucceededPayload.EVENT_TYPE,
+                "Charge", chargeId, refundedAt, 1, this.objectMapper.valueToTree(payload));
+        return this.objectMapper.writeValueAsBytes(envelope);
     }
 
     private int registerConcurrently(UUID eventId, String subject, CountDownLatch ready, CountDownLatch start)

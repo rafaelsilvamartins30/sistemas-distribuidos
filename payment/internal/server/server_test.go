@@ -6,8 +6,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"br.unir/payment/internal/payment"
 	"br.unir/payment/internal/server"
 )
 
@@ -79,4 +82,54 @@ func TestProtectedEndpointsRequireBearerToken(t *testing.T) {
 	if recWithToken.Code != http.StatusNotFound {
 		t.Fatalf("expected status 404 for unmapped route with token, got %d", recWithToken.Code)
 	}
+}
+
+func TestSimulatedConfirmationRouteIsAbsentWithoutLocalWiring(t *testing.T) {
+	handler := server.NewHandler(stubPinger{})
+	req := httptest.NewRequest(http.MethodPost,
+		"/local/simulated-payments/550e8400-e29b-41d4-a716-446655440002/confirm", nil)
+	req.Header.Set("Authorization", "Bearer local-test")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected disabled local route to return 404, got %d", rec.Code)
+	}
+}
+
+func TestSimulatedConfirmationRoutePassesRegistrationAndEffectivePaidAt(t *testing.T) {
+	paidAt := time.Date(2026, 11, 16, 15, 4, 0, 0, time.UTC)
+	confirmer := &stubConfirmer{result: payment.PaymentConfirmedEvent{
+		RegistrationID: "550e8400-e29b-41d4-a716-446655440002", PaidAt: paidAt,
+	}}
+	handler := server.NewHandlerWithSimulation(stubPinger{}, confirmer)
+	req := httptest.NewRequest(http.MethodPost,
+		"/local/simulated-payments/550e8400-e29b-41d4-a716-446655440002/confirm",
+		strings.NewReader(`{"paidAt":"2026-11-16T15:04:00Z"}`))
+	req.Header.Set("Authorization", "Bearer local-test")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if confirmer.registrationID != "550e8400-e29b-41d4-a716-446655440002" || !confirmer.paidAt.Equal(paidAt) {
+		t.Fatalf("unexpected confirmation input: registration=%q paidAt=%v", confirmer.registrationID,
+			confirmer.paidAt)
+	}
+}
+
+type stubConfirmer struct {
+	result         payment.PaymentConfirmedEvent
+	registrationID string
+	paidAt         time.Time
+}
+
+func (s *stubConfirmer) ConfirmSimulatedPayment(_ context.Context, registrationID string,
+	paidAt time.Time) (payment.PaymentConfirmedEvent, error) {
+	s.registrationID = registrationID
+	s.paidAt = paidAt
+	return s.result, nil
 }

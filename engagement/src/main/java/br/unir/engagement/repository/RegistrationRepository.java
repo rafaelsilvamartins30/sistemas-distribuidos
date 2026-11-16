@@ -9,8 +9,10 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
 
 public interface RegistrationRepository extends JpaRepository<Registration, UUID> {
 
@@ -52,4 +54,15 @@ public interface RegistrationRepository extends JpaRepository<Registration, UUID
     Optional<UUID> findEventIdForUser(@Param("registrationId") UUID registrationId, @Param("userId") String userId);
 
     Optional<Registration> findByIdAndUserId(UUID registrationId, String userId);
+
+    @Query("select registration.eventId from Registration registration where registration.id = :registrationId")
+    Optional<UUID> findEventIdById(@Param("registrationId") UUID registrationId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select registration from Registration registration where registration.id = :registrationId")
+    Optional<Registration> findByIdForUpdate(@Param("registrationId") UUID registrationId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select registration from Registration registration where registration.eventId = :eventId")
+    List<Registration> findByEventIdForUpdate(@Param("eventId") UUID eventId);
 }

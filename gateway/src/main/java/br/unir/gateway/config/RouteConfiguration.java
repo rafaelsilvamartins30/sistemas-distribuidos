@@ -37,6 +37,8 @@ public class RouteConfiguration {
                 .route(RequestPredicates.POST("/api/v1/web/events/{eventId}/registrations"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/me/activities"), HandlerFunctions.http())
                 .route(RequestPredicates.DELETE("/api/v1/web/registrations/{registrationId}"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/attendance/me"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/attendance/check-ins"), HandlerFunctions.http())
                 .before(BeforeFilterFunctions.uri(this.webBffUrl)).build();
     }
 

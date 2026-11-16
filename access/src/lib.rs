@@ -3,6 +3,10 @@ use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
+pub mod attendance;
+pub mod auth;
+pub mod http_api;
+
 const DEFAULT_DB_URL: &str = "postgres://unir:unir-local-only@localhost:15436/unir_access";
 const DEFAULT_PORT: &str = "8080";
 const DB_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);

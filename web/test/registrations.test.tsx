@@ -15,6 +15,8 @@ const registration = {
   registeredAt: "2027-01-15T12:00:00Z",
   confirmedAt: "2027-01-15T12:00:00Z",
   cancelledAt: null,
+  paymentDeadlineAt: null,
+  reservationExpiresAt: null,
   event: {
     id: "10000000-0000-4000-8000-000000000001",
     title: "Encontro UNIR",
@@ -48,6 +50,27 @@ test("getMyRegistrations reads the authenticated activity endpoint", async () =>
   assert.equal(requestedUrl, "http://localhost:18084/api/v1/web/me/activities?page=0&size=100");
   assert.deepEqual(requestHeaders, { Authorization: "Bearer access-token" });
   assert.deepEqual(result.items, [registration]);
+});
+
+test("getMyRegistrations preserves the paid reservation deadlines", async () => {
+  const pending = {
+    ...registration,
+    status: "PENDING_PAYMENT" as const,
+    confirmedAt: null,
+    paymentDeadlineAt: "2027-01-15T12:10:00Z",
+    reservationExpiresAt: "2027-01-15T12:15:00Z",
+  };
+
+  const result = await getMyRegistrations("access-token", "http://localhost:18084", async () => {
+    return new Response(JSON.stringify({ items: [pending], page: 0, size: 100, totalElements: 1, totalPages: 1 }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+
+  assert.equal(result.items[0]?.status, "PENDING_PAYMENT");
+  assert.equal(result.items[0]?.paymentDeadlineAt, "2027-01-15T12:10:00Z");
+  assert.equal(result.items[0]?.reservationExpiresAt, "2027-01-15T12:15:00Z");
 });
 
 test("registerForEvent sends no identity payload and returns the persisted registration", async () => {

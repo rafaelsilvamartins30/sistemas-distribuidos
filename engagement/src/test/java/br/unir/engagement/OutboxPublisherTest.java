@@ -12,6 +12,9 @@ import static org.mockito.Mockito.when;
 
 import br.unir.engagement.config.RabbitMqConfiguration;
 import br.unir.engagement.dto.RegistrationPaymentRequestedPayload;
+import br.unir.engagement.dto.RegistrationConfirmedPayload;
+import br.unir.engagement.dto.EventCancelledPayload;
+import br.unir.engagement.dto.RegistrationCancelledByEventPayload;
 import br.unir.engagement.entity.OutboxEvent;
 import br.unir.engagement.repository.OutboxRepository;
 import br.unir.engagement.service.OutboxPublisher;
@@ -97,6 +100,77 @@ class OutboxPublisherTest {
 
         assertNull(event.getPublishedAt());
         verify(this.outboxRepository, never()).saveAndFlush(any(OutboxEvent.class));
+    }
+
+    @Test
+    void publishesRegistrationConfirmedToTheAccessRoutingKey() {
+        UUID registrationId = UUID.randomUUID();
+        OutboxEvent event = new OutboxEvent(UUID.randomUUID(), "Registration", registrationId,
+                RegistrationConfirmedPayload.EVENT_TYPE, """
+                        {"registrationId":"%s","eventId":"%s","userId":"keycloak-sub",
+                         "attendanceEnabled":true,"attendanceMode":"PARTICIPANT_SCANS_EVENT",
+                         "eventTitle":"Evento","startsAt":"2027-06-15T17:00:00Z",
+                         "endsAt":"2027-06-15T19:00:00Z"}
+                        """.formatted(registrationId, UUID.randomUUID()), Instant.parse("2026-11-16T15:00:00Z"));
+        when(this.outboxRepository.findTop50ByPublishedAtIsNullOrderByCreatedAtAsc()).thenReturn(List.of(event));
+        doAnswer(invocation -> {
+            CorrelationData correlation = invocation.getArgument(3);
+            correlation.getFuture().complete(new CorrelationData.Confirm(true, null));
+            return null;
+        }).when(this.rabbitTemplate).send(eq(RabbitMqConfiguration.EXCHANGE_NAME),
+                eq(RegistrationConfirmedPayload.ROUTING_KEY), any(Message.class), any(CorrelationData.class));
+
+        new OutboxPublisher(this.outboxRepository, this.rabbitTemplate, this.objectMapper).publishPendingEvents();
+
+        verify(this.rabbitTemplate).send(eq(RabbitMqConfiguration.EXCHANGE_NAME),
+                eq(RegistrationConfirmedPayload.ROUTING_KEY), any(Message.class), any(CorrelationData.class));
+        org.junit.jupiter.api.Assertions.assertNotNull(event.getPublishedAt());
+        verify(this.outboxRepository).saveAndFlush(event);
+    }
+
+    @Test
+    void publishesEventCancelledToTheAccessRoutingKey() {
+        UUID eventId = UUID.randomUUID();
+        OutboxEvent event = new OutboxEvent(UUID.randomUUID(), "Event", eventId, EventCancelledPayload.EVENT_TYPE,
+                "{\"eventId\":\"%s\",\"cancelledAt\":\"2026-11-16T15:00:00Z\"}".formatted(eventId),
+                Instant.parse("2026-11-16T15:00:00Z"));
+        when(this.outboxRepository.findTop50ByPublishedAtIsNullOrderByCreatedAtAsc()).thenReturn(List.of(event));
+        doAnswer(invocation -> {
+            CorrelationData correlation = invocation.getArgument(3);
+            correlation.getFuture().complete(new CorrelationData.Confirm(true, null));
+            return null;
+        }).when(this.rabbitTemplate).send(eq(RabbitMqConfiguration.EXCHANGE_NAME),
+                eq(EventCancelledPayload.ROUTING_KEY), any(Message.class), any(CorrelationData.class));
+
+        new OutboxPublisher(this.outboxRepository, this.rabbitTemplate, this.objectMapper).publishPendingEvents();
+
+        verify(this.rabbitTemplate).send(eq(RabbitMqConfiguration.EXCHANGE_NAME), eq(EventCancelledPayload.ROUTING_KEY),
+                any(Message.class), any(CorrelationData.class));
+        org.junit.jupiter.api.Assertions.assertNotNull(event.getPublishedAt());
+    }
+
+    @Test
+    void publishesRegistrationCancelledByEventToThePaymentRoutingKey() {
+        UUID registrationId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        OutboxEvent event = new OutboxEvent(UUID.randomUUID(), "Registration", registrationId,
+                RegistrationCancelledByEventPayload.EVENT_TYPE,
+                "{\"registrationId\":\"%s\",\"eventId\":\"%s\",\"userId\":\"keycloak-sub\",".formatted(registrationId,
+                        eventId) + "\"cancelledAt\":\"2026-11-16T15:00:00Z\"}",
+                Instant.parse("2026-11-16T15:00:00Z"));
+        when(this.outboxRepository.findTop50ByPublishedAtIsNullOrderByCreatedAtAsc()).thenReturn(List.of(event));
+        doAnswer(invocation -> {
+            CorrelationData correlation = invocation.getArgument(3);
+            correlation.getFuture().complete(new CorrelationData.Confirm(true, null));
+            return null;
+        }).when(this.rabbitTemplate).send(eq(RabbitMqConfiguration.EXCHANGE_NAME),
+                eq(RegistrationCancelledByEventPayload.ROUTING_KEY), any(Message.class), any(CorrelationData.class));
+
+        new OutboxPublisher(this.outboxRepository, this.rabbitTemplate, this.objectMapper).publishPendingEvents();
+
+        verify(this.rabbitTemplate).send(eq(RabbitMqConfiguration.EXCHANGE_NAME),
+                eq(RegistrationCancelledByEventPayload.ROUTING_KEY), any(Message.class), any(CorrelationData.class));
+        org.junit.jupiter.api.Assertions.assertNotNull(event.getPublishedAt());
     }
 
     private OutboxEvent outboxEvent() {

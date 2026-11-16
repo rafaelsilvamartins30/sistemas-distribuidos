@@ -180,6 +180,14 @@ public class Event {
         return this.status;
     }
 
+    /**
+     * Marks this event terminally cancelled; this entity exposes no reactivation
+     * operation.
+     */
+    public void cancel() {
+        this.status = EventStatus.CANCELLED;
+    }
+
     public Instant getCreatedAt() {
         return this.createdAt;
     }

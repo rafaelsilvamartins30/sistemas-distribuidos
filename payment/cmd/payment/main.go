@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -49,14 +50,20 @@ func run() error {
 
 	processor := payment.NewStore(db, payment.SimulatedPixProvider{})
 	consumer := payment.NewConsumer(rabbitURL(), processor, logger)
+	refundConsumer := payment.NewRefundConsumer(rabbitURL(), processor, logger)
+	cancellationConsumer := payment.NewRegistrationCancellationConsumer(rabbitURL(), processor, logger)
+	outboxPublisher := payment.NewOutboxPublisher(db, rabbitURL(), logger)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	go consumer.Run(ctx)
+	go refundConsumer.Run(ctx)
+	go cancellationConsumer.Run(ctx)
+	go outboxPublisher.Run(ctx)
 
 	port := envOr("PORT", "8080")
 	httpServer := &http.Server{
 		Addr:              ":" + port,
-		Handler:           server.NewHandler(db),
+		Handler:           server.NewHandlerWithSimulation(db, simulatedConfirmer(processor)),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	serverErrors := make(chan error, 1)
@@ -79,6 +86,15 @@ func run() error {
 		}
 		return fmt.Errorf("serve Payment HTTP: %w", err)
 	}
+}
+
+func simulatedConfirmer(store *payment.Store) server.SimulatedPaymentConfirmer {
+	environment := strings.ToLower(os.Getenv("PAYMENT_ENV"))
+	enabled := strings.EqualFold(os.Getenv("PAYMENT_SIMULATED_CONFIRMATION_ENABLED"), "true")
+	if enabled && (environment == "local" || environment == "test") {
+		return store
+	}
+	return nil
 }
 
 func rabbitURL() string {

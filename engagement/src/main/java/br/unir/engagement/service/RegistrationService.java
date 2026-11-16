@@ -1,6 +1,7 @@
 package br.unir.engagement.service;
 
 import br.unir.engagement.dto.RegistrationListResponse;
+import br.unir.engagement.dto.RegistrationConfirmedPayload;
 import br.unir.engagement.dto.RegistrationPaymentRequestedPayload;
 import br.unir.engagement.dto.RegistrationResponse;
 import br.unir.engagement.entity.Event;
@@ -91,6 +92,8 @@ public class RegistrationService {
         Registration saved = this.registrationRepository.saveAndFlush(registration);
         if (saved.getStatus() == RegistrationStatus.PENDING_PAYMENT) {
             this.createPaymentRequest(saved, event);
+        } else if (event.isAttendanceEnabled()) {
+            this.createRegistrationConfirmed(saved, event);
         }
         return RegistrationResponse.from(saved, event);
     }
@@ -160,6 +163,23 @@ public class RegistrationService {
             this.outboxRepository.saveAndFlush(outboxEvent);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Could not serialize RegistrationPaymentRequested v1", exception);
+        }
+    }
+
+    private void createRegistrationConfirmed(Registration registration, Event event) {
+        if (event.getAttendanceMode() == null) {
+            throw new IllegalStateException("attendanceEnabled event must define attendanceMode");
+        }
+        RegistrationConfirmedPayload payload = new RegistrationConfirmedPayload(registration.getId(), event.getId(),
+                registration.getUserId(), true, event.getAttendanceMode(), event.getTitle(), event.getStartsAt(),
+                event.getEndsAt());
+        try {
+            String payloadJson = this.objectMapper.writeValueAsString(payload);
+            OutboxEvent outboxEvent = new OutboxEvent(UUID.randomUUID(), "Registration", registration.getId(),
+                    RegistrationConfirmedPayload.EVENT_TYPE, payloadJson, registration.getConfirmedAt());
+            this.outboxRepository.saveAndFlush(outboxEvent);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Could not serialize RegistrationConfirmed v1", exception);
         }
     }
 

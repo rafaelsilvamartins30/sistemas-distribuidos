@@ -71,4 +71,26 @@ class RegistrationOutboxAtomicityTest {
         org.junit.jupiter.api.Assertions.assertEquals(0,
                 this.jdbcTemplate.queryForObject("select count(*) from outbox_events", Long.class));
     }
+
+    @Test
+    void registrationConfirmedOutboxFailureRollsBackFreeRegistration() throws Exception {
+        Instant now = Instant.now();
+        Instant startsAt = now.plusSeconds(86_400);
+        Event event = new Event(UUID.randomUUID(), "Evento gratuito", "Descrição", "UNIVERSITY", UUID.randomUUID(),
+                null, "Auditório", startsAt, startsAt.plusSeconds(3600), "ACADEMIC", 2, startsAt.minusSeconds(60),
+                RegistrationMode.INTERNAL_FREE, null, null, true,
+                br.unir.engagement.entity.AttendanceMode.PARTICIPANT_SCANS_EVENT, EventStatus.ACTIVE, now);
+        this.eventRepository.saveAndFlush(event);
+        when(this.outboxRepository.saveAndFlush(any(OutboxEvent.class)))
+                .thenThrow(new IllegalStateException("simulated outbox database failure"));
+
+        assertThrows(jakarta.servlet.ServletException.class,
+                () -> this.mockMvc.perform(post("/api/v1/events/{eventId}/registrations", event.getId())
+                        .with(jwt().jwt(token -> token.subject("keycloak-user"))
+                                .authorities(new SimpleGrantedAuthority("ROLE_USER")))));
+
+        org.junit.jupiter.api.Assertions.assertEquals(0, this.registrationRepository.count());
+        org.junit.jupiter.api.Assertions.assertEquals(0,
+                this.jdbcTemplate.queryForObject("select count(*) from outbox_events", Long.class));
+    }
 }

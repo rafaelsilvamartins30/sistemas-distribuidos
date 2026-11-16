@@ -6,7 +6,9 @@ import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
 import { SearchField } from "../components/SearchField";
 import { Section } from "../components/Section";
+import { ParticipantQrScanner } from "../components/ParticipantQrScanner";
 import { useEventList } from "../hooks/useEventList";
+import { AttendanceApiError, checkInWithEventQr, getMyAttendance, type MyAttendance } from "../services/attendance";
 import { EventApiError, getEvent, type Event } from "../services/events";
 import {
   cancelRegistration,
@@ -132,6 +134,10 @@ export function EventDetailPage() {
   const [registrationLoading, setRegistrationLoading] = useState(true);
   const [registrationBusy, setRegistrationBusy] = useState(false);
   const [registrationError, setRegistrationError] = useState<string | null>(null);
+  const [attendance, setAttendance] = useState<MyAttendance | null>(null);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [attendanceBusy, setAttendanceBusy] = useState(false);
+  const [attendanceError, setAttendanceError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -142,7 +148,7 @@ export function EventDetailPage() {
         if (!keycloak.token || !eventId) throw new Error("Evento indisponível.");
         const result = await getEvent(keycloak.token, eventId);
         if (active) setEvent(result);
-        if (result.registrationMode === "INTERNAL_FREE") {
+        if (result.registrationMode !== "EXTERNAL_PAID") {
           const page = await getMyRegistrations(keycloak.token);
           const ownRegistration = page.items.find((item) => item.eventId === result.id) ?? null;
           if (active) setRegistration(ownRegistration);
@@ -171,6 +177,43 @@ export function EventDetailPage() {
     };
   }, [eventId, keycloak]);
 
+  useEffect(() => {
+    let active = true;
+    if (!event?.attendanceEnabled || registration?.status !== "CONFIRMED" || !eventId) {
+      setAttendance(null);
+      setAttendanceLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+    const attendanceEventId = eventId;
+
+    async function loadAttendance() {
+      setAttendanceLoading(true);
+      setAttendanceError(null);
+      try {
+        await keycloak.updateToken(30);
+        if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+        const result = await getMyAttendance(keycloak.token, attendanceEventId);
+        if (active) setAttendance(result);
+      } catch (error) {
+        if (!active) return;
+        if (error instanceof AttendanceApiError && error.status === 404) {
+          setAttendance(null);
+        } else {
+          setAttendanceError("Não foi possível consultar sua presença. Tente novamente.");
+        }
+      } finally {
+        if (active) setAttendanceLoading(false);
+      }
+    }
+
+    void loadAttendance();
+    return () => {
+      active = false;
+    };
+  }, [event?.attendanceEnabled, eventId, keycloak, registration?.status]);
+
   async function handleRegister() {
     if (!event) return;
     setRegistrationBusy(true);
@@ -198,6 +241,57 @@ export function EventDetailPage() {
       setRegistrationError(registrationErrorMessage(error));
     } finally {
       setRegistrationBusy(false);
+    }
+  }
+
+  async function handleRefreshRegistration() {
+    if (!event) return;
+    setRegistrationBusy(true);
+    setRegistrationError(null);
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+      const page = await getMyRegistrations(keycloak.token);
+      setRegistration(page.items.find((item) => item.eventId === event.id) ?? null);
+    } catch (error) {
+      setRegistrationError(registrationErrorMessage(error));
+    } finally {
+      setRegistrationBusy(false);
+    }
+  }
+
+  async function handleCheckIn(qrToken: string) {
+    setAttendanceBusy(true);
+    setAttendanceError(null);
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+      const result = await checkInWithEventQr(keycloak.token, qrToken);
+      setAttendance((current) => (current ? { ...current, status: "ATTENDED", checkedAt: result.checkedAt } : current));
+    } catch (error) {
+      const detail = error instanceof AttendanceApiError ? error.detail : "Tente novamente mais tarde.";
+      setAttendanceError(`Não foi possível registrar sua presença: ${detail}`);
+    } finally {
+      setAttendanceBusy(false);
+    }
+  }
+
+  async function handleRefreshAttendance() {
+    if (!event || !keycloak.token) return;
+    setAttendanceLoading(true);
+    setAttendanceError(null);
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+      setAttendance(await getMyAttendance(keycloak.token, event.id));
+    } catch (error) {
+      if (error instanceof AttendanceApiError && error.status === 404) {
+        setAttendance(null);
+      } else {
+        setAttendanceError("Não foi possível atualizar sua presença.");
+      }
+    } finally {
+      setAttendanceLoading(false);
     }
   }
 
@@ -294,8 +388,8 @@ export function EventDetailPage() {
         <aside className="detail-aside-card">
           <section className="registration-action-panel" aria-labelledby="registration-action-title">
             <h2 id="registration-action-title">Minha inscrição</h2>
-            {event.registrationMode !== "INTERNAL_FREE" ? (
-              <p>Inscrições pagas não estão disponíveis nesta etapa.</p>
+            {event.registrationMode === "EXTERNAL_PAID" ? (
+              <p>Consulte as informações da organização externa para concluir sua inscrição.</p>
             ) : registrationLoading ? (
               <p role="status">Consultando sua inscrição…</p>
             ) : registration?.status === "CONFIRMED" ? (
@@ -304,7 +398,7 @@ export function EventDetailPage() {
                   Inscrição confirmada
                 </p>
                 <p>Confirmada em {dateTime(registration.confirmedAt ?? registration.registeredAt)}.</p>
-                {canCancel(registration) ? (
+                {event.registrationMode === "INTERNAL_FREE" && canCancel(registration) ? (
                   <button
                     className="button button-secondary"
                     type="button"
@@ -313,23 +407,55 @@ export function EventDetailPage() {
                   >
                     {registrationBusy ? "Cancelando…" : "Cancelar inscrição"}
                   </button>
-                ) : (
+                ) : event.registrationMode === "INTERNAL_FREE" ? (
                   <p>O prazo para cancelamento (24 horas antes do evento) terminou.</p>
+                ) : null}
+              </>
+            ) : registration?.status === "PENDING_PAYMENT" ? (
+              <>
+                <p className="registration-pending" role="status">
+                  Aguardando confirmação do pagamento.
+                </p>
+                {registration.paymentDeadlineAt && (
+                  <p>Prazo para pagamento: {dateTime(registration.paymentDeadlineAt)}.</p>
                 )}
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  disabled={registrationBusy}
+                  onClick={() => void handleRefreshRegistration()}
+                >
+                  {registrationBusy ? "Atualizando…" : "Atualizar status"}
+                </button>
               </>
             ) : (
               <>
                 {registration?.status === "CANCELLED_BY_USER" && (
                   <p role="status">Sua inscrição anterior foi cancelada.</p>
                 )}
-                <p>Inscreva-se gratuitamente usando sua conta UNIR.</p>
+                {registration?.status === "PAYMENT_EXPIRED" && (
+                  <p role="status">Sua reserva anterior expirou. Você pode tentar novamente.</p>
+                )}
+                {registration?.status === "PAYMENT_FAILED" && (
+                  <p role="status">O pagamento da tentativa anterior não foi concluído.</p>
+                )}
+                {registration?.status === "CANCELLED_BY_EVENT" && <p role="status">O evento cancelou sua inscrição.</p>}
+                <p>
+                  {event.registrationMode === "INTERNAL_FREE"
+                    ? "Inscreva-se gratuitamente usando sua conta UNIR."
+                    : `Reserve sua vaga por ${priceLabel(event)}. A cobrança Pix será simulada nesta etapa.`}
+                </p>
                 <button
                   className="button button-primary"
                   type="button"
                   disabled={registrationBusy || event.status !== "ACTIVE"}
                   onClick={() => void handleRegister()}
                 >
-                  {registrationBusy ? "Inscrevendo…" : "Inscrever-se gratuitamente"}
+                  {registrationBusy
+                    ? "Inscrevendo…"
+                    : event.registrationMode === "INTERNAL_FREE"
+                      ? "Inscrever-se gratuitamente"
+                      : "Reservar vaga paga"}
                 </button>
               </>
             )}
@@ -339,6 +465,52 @@ export function EventDetailPage() {
               </p>
             )}
           </section>
+          {event.attendanceEnabled && registration?.status === "CONFIRMED" && (
+            <section
+              className="registration-action-panel attendance-action-panel"
+              aria-labelledby="attendance-action-title"
+            >
+              <h2 id="attendance-action-title">Minha presença</h2>
+              {event.attendanceMode !== "PARTICIPANT_SCANS_EVENT" ? (
+                <p>Este evento utiliza validação de presença pela organização.</p>
+              ) : attendanceLoading ? (
+                <p role="status">Consultando sua elegibilidade…</p>
+              ) : attendance?.status === "ATTENDED" ? (
+                <p className="registration-confirmed" role="status">
+                  Presença confirmada{attendance.checkedAt ? ` em ${dateTime(attendance.checkedAt)}` : ""}.
+                </p>
+              ) : attendance?.status === "ELIGIBLE" ? (
+                <>
+                  <p>Escaneie o QR compartilhado do evento durante a atividade para registrar sua presença.</p>
+                  <p className="attendance-window">
+                    Janela: {dateTime(event.startsAt)} a {dateTime(event.endsAt)}.
+                  </p>
+                  <ParticipantQrScanner busy={attendanceBusy} onToken={(token) => void handleCheckIn(token)} />
+                </>
+              ) : attendance?.status === "CANCELLED" ? (
+                <p role="status">Sua elegibilidade para presença foi cancelada.</p>
+              ) : attendance?.status === "NO_SHOW" ? (
+                <p role="status">A presença foi encerrada e você consta como ausente.</p>
+              ) : (
+                <p role="status">Sua elegibilidade está sendo sincronizada. Atualize em instantes.</p>
+              )}
+              {event.attendanceMode === "PARTICIPANT_SCANS_EVENT" && attendance?.status !== "ATTENDED" && (
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  disabled={attendanceLoading || attendanceBusy}
+                  onClick={() => void handleRefreshAttendance()}
+                >
+                  Atualizar presença
+                </button>
+              )}
+              {attendanceError && (
+                <p className="notice notice-error" role="alert">
+                  {attendanceError}
+                </p>
+              )}
+            </section>
+          )}
           <span className="eyebrow">Evento</span>
           <p>Identificador do evento</p>
           <code>{event.id}</code>

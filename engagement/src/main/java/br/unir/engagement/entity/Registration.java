@@ -66,8 +66,18 @@ public class Registration {
         this.cancelledAt = cancelledAt;
     }
 
+    public void cancelByEvent(Instant cancelledAt) {
+        this.status = RegistrationStatus.CANCELLED_BY_EVENT;
+        this.cancelledAt = cancelledAt;
+    }
+
     public void expirePayment() {
         this.status = RegistrationStatus.PAYMENT_EXPIRED;
+    }
+
+    public void confirmPayment(Instant paidAt) {
+        this.status = RegistrationStatus.CONFIRMED;
+        this.confirmedAt = paidAt;
     }
 
     public UUID getId() {

@@ -46,6 +46,77 @@ test("GET /health returns 200", async (t) => {
   assert.deepEqual(response.json(), { status: "ok" });
 });
 
+test("attendance routes forward the JWT and preserve Access responses", async (t) => {
+  const token = "Bearer valid-access-token";
+  const attendance = {
+    eventId: "10000000-0000-4000-8000-000000000001",
+    status: "ELIGIBLE",
+    checkedAt: null,
+  };
+  const checkIn = {
+    checkInId: "30000000-0000-4000-8000-000000000001",
+    status: "ATTENDED",
+  };
+  let responseBody = attendance;
+  const server = createServer({
+    accessServiceUrl: "http://access:8080/",
+    fetch: async (url, options) => {
+      assert.equal(options.headers.authorization, token);
+      if (options.method === "GET") {
+        assert.equal(url, `http://access:8080/api/v1/attendance/me?eventId=${attendance.eventId}`);
+      } else {
+        assert.equal(url, "http://access:8080/api/v1/attendance/check-ins");
+        assert.equal(options.headers["content-type"], "application/json");
+        assert.deepEqual(JSON.parse(options.body), { token: "opaque-qr-token" });
+      }
+      return new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  t.after(() => server.close());
+
+  const query = await server.inject({
+    method: "GET",
+    url: `/api/v1/web/attendance/me?eventId=${attendance.eventId}`,
+    headers: { authorization: token },
+  });
+  assert.equal(query.statusCode, 200);
+  assert.deepEqual(query.json(), attendance);
+
+  responseBody = checkIn;
+  const result = await server.inject({
+    method: "POST",
+    url: "/api/v1/web/attendance/check-ins",
+    headers: { authorization: token, "content-type": "application/json" },
+    payload: { token: "opaque-qr-token" },
+  });
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(result.json(), checkIn);
+});
+
+test("attendance routes require a bearer token and report Access outages", async (t) => {
+  const server = createServer({
+    fetch: async () => {
+      throw new Error("Access unavailable");
+    },
+  });
+  t.after(() => server.close());
+
+  const unauthorized = await server.inject({ method: "GET", url: "/api/v1/web/attendance/me?eventId=event-1" });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const unavailable = await server.inject({
+    method: "POST",
+    url: "/api/v1/web/attendance/check-ins",
+    headers: { authorization: "Bearer token" },
+    payload: { token: "opaque-qr-token" },
+  });
+  assert.equal(unavailable.statusCode, 503);
+  assert.deepEqual(unavailable.json(), { error: "Access Service unavailable" });
+});
+
 test("GET /api/v1/me forwards the JWT to Campus and returns its response", async (t) => {
   const token = "Bearer eyJhbGciOiJIUzI1NiJ9.test.signature";
   const server = createServer({
