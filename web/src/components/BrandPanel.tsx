@@ -11,7 +11,7 @@ export function BrandPanel() {
       <div className="brand-message">
         <p className="eyebrow">University Network for Integration and Relationships</p>
         <h1>Conexões que transformam a vida universitária.</h1>
-        <p>Encontre pessoas, comunidades e oportunidades em um só lugar.</p>
+        <p>Descubra eventos, consulte espaços e acompanhe sua trajetória universitária.</p>
       </div>
       <span className="panel-caption">UNIR · Plataforma universitária</span>
     </section>

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { Icon } from "../components/Icon";
-import { isStandaloneFrontendPreview } from "../dev/frontendPreview";
 import {
   endMySession,
   formatSessionDate,
@@ -35,7 +34,6 @@ export function SecurityPage() {
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [sessionsError, setSessionsError] = useState("");
   const [revoking, setRevoking] = useState("");
-  const [previewAction, setPreviewAction] = useState("");
 
   async function loadSecurityData() {
     setTotpStatus("loading");
@@ -63,15 +61,6 @@ export function SecurityPage() {
   }, [keycloak]);
 
   function startAction(action: "CONFIGURE_TOTP" | "UPDATE_PASSWORD" | "UPDATE_EMAIL") {
-    if (isStandaloneFrontendPreview()) {
-      const actionLabels = {
-        CONFIGURE_TOTP: "Configuração do autenticador",
-        UPDATE_PASSWORD: "Troca de senha",
-        UPDATE_EMAIL: "Troca de e-mail",
-      };
-      setPreviewAction(`${actionLabels[action]}: aqui abriria a etapa segura do Keycloak.`);
-      return;
-    }
     const redirectUri = `${window.location.origin}/seguranca`;
     const requiresFreshAuthentication = action === "UPDATE_PASSWORD" || action === "UPDATE_EMAIL";
     void keycloak.login({
@@ -197,11 +186,6 @@ export function SecurityPage() {
         </section>
       </div>
 
-      {previewAction && (
-        <p className="notice" role="status">
-          {previewAction}
-        </p>
-      )}
       {totpStatus === "missing" && (
         <p className="notice">
           Sem 2FA, a troca pede apenas sua senha. Configure o autenticador para exigir também o código.

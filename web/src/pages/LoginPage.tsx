@@ -20,9 +20,9 @@ export function LoginPage({ keycloak }: LoginPageProps) {
         <div className="content-card login-card">
           <p className="eyebrow">Bem-vindo</p>
           <h2 id="login-title">Acesse a UNIR</h2>
-          <p>Entre com seu e-mail e senha ou crie sua conta para continuar.</p>
+          <p>Use suas credenciais institucionais para continuar com segurança.</p>
           <button className="button button-primary" onClick={() => void keycloak.login({ redirectUri: homeUrl })}>
-            Entrar
+            Entrar na UNIR
           </button>
           <button className="button button-secondary" onClick={() => void keycloak.register({ redirectUri: homeUrl })}>
             Criar conta

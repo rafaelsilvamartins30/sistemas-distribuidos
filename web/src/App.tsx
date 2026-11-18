@@ -4,7 +4,6 @@ import { AppearanceProvider } from "./contexts/AppearanceContext";
 import { AccountLayout } from "./layouts/AccountLayout";
 import { MainLayout } from "./layouts/MainLayout";
 import { AppearancePage } from "./pages/AppearancePage";
-import { AdminPage } from "./pages/AdminPage";
 import { CommunitiesPage } from "./pages/CommunitiesPage";
 import { EntitiesPage, EntityDetailPage } from "./pages/EntitiesPage";
 import { EventDetailPage, EventsPage } from "./pages/EventsPage";
@@ -46,16 +45,16 @@ export function App({ keycloak }: AppProps) {
             <Route path="/eventos/:eventId" element={<EventDetailPage />} />
             <Route path="/esportes" element={<SportsPage />} />
             <Route path="/oportunidades" element={<OpportunitiesPage />} />
-            <Route path="/me" element={<MySpacePage />} />
-            <Route path="/my-registrations" element={<MySpacePage initialSection="Inscrições" />} />
-            <Route path="/admin" element={<AdminPage />} />
-          </Route>
-          <Route
-            element={keycloak.authenticated ? <AccountLayout keycloak={keycloak} /> : <Navigate to="/login" replace />}
-          >
-            <Route path="/perfil" element={<ProfilePage />} />
-            <Route path="/seguranca" element={<SecurityPage />} />
-            <Route path="/aparencia" element={<AppearancePage />} />
+            <Route path="/me" element={<Navigate to="/perfil" replace />} />
+            <Route path="/my-registrations" element={<MySpacePage />} />
+            <Route path="/perfil" element={<AccountLayout keycloak={keycloak} />}>
+              <Route index element={<ProfilePage />} />
+              <Route path="seguranca" element={<SecurityPage />} />
+              <Route path="aparencia" element={<AppearancePage />} />
+            </Route>
+            <Route path="/seguranca" element={<Navigate to="/perfil/seguranca" replace />} />
+            <Route path="/aparencia" element={<Navigate to="/perfil/aparencia" replace />} />
+            <Route path="/admin" element={<Navigate to="/" replace />} />
           </Route>
           <Route path="*" element={<Navigate to={keycloak.authenticated ? "/" : "/login"} replace />} />
         </Routes>

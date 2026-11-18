@@ -81,12 +81,17 @@ export function EventsPage() {
   }, [events, query]);
 
   return (
-    <div className="browse-page">
-      <PageHeader
-        eyebrow="A vida acontece junto"
-        title="Eventos"
-        description="Encontre atividades da universidade e saiba quem organiza, quando acontece e como participar."
-      />
+    <div className="browse-page events-page">
+      <div className="events-page-heading">
+        <PageHeader
+          eyebrow="Agenda oficial e comunidades"
+          title="Eventos & encontros universitários"
+          description="Acompanhe atividades publicadas no Campus e consulte as informações de inscrição."
+        />
+        <Link className="button button-secondary" to="/my-registrations">
+          <Icon name="calendar" width="16" height="16" /> Minhas inscrições
+        </Link>
+      </div>
 
       <div className="page-search-toolbar" role="search" aria-label="Buscar eventos">
         <SearchField

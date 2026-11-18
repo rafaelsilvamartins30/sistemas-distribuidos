@@ -1,5 +1,3 @@
-import { isStandaloneFrontendPreview } from "../dev/frontendPreview";
-
 export type AffiliationStatus = "STUDENT" | "PROFESSOR" | "ALUMNI";
 export type AcademicLevel = "UNDERGRADUATE" | "MASTERS" | "DOCTORATE";
 
@@ -44,19 +42,7 @@ export class UserProfileApiError extends Error {
   }
 }
 
-const gatewayUrl = import.meta.env.VITE_GATEWAY_URL;
-let previewProfile: UserProfile | null = {
-  id: "local-preview-profile",
-  name: "Rafael Silva Martins",
-  institutionalId: "202420228",
-  affiliationStatus: "STUDENT",
-  academicLevel: "UNDERGRADUATE",
-  course: "Sistemas de Informação",
-  department: "Departamento de Ciência da Computação",
-  interests: ["Engenharia de Software", "Segurança de Software"],
-  createdAt: "2026-10-14T12:00:00.000Z",
-  updatedAt: "2026-10-14T12:00:00.000Z",
-};
+const gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "";
 
 async function requestProfile(token: string, path: string, method = "GET", body?: object): Promise<UserProfile> {
   const response = await fetch(`${gatewayUrl}${path}`, {
@@ -76,7 +62,6 @@ async function requestProfile(token: string, path: string, method = "GET", body?
 }
 
 export async function getMyProfile(token: string): Promise<UserProfile | null> {
-  if (isStandaloneFrontendPreview()) return previewProfile;
   try {
     return await requestProfile(token, "/api/v1/me");
   } catch (error) {
@@ -88,23 +73,9 @@ export async function getMyProfile(token: string): Promise<UserProfile | null> {
 }
 
 export function createMyProfile(token: string, input: CreateProfileInput): Promise<UserProfile> {
-  if (isStandaloneFrontendPreview()) {
-    previewProfile = {
-      ...input,
-      id: "local-preview-profile",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    return Promise.resolve(previewProfile);
-  }
   return requestProfile(token, "/api/v1/users", "POST", input);
 }
 
 export function updateMyProfile(token: string, input: UpdateProfileInput): Promise<UserProfile> {
-  if (isStandaloneFrontendPreview()) {
-    if (!previewProfile) return Promise.reject(new Error("Crie o perfil antes de alterá-lo."));
-    previewProfile = { ...previewProfile, ...input, updatedAt: new Date().toISOString() };
-    return Promise.resolve(previewProfile);
-  }
   return requestProfile(token, "/api/v1/me", "PATCH", input);
 }

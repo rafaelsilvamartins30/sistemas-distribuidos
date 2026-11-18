@@ -15,7 +15,7 @@ interface AppearanceContextValue extends AppearanceSettings {
 
 const storageKey = "unir.appearance";
 const keycloakCookieKey = "unir-keycloak-appearance";
-const defaults: AppearanceSettings = { mode: "light", palette: "green" };
+const defaults: AppearanceSettings = { mode: "light", palette: "blue" };
 const AppearanceContext = createContext<AppearanceContextValue | null>(null);
 
 function readSettings(): AppearanceSettings {
@@ -32,7 +32,7 @@ function readSettings(): AppearanceSettings {
             ? "violet"
             : parsed.palette === "ember" || parsed.palette === "amber"
               ? "ember"
-              : "green",
+              : "blue",
     };
   } catch {
     return defaults;

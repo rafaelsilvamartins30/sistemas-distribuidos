@@ -1,5 +1,4 @@
 import type Keycloak from "keycloak-js";
-import { isStandaloneFrontendPreview } from "../dev/frontendPreview";
 
 export interface KeycloakSession {
   id: string;
@@ -31,17 +30,6 @@ export class KeycloakAccountError extends Error {
   }
 }
 
-let previewSessions: KeycloakSession[] = [
-  {
-    id: "local-current-session",
-    ipAddress: "Dispositivo local de desenvolvimento",
-    started: Date.now() - 45 * 60_000,
-    lastAccess: Date.now(),
-    current: true,
-    clients: ["UNIR"],
-  },
-];
-
 async function accountRequest<T>(keycloak: Keycloak, path: string, method = "GET"): Promise<T> {
   await keycloak.updateToken(30);
   if (!keycloak.token) throw new Error("Token de acesso indisponível.");
@@ -63,7 +51,6 @@ async function accountRequest<T>(keycloak: Keycloak, path: string, method = "GET
 }
 
 export function getMySessions(keycloak: Keycloak): Promise<KeycloakSession[]> {
-  if (isStandaloneFrontendPreview()) return Promise.resolve(previewSessions);
   return accountRequest<KeycloakSession[]>(keycloak, "/sessions").then((sessions) => {
     if (!Array.isArray(sessions)) throw new Error("A lista de sessões retornada pelo Keycloak não é válida.");
     return sessions;
@@ -71,15 +58,10 @@ export function getMySessions(keycloak: Keycloak): Promise<KeycloakSession[]> {
 }
 
 export function endMySession(keycloak: Keycloak, sessionId: string): Promise<void> {
-  if (isStandaloneFrontendPreview()) {
-    previewSessions = previewSessions.filter((session) => session.id !== sessionId);
-    return Promise.resolve();
-  }
   return accountRequest<void>(keycloak, `/sessions/${encodeURIComponent(sessionId)}`, "DELETE");
 }
 
 export async function hasTotpCredential(keycloak: Keycloak): Promise<boolean> {
-  if (isStandaloneFrontendPreview()) return false;
   const credentials = await accountRequest<KeycloakCredential[]>(keycloak, "/credentials?user-credentials=true");
   if (!Array.isArray(credentials)) throw new Error("A lista de credenciais retornada pelo Keycloak não é válida.");
   return credentials.some(

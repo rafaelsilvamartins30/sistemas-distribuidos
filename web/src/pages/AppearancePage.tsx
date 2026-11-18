@@ -2,8 +2,8 @@ import { Icon } from "../components/Icon";
 import { useAppearance, type ColorMode, type ColorPalette } from "../contexts/AppearanceContext";
 
 const palettes: { id: ColorPalette; name: string; description: string }[] = [
-  { id: "green", name: "Floresta", description: "Verde UNIR" },
-  { id: "blue", name: "Oceano", description: "Azul sereno" },
+  { id: "green", name: "Floresta", description: "Verde sereno" },
+  { id: "blue", name: "UNIR", description: "Azul institucional" },
   { id: "violet", name: "Lavanda", description: "Violeta suave" },
   { id: "ember", name: "Brasa", description: "Vermelho intenso" },
 ];

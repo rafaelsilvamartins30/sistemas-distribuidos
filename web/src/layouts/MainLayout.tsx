@@ -9,21 +9,14 @@ interface MainLayoutProps {
 }
 
 const mainNavigation: { to: string; label: string; icon: IconName }[] = [
-  { to: "/", label: "Início", icon: "sun" },
-  { to: "/comunidades", label: "Comunidades", icon: "communities" },
-  { to: "/departamentos", label: "Departamentos", icon: "profile" },
-  { to: "/entidades", label: "Entidades", icon: "profile" },
+  { to: "/", label: "Publicações", icon: "message" },
   { to: "/eventos", label: "Eventos", icon: "calendar" },
-  { to: "/esportes", label: "Esportes", icon: "opportunity" },
-  { to: "/oportunidades", label: "Oportunidades", icon: "bookmark" },
-  { to: "/me", label: "Meu espaço", icon: "profile" },
-  { to: "/admin", label: "Administração", icon: "shield" },
+  { to: "/oportunidades", label: "Oportunidades", icon: "opportunity" },
+  { to: "/esportes", label: "Esportes", icon: "calendar" },
 ];
 
 function isCurrentPage(pathname: string, destination: string) {
   if (destination === "/") return pathname === "/";
-  if (destination === "/me" && pathname === "/my-registrations") return true;
-  if (destination === "/comunidades" && pathname.startsWith("/espacos/")) return true;
   return pathname === destination || pathname.startsWith(`${destination}/`);
 }
 
@@ -35,14 +28,12 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
   const initial = (name.trim()[0] || "U").toLocaleUpperCase("pt-BR");
 
   useEffect(() => {
-    if (location.pathname !== "/login" && !["/perfil", "/seguranca", "/aparencia"].includes(location.pathname)) {
-      sessionStorage.setItem("unir.lastMainPath", `${location.pathname}${location.hash}`);
-    }
-  }, [location.pathname, location.hash]);
-
-  useEffect(() => {
     const section = mainNavigation.find((item) => isCurrentPage(location.pathname, item.to));
-    const label = section?.label ?? (location.pathname.startsWith("/entidades/") ? "Entidade" : "Início");
+    const label = location.pathname.startsWith("/perfil")
+      ? "Minha conta"
+      : location.pathname.startsWith("/my-registrations")
+        ? "Minhas inscrições"
+        : (section?.label ?? "Campus");
     document.title = `UNIR — ${label}`;
   }, [location.pathname]);
 
@@ -62,7 +53,10 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
           <div className="product-topbar-inner">
             <Link className="product-brand" to="/" aria-label="UNIR, início">
               <BrandMark />
-              <span>UNIR</span>
+              <span className="product-brand-copy">
+                <strong>UNIR</strong>
+                <small>UFRJ · CAMPUS CENTRAL</small>
+              </span>
             </Link>
             <nav ref={navigationRef} className="product-nav" aria-label="Navegação principal">
               {mainNavigation.map((item) => (
@@ -93,16 +87,10 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
                   {email && <span>{email}</span>}
                 </div>
                 <Link to="/perfil">
-                  <Icon name="profile" width="17" height="17" /> Minha conta
+                  <Icon name="profile" width="17" height="17" /> Meu perfil
                 </Link>
-                <Link to="/me">
-                  <Icon name="communities" width="17" height="17" /> Meu espaço
-                </Link>
-                <Link to="/seguranca">
-                  <Icon name="shield" width="17" height="17" /> Segurança
-                </Link>
-                <Link to="/aparencia">
-                  <Icon name="palette" width="17" height="17" /> Aparência
+                <Link to="/my-registrations">
+                  <Icon name="calendar" width="17" height="17" /> Minhas inscrições
                 </Link>
                 <button onClick={() => void keycloak.logout({ redirectUri: `${window.location.origin}/login` })}>
                   <Icon name="logout" width="17" height="17" /> Sair
