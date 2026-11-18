@@ -4,9 +4,16 @@ Serviço de domínio responsável por atividades/eventos, inscrições e process
 
 ## Endpoints
 
+The Sports catalog is documented in [`docs/contracts/sports-v1.md`](../docs/contracts/sports-v1.md). Migration `V11__create_sports_catalog.sql` adds Sport, Competition, and Season; the endpoints are read-only and do not expose organizer management.
+
 - `GET /health` verifica a conectividade com o banco PostgreSQL próprio (`unir_engagement`) e retorna `200`.
 - `GET /api/v1/events?page=0&size=20` lista eventos ativos em ordem de início, no envelope paginado compartilhado. Eventos pagos externos com prazo encerrado não aparecem na descoberta; eventos cancelados não aparecem na listagem.
 - `GET /api/v1/events/{eventId}` retorna os detalhes de um evento persistido (inclusive cancelado) ou `404`.
+- `GET /api/v1/opportunities?page=0&size=20` lista oportunidades ativas em ordem de publicação, com filtros opcionais `q`, `category` e `publisherType`. A página aceita de 1 a 100 itens; `publisherType` aceita `PROFESSOR`, `DEPARTMENT` ou `ACADEMIC_ENTITY`. O prazo encerrado ou status diferente de `ACTIVE` remove o registro da lista.
+- `GET /api/v1/opportunities/{opportunityId}` retorna detalhes persistidos inclusive após o prazo ou mudança de status, preservando o histórico consultável. O modelo e as regras estão em [`docs/contracts/opportunities-v1.md`](../docs/contracts/opportunities-v1.md).
+- `GET /api/v1/opportunities/publisher-contexts` consulta no Campus, com o token original do usuário, os contextos de publicação disponíveis.
+- `POST /api/v1/opportunities` publica em um contexto retornado pelo Campus. Engagement confere novamente `publisherType` e `publisherId`, gera `id`, `createdAt` e `ACTIVE`, e falha fechado se Campus estiver indisponível. `COMMUNITY` é proibida. Não há candidatura interna.
+- A autorização de departamento/entidade vem dos vínculos mantidos pelo Campus; a autorização docente exige `ProfessorAffiliation` `ACTIVE`, criada após aprovação de administrador do departamento. `user_type` autodeclarado não autoriza publicação.
 - `POST /api/v1/events/{eventId}/registrations` inscreve o titular do JWT em evento `INTERNAL_FREE` (`201`, `CONFIRMED`) ou reserva vaga de evento `INTERNAL_PAID` (`201`, `PENDING_PAYMENT`). A reserva paga expõe `paymentDeadlineAt` (10 minutos) e `reservationExpiresAt` (15 minutos), com `RegistrationPaymentRequested` gravado no Outbox na mesma transação. Evento cancelado, prazo encerrado, modalidade não suportada, duplicidade ativa, lotação ou preço não configurado retornam `409`.
 - `GET /api/v1/registrations/me?page=0&size=20` lista as inscrições do `sub` autenticado, incluindo os dados do evento e o histórico de cancelamento.
 - `DELETE /api/v1/registrations/{registrationId}` realiza cancelamento lógico de inscrição gratuita até 24 horas antes do início. O registro permanece no banco com `CANCELLED_BY_USER` e `cancelledAt`; nenhum registro é apagado.
@@ -19,14 +26,17 @@ Serviço de domínio responsável por atividades/eventos, inscrições e process
 ## Ambiente local
 
 No `compose.yaml`, `engagement` expõe a porta `18085` (`ENGAGEMENT_PORT`), conecta ao banco `engagement-db` (`unir_engagement`, porta `15434`) e publica pelo RabbitMQ interno `rabbitmq` (`unir.events`). O broker não expõe porta no host e usa o volume `rabbitmq_data`.
+O Compose aponta `CAMPUS_URL` para `http://campus:3000`; fora do Compose, o padrão local é `http://localhost:3000`.
 
-Para carregar os dois eventos locais determinísticos, com o banco do Compose já iniciado e a migration aplicada:
+Para carregar os exemplos determinísticos locais, com o banco do Compose já iniciado e as migrations aplicadas:
 
 ```sh
 docker compose exec -T engagement-db psql -v ON_ERROR_STOP=1 -U unir -d unir_engagement < engagement/seed/local-events.sql
+docker compose exec -T engagement-db psql -v ON_ERROR_STOP=1 -U unir -d unir_engagement < engagement/seed/local-opportunities.sql
+docker compose exec -T engagement-db psql -v ON_ERROR_STOP=1 -U unir -d unir_engagement < engagement/seed/local-sports.sql
 ```
 
-O seed usa IDs fixos e `ON CONFLICT DO NOTHING`, portanto pode ser repetido sem sobrescrever ou remover dados existentes.
+Os seeds usam IDs fixos e `ON CONFLICT DO NOTHING`, portanto podem ser repetidos sem sobrescrever ou remover dados existentes. Os links das oportunidades são domínios de demonstração `example.org`, não editais reais.
 
 ## Qualidade
 

@@ -11,6 +11,9 @@ class UsersController < ApplicationController
   def create
     payload = load_payload(CREATE_FIELDS)
     return unless payload
+    unless valid_department_catalog?(payload, required: true)
+      return render_problem(:bad_request, 'department must match an existing Campus department')
+    end
 
     profile = UserProfile.new(create_attributes(payload, current_subject))
     return render(json: profile_response(profile), status: :created) if profile.save
@@ -30,6 +33,9 @@ class UsersController < ApplicationController
   def update_me
     payload = load_payload(UPDATE_FIELDS)
     return unless payload
+    unless valid_department_catalog?(payload, required: false)
+      return render_problem(:bad_request, 'department must match an existing Campus department')
+    end
 
     profile = find_my_profile
     return unless profile
@@ -37,7 +43,7 @@ class UsersController < ApplicationController
     profile.assign_attributes(profile_update_attributes(payload))
     return render(json: profile_response(profile, include_token_claims: true)) if profile.save
 
-    render_invalid_profile(profile)
+    render_save_error(profile)
   end
 
   private
@@ -57,6 +63,12 @@ class UsersController < ApplicationController
     UserProfile.find_by(keycloak_user_id: current_subject).tap do |profile|
       render_problem(:not_found, 'UNIR user not found') unless profile
     end
+  end
+
+  def valid_department_catalog?(payload, required:)
+    return true unless required || payload.key?('department')
+
+    Department.exists?(name: payload['department'])
   end
 
   def current_subject

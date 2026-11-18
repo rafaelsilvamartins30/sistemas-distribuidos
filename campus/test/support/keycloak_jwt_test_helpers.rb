@@ -9,6 +9,8 @@ module KeycloakJwtTestHelpers
 
   def setup
     super
+    InstitutionalRequest.delete_all
+    ProfessorAffiliation.delete_all
     UserProfile.delete_all
     ENV['KEYCLOAK_ISSUER_URI'] = ISSUER
     ENV['KEYCLOAK_JWK_SET_URI'] = 'http://keycloak.test/certs'
@@ -21,12 +23,13 @@ module KeycloakJwtTestHelpers
       affiliationStatus: 'STUDENT',
       academicLevel: 'UNDERGRADUATE',
       course: 'Computação',
-      department: 'Tecnologia',
+      department: 'Departamento de Ciência da Computação',
       interests: ['Sistemas distribuídos']
     }
   end
 
   def create_profile(subject: SUBJECT, institutional_id: '12345')
+    ensure_profile_department!
     with_jwks do
       post '/users',
            params: valid_profile.merge(institutionalId: institutional_id),
@@ -34,6 +37,16 @@ module KeycloakJwtTestHelpers
            as: :json
     end
     assert_response :created
+  end
+
+  def ensure_profile_department!
+    Department.find_or_create_by!(name: valid_profile.fetch(:department)) do |department|
+      department.acronym = 'DCC'
+      department.description = 'Departamento de teste.'
+      department.general_info_markdown = 'Informações de teste.'
+      department.links = []
+      department.administrator_user_ids = []
+    end
   end
 
   def bearer_headers(subject: SUBJECT, email: 'ana@unir.br', issuer: ISSUER, expires_at: 5.minutes.from_now)

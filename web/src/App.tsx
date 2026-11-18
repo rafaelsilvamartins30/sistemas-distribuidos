@@ -11,10 +11,11 @@ import { DepartmentDetailPage, DepartmentsPage } from "./pages/DepartmentsPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { MySpacePage } from "./pages/MySpacePage";
-import { OpportunitiesPage } from "./pages/OpportunitiesPage";
+import { OpportunityDetailPage, OpportunitiesPage } from "./pages/OpportunitiesPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { SecurityPage } from "./pages/SecurityPage";
 import { SportsPage } from "./pages/SportsPage";
+import { SportsDetailPage } from "./pages/SportsDetailPage";
 
 interface AppProps {
   keycloak: Keycloak;
@@ -44,7 +45,11 @@ export function App({ keycloak }: AppProps) {
             <Route path="/eventos" element={<EventsPage />} />
             <Route path="/eventos/:eventId" element={<EventDetailPage />} />
             <Route path="/esportes" element={<SportsPage />} />
+            <Route path="/esportes/modalidades/:sportId" element={<SportsDetailPage kind="sport" />} />
+            <Route path="/esportes/campeonatos/:competitionId" element={<SportsDetailPage kind="competition" />} />
+            <Route path="/esportes/temporadas/:seasonId" element={<SportsDetailPage kind="season" />} />
             <Route path="/oportunidades" element={<OpportunitiesPage />} />
+            <Route path="/oportunidades/:opportunityId" element={<OpportunityDetailPage />} />
             <Route path="/me" element={<Navigate to="/perfil" replace />} />
             <Route path="/my-registrations" element={<MySpacePage />} />
             <Route path="/perfil" element={<AccountLayout keycloak={keycloak} />}>

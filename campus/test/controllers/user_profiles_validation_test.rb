@@ -40,14 +40,23 @@ class UserProfilesValidationTest < ActionDispatch::IntegrationTest
     assert_equal 0, UserProfile.count
   end
 
-  test 'rejects changes to identity fields' do
+  test 'allows updating the institutional identifier but keeps it unique' do
     create_profile
+    create_profile(subject: 'another-user', institutional_id: '67890')
+
+    with_jwks do
+      patch '/users/me', params: { institutionalId: 'siape-987' }, headers: bearer_headers, as: :json
+    end
+    assert_response :success
+    assert_equal 'siape-987', response.parsed_body.fetch('institutionalId')
+    assert_equal 'siape-987', UserProfile.find_by!(keycloak_user_id: SUBJECT).registration_code
+
     with_jwks do
       patch '/users/me', params: { institutionalId: '67890' }, headers: bearer_headers, as: :json
     end
-
-    assert_response :bad_request
-    assert_equal '12345', UserProfile.sole.registration_code
+    assert_response :conflict
+    assert_equal 'Institutional ID already exists', response.parsed_body.fetch('detail')
+    assert_equal 'siape-987', UserProfile.find_by!(keycloak_user_id: SUBJECT).registration_code
   end
 
   test 'stores no email, password, or role data' do

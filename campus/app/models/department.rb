@@ -3,11 +3,20 @@
 # Departments are scoped to the single University record; external user IDs are not foreign keys.
 class Department < ApplicationRecord
   has_many :academic_entities, dependent: :restrict_with_error
+  has_many :institutional_requests,
+           foreign_key: :target_department_id,
+           dependent: :restrict_with_error,
+           inverse_of: :target_department
+  has_many :professor_affiliations, dependent: :restrict_with_error, inverse_of: :department
 
   before_validation :assign_id, on: :create
 
   validates :name, :acronym, :description, :general_info_markdown, presence: true
   validate :list_fields_must_be_arrays
+
+  def administered_by?(user_id)
+    administrator_user_ids.include?(user_id)
+  end
 
   private
 

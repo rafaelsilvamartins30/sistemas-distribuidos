@@ -4,7 +4,7 @@ module UserProfiles
   # Keeps Campus responses compatible with the existing public profile contract.
   module ApiContract
     CREATE_FIELDS = %w[name institutionalId affiliationStatus academicLevel course department interests].freeze
-    UPDATE_FIELDS = %w[name affiliationStatus academicLevel course department interests].freeze
+    UPDATE_FIELDS = %w[name institutionalId affiliationStatus academicLevel course department interests].freeze
     STRING_FIELDS = %w[name institutionalId affiliationStatus academicLevel course department].freeze
     LEGACY_AFFILIATION_STATUSES = %w[STUDENT PROFESSOR ALUMNI].freeze
     LEGACY_ACADEMIC_LEVELS = %w[UNDERGRADUATE MASTERS DOCTORATE].freeze
@@ -15,6 +15,7 @@ module UserProfiles
     }.freeze
     CAMPUS_TO_LEGACY_ACADEMIC_LEVEL = LEGACY_TO_CAMPUS_ACADEMIC_LEVEL.invert.freeze
     PROFILE_FIELD_NAMES = {
+      'institutionalId' => 'registration_code',
       'affiliationStatus' => 'legacy_affiliation_status',
       'academicLevel' => 'academic_level'
     }.freeze

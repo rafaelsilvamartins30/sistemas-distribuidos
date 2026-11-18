@@ -20,7 +20,9 @@ O serviço e seu banco não publicam portas no host, e o Campus não habilita CO
 
 O contrato HTTP preserva os nomes e enums públicos existentes: `institutionalId`, `affiliationStatus` (`STUDENT`, `PROFESSOR`, `ALUMNI`), `academicLevel` (`UNDERGRADUATE`, `MASTERS`, `DOCTORATE`), `course`, `department` e `interests`. O `id` retornado é o `sub`; o UUID interno do registro é separado, e `keycloak_user_id` tem unicidade no banco.
 
-O armazenamento segue o vocabulário de Campus onde a conversão é direta: `institutionalId` é persistido como `registration_code`; os níveis são guardados como `UNDERGRAD`, `MASTER` e `PHD`, mantendo a tradução de ida e volta para o contrato HTTP. `legacy_affiliation_status` preserva os estados públicos que ainda não possuem equivalente interno. `STUDENT` e `PROFESSOR` também preenchem `user_type`; `ALUMNI` permanece sem conversão para `STAFF` até uma decisão de domínio. O campo `department` do perfil permanece texto e não é convertido nesta leva. `email` vem do JWT e bio/avatar não fazem parte do contrato atual.
+O armazenamento segue o vocabulário de Campus onde a conversão é direta: `institutionalId` é persistido como `registration_code`; os níveis são guardados como `UNDERGRAD`, `MASTER` e `PHD`, mantendo a tradução de ida e volta para o contrato HTTP. `legacy_affiliation_status` preserva os estados públicos que ainda não possuem equivalente interno. `STUDENT` e `PROFESSOR` também preenchem `user_type`; `ALUMNI` permanece sem conversão para `STAFF` até uma decisão de domínio. O campo `department` permanece texto por compatibilidade, mas criação e alteração devem usar o nome de um Department cadastrado no Campus. O curso continua sendo texto até existir um catálogo de cursos aprovado. `email` vem do JWT e bio/avatar não fazem parte do contrato atual.
+
+`PATCH /users/me` aceita atualizar `institutionalId`, mantendo a unicidade de `registration_code`. Esse identificador e a situação `PROFESSOR` continuam autodeclarados; nenhum deles concede afiliação docente ou permissão.
 
 ## Universidade e departamentos
 

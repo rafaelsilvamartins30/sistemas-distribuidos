@@ -27,6 +27,13 @@ public class SecurityConfiguration {
                 .authorizeHttpRequests(requests -> requests.requestMatchers(HttpMethod.GET, "/health").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/events", "/api/v1/events/*")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/opportunities", "/api/v1/opportunities/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/opportunities")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/sports", "/api/v1/sports/*", "/api/v1/competitions",
+                                "/api/v1/competitions/*", "/api/v1/seasons", "/api/v1/seasons/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/events/*/registrations")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/v1/registrations/me")

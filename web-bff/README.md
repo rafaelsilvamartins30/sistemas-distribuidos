@@ -19,6 +19,18 @@ them and persists profiles.
   bearer token and list query to the Engagement Service (`/api/v1/events` and
   `/api/v1/events/{eventId}`), preserving its status, content type, and body.
   Connection failures return `503`.
+- `GET /api/v1/web/opportunities` and
+  `GET /api/v1/web/opportunities/{opportunityId}` forward the bearer token and
+  list filters to Engagement, preserving its status, content type, and body.
+- `GET /api/v1/web/opportunities/publisher-contexts` and
+  `POST /api/v1/web/opportunities` forward the original user token to
+  Engagement. Engagement rechecks each selected publisher context against
+  Campus; the BFF does not make authorization decisions.
+- `POST /api/v1/web/professor-verification-requests`, the department-scoped
+  pending-list route, and the approve/reject routes forward requests to Campus,
+  which derives both requester and reviewer identity from the token.
+  Opportunities still use only external application links; no internal
+  application is created.
 - `POST /api/v1/web/events/{eventId}/registrations`,
   `GET /api/v1/web/me/activities`, and
   `DELETE /api/v1/web/registrations/{registrationId}` forward free-event

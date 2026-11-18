@@ -45,6 +45,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.util.UriComponentsBuilder;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -224,6 +225,8 @@ class GatewayRoutingAndSecurityTest {
                 .andExpect(status().isForbidden());
         this.mockMvc.perform(post("/api/v1/web/events").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isForbidden());
+        this.mockMvc.perform(patch("/api/v1/web/opportunities").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isForbidden());
         assertThat(LAST_AUTHORIZATION.get()).isNull();
     }
 
@@ -363,6 +366,127 @@ class GatewayRoutingAndSecurityTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(eventId));
         assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/events/" + eventId);
         assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+    }
+
+    @Test
+    void forwardsOpportunityListAndDetailToWebBffWithUserBearerToken() throws Exception {
+        String opportunityId = "10000000-0000-4000-8000-000000000009";
+        String opportunityJson = "{\"id\":\"" + opportunityId + "\",\"title\":\"Estágio em software\","
+                + "\"description\":\"Vaga intermediada pelo departamento\",\"publisherType\":\"DEPARTMENT\","
+                + "\"publisherId\":\"20000000-0000-4000-8000-000000000001\",\"category\":\"ESTAGIO\","
+                + "\"deadline\":\"2027-06-30T23:59:00Z\",\"externalUrl\":\"https://example.org/apply\","
+                + "\"imageUrl\":null,\"createdAt\":\"2027-01-15T12:00:00Z\",\"status\":\"ACTIVE\"}";
+        String token = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300), List.of("USER"));
+        String authorizationHeader = "Bearer " + token;
+        String query = "page=0&size=10&category=ESTAGIO&publisherType=DEPARTMENT&q=software";
+        BFF_BODY.set("{\"items\":[" + opportunityJson + "],\"page\":0,\"size\":10,"
+                + "\"totalElements\":1,\"totalPages\":1}");
+
+        this.mockMvc
+                .perform(get("/api/v1/web/opportunities?" + query).header(HttpHeaders.AUTHORIZATION,
+                        authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].id").value(opportunityId))
+                .andExpect(jsonPath("$.items[0].publisherType").value("DEPARTMENT"));
+        assertThat(LAST_METHOD.get()).isEqualTo("GET");
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/opportunities");
+        assertThat(UriComponentsBuilder.fromUriString("http://localhost/?" + LAST_QUERY.get()).build().getQueryParams()
+                .toSingleValueMap())
+                .isEqualTo(Map.of("page", "0", "size", "10", "category", "ESTAGIO", "publisherType", "DEPARTMENT", "q",
+                        "software"));
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+
+        BFF_BODY.set(opportunityJson);
+        this.mockMvc
+                .perform(get("/api/v1/web/opportunities/{opportunityId}", opportunityId)
+                        .header(HttpHeaders.AUTHORIZATION, authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(opportunityId))
+                .andExpect(jsonPath("$.externalUrl").value("https://example.org/apply"));
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/opportunities/" + opportunityId);
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+
+    }
+
+    @Test
+    void forwardsOpportunityPublicationAndFacultyVerificationRoutesToWebBff() throws Exception {
+        String token = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300), List.of("USER"));
+        String authorizationHeader = "Bearer " + token;
+        String opportunity = "{\"id\":\"10000000-0000-4000-8000-000000000009\",\"title\":\"Vaga\"}";
+        String requestBody = "{\"title\":\"Vaga\",\"publisherType\":\"DEPARTMENT\"}";
+
+        BFF_STATUS.set(201);
+        BFF_BODY.set(opportunity);
+        this.mockMvc
+                .perform(post("/api/v1/web/opportunities").header(HttpHeaders.AUTHORIZATION, authorizationHeader)
+                        .contentType(MediaType.APPLICATION_JSON).content(requestBody))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value("10000000-0000-4000-8000-000000000009"));
+        assertThat(LAST_METHOD.get()).isEqualTo("POST");
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/opportunities");
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+        assertThat(LAST_REQUEST_BODY.get()).isEqualTo(requestBody);
+
+        BFF_STATUS.set(200);
+        BFF_BODY.set("{\"items\":[{\"publisherType\":\"DEPARTMENT\"}]}");
+        this.mockMvc
+                .perform(get("/api/v1/web/opportunities/publisher-contexts").header(HttpHeaders.AUTHORIZATION,
+                        authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].publisherType").value("DEPARTMENT"));
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/opportunities/publisher-contexts");
+
+        BFF_BODY.set("{\"id\":\"request-1\",\"status\":\"PENDING\"}");
+        this.mockMvc.perform(post("/api/v1/web/professor-verification-requests")
+                .header(HttpHeaders.AUTHORIZATION, authorizationHeader).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"departmentId\":\"department-1\"}")).andExpect(status().isOk());
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/professor-verification-requests");
+        assertThat(LAST_REQUEST_BODY.get()).isEqualTo("{\"departmentId\":\"department-1\"}");
+
+        BFF_BODY.set("{\"items\":[{\"id\":\"request-1\",\"status\":\"PENDING\"}]}");
+        this.mockMvc
+                .perform(get("/api/v1/web/professor-verification-requests/me").header(HttpHeaders.AUTHORIZATION,
+                        authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].status").value("PENDING"));
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/professor-verification-requests/me");
+
+        this.mockMvc.perform(get("/api/v1/web/departments/department-1/professor-verification-requests")
+                .header(HttpHeaders.AUTHORIZATION, authorizationHeader)).andExpect(status().isOk());
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/departments/department-1/professor-verification-requests");
+
+        this.mockMvc.perform(post("/api/v1/web/professor-verification-requests/request-1/approve")
+                .header(HttpHeaders.AUTHORIZATION, authorizationHeader)).andExpect(status().isOk());
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/professor-verification-requests/request-1/approve");
+
+        this.mockMvc.perform(post("/api/v1/web/professor-verification-requests/request-1/reject")
+                .header(HttpHeaders.AUTHORIZATION, authorizationHeader)).andExpect(status().isOk());
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/professor-verification-requests/request-1/reject");
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+    }
+
+    @Test
+    void forwardsSportsCatalogReadsToWebBffAndKeepsWritesDenied() throws Exception {
+        String token = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300), List.of("USER"));
+        String authorizationHeader = "Bearer " + token;
+        BFF_BODY.set("{\"items\":[],\"page\":0,\"size\":10,\"totalElements\":0,\"totalPages\":0}");
+
+        this.mockMvc
+                .perform(get("/api/v1/web/sports?page=0&size=10&q=futsal").header(HttpHeaders.AUTHORIZATION,
+                        authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(0));
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/sports");
+        assertThat(LAST_QUERY.get()).isEqualTo("page=0&size=10&q=futsal");
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+
+        for (String path : List.of("/api/v1/web/sports/40000000-0000-4000-8000-000000000001",
+                "/api/v1/web/competitions?targetTeamCount=16",
+                "/api/v1/web/competitions/40000000-0000-4000-8000-000000000002",
+                "/api/v1/web/seasons?targetTeamCount=10", "/api/v1/web/seasons/40000000-0000-4000-8000-000000000003")) {
+            this.mockMvc.perform(get(path).header(HttpHeaders.AUTHORIZATION, authorizationHeader))
+                    .andExpect(status().isOk());
+            assertThat(LAST_PATH.get()).isEqualTo(path.split("\\?")[0]);
+            assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+        }
+
+        this.mockMvc.perform(post("/api/v1/web/sports").header(HttpHeaders.AUTHORIZATION, authorizationHeader))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -566,7 +690,8 @@ class GatewayRoutingAndSecurityTest {
     void allowsCorsPreflightForUniversityAndDepartmentQueriesFromConfiguredWebOrigin() throws Exception {
         for (String path : List.of("/api/v1/web/university", "/api/v1/web/departments",
                 "/api/v1/web/departments/10000000-0000-4000-8000-000000000001", "/api/v1/web/entities",
-                "/api/v1/web/entities/entity-1", "/api/v1/web/communities", "/api/v1/web/communities/community-1")) {
+                "/api/v1/web/entities/entity-1", "/api/v1/web/communities", "/api/v1/web/communities/community-1",
+                "/api/v1/web/opportunities", "/api/v1/web/opportunities/10000000-0000-4000-8000-000000000009")) {
             this.mockMvc
                     .perform(options(path).header(HttpHeaders.ORIGIN, "http://localhost:15173")
                             .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")

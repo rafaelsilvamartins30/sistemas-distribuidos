@@ -564,6 +564,95 @@ test("event routes require a bearer token and return 503 when Engagement is unav
   assert.deepEqual(unavailable.json(), { error: "Engagement Service unavailable" });
 });
 
+test("opportunity list and detail forward filters and the bearer token to Engagement", async (t) => {
+  const requested = [];
+  const opportunity = { id: "opportunity-1", title: "Estágio em dados", publisherType: "DEPARTMENT" };
+  const server = createServer({
+    engagementServiceUrl: "http://engagement:8080/",
+    fetch: async (url, options) => {
+      requested.push([url, options.method, options.headers.authorization]);
+      const body = url.includes("/opportunity-1")
+        ? opportunity
+        : { items: [opportunity], page: 0, size: 10, totalElements: 1, totalPages: 1 };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  t.after(() => server.close());
+
+  const list = await server.inject({
+    method: "GET",
+    url: "/api/v1/web/opportunities?page=0&size=10&category=ESTAGIO&publisherType=DEPARTMENT&q=dados",
+    headers: { authorization: "Bearer opportunity-token" },
+  });
+  const detail = await server.inject({
+    method: "GET",
+    url: "/api/v1/web/opportunities/opportunity-1",
+    headers: { authorization: "Bearer opportunity-token" },
+  });
+
+  assert.equal(list.statusCode, 200);
+  assert.deepEqual(list.json().items, [opportunity]);
+  assert.equal(detail.statusCode, 200);
+  assert.deepEqual(detail.json(), opportunity);
+  assert.deepEqual(requested, [
+    [
+      "http://engagement:8080/api/v1/opportunities?page=0&size=10&category=ESTAGIO&publisherType=DEPARTMENT&q=dados",
+      "GET",
+      "Bearer opportunity-token",
+    ],
+    ["http://engagement:8080/api/v1/opportunities/opportunity-1", "GET", "Bearer opportunity-token"],
+  ]);
+});
+
+test("sports catalogue list and detail forward approved filters and the bearer token", async (t) => {
+  const requested = [];
+  const server = createServer({
+    engagementServiceUrl: "http://engagement:8080",
+    fetch: async (url, options) => {
+      requested.push([url, options.method, options.headers.authorization]);
+      return new Response(JSON.stringify({ items: [], page: 0, size: 10, totalElements: 0, totalPages: 0 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  t.after(() => server.close());
+
+  const urls = [
+    "/api/v1/web/sports?page=0&size=10&q=futsal",
+    "/api/v1/web/sports/sport-1",
+    "/api/v1/web/competitions?page=0&size=10&sportId=sport-1&targetTeamCount=16",
+    "/api/v1/web/competitions/competition-1",
+    "/api/v1/web/seasons?page=0&size=10&sportId=sport-1&targetTeamCount=10",
+    "/api/v1/web/seasons/season-1",
+  ];
+
+  for (const url of urls) {
+    const response = await server.inject({ method: "GET", url, headers: { authorization: "Bearer sports-token" } });
+    assert.equal(response.statusCode, 200);
+  }
+
+  assert.deepEqual(requested, [
+    ["http://engagement:8080/api/v1/sports?page=0&size=10&q=futsal", "GET", "Bearer sports-token"],
+    ["http://engagement:8080/api/v1/sports/sport-1", "GET", "Bearer sports-token"],
+    [
+      "http://engagement:8080/api/v1/competitions?page=0&size=10&sportId=sport-1&targetTeamCount=16",
+      "GET",
+      "Bearer sports-token",
+    ],
+    ["http://engagement:8080/api/v1/competitions/competition-1", "GET", "Bearer sports-token"],
+    [
+      "http://engagement:8080/api/v1/seasons?page=0&size=10&sportId=sport-1&targetTeamCount=10",
+      "GET",
+      "Bearer sports-token",
+    ],
+    ["http://engagement:8080/api/v1/seasons/season-1", "GET", "Bearer sports-token"],
+  ]);
+});
+
 test("event routes preserve Engagement problem responses", async (t) => {
   const problem = { type: "about:blank", status: 404, detail: "Event not found" };
   const server = createServer({
@@ -677,4 +766,116 @@ test("registration operations require a bearer token and preserve conflict and u
   });
   assert.equal(unavailable.statusCode, 503);
   assert.deepEqual(unavailable.json(), { error: "Engagement Service unavailable" });
+});
+
+test("opportunity publisher context and publication forward the caller token and request body", async (t) => {
+  const token = "Bearer user-token";
+  const context = { items: [{ publisherType: "DEPARTMENT", publisherId: "department-1", name: "DCC" }] };
+  const created = { id: "opportunity-1", publisherType: "DEPARTMENT", publisherId: "department-1" };
+  const received = [];
+  const server = createServer({
+    engagementServiceUrl: "http://engagement:8080/",
+    fetch: async (url, options) => {
+      received.push({ url, options });
+      return new Response(JSON.stringify(options.method === "GET" ? context : created), {
+        status: options.method === "GET" ? 200 : 201,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  t.after(() => server.close());
+
+  const contexts = await server.inject({
+    method: "GET",
+    url: "/api/v1/web/opportunities/publisher-contexts",
+    headers: { authorization: token },
+  });
+  const payload = {
+    title: "Estágio em software",
+    description: "Atuação em serviços",
+    publisherType: "DEPARTMENT",
+    publisherId: "department-1",
+    category: "ESTAGIO",
+    externalUrl: "https://example.org/apply",
+  };
+  const publication = await server.inject({
+    method: "POST",
+    url: "/api/v1/web/opportunities",
+    headers: { authorization: token, "content-type": "application/json" },
+    payload,
+  });
+
+  assert.equal(contexts.statusCode, 200);
+  assert.deepEqual(contexts.json(), context);
+  assert.equal(publication.statusCode, 201);
+  assert.deepEqual(publication.json(), created);
+  assert.deepEqual(
+    received.map(({ url, options }) => [url, options.method, options.headers.authorization]),
+    [
+      ["http://engagement:8080/api/v1/opportunities/publisher-contexts", "GET", token],
+      ["http://engagement:8080/api/v1/opportunities", "POST", token],
+    ],
+  );
+  assert.deepEqual(JSON.parse(received[1].options.body), payload);
+});
+
+test("professor verification and department review forward the JWT and preserve Campus responses", async (t) => {
+  const token = "Bearer faculty-token";
+  const departmentId = "department-1";
+  const requestId = "request-1";
+  const paths = [];
+  const server = createServer({
+    campusUrl: "http://campus:3000/",
+    fetch: async (url, options) => {
+      paths.push([url, options.method, options.headers.authorization]);
+      return new Response(JSON.stringify({ status: "PENDING" }), {
+        status: url.endsWith("/professor-verification-requests") && options.method === "POST" ? 201 : 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  t.after(() => server.close());
+
+  const created = await server.inject({
+    method: "POST",
+    url: "/api/v1/web/professor-verification-requests",
+    headers: { authorization: token, "content-type": "application/json" },
+    payload: { departmentId },
+  });
+  const mine = await server.inject({
+    method: "GET",
+    url: "/api/v1/web/professor-verification-requests/me",
+    headers: { authorization: token },
+  });
+  const pending = await server.inject({
+    method: "GET",
+    url: `/api/v1/web/departments/${departmentId}/professor-verification-requests`,
+    headers: { authorization: token },
+  });
+  const approved = await server.inject({
+    method: "POST",
+    url: `/api/v1/web/professor-verification-requests/${requestId}/approve`,
+    headers: { authorization: token },
+  });
+  const rejected = await server.inject({
+    method: "POST",
+    url: `/api/v1/web/professor-verification-requests/${requestId}/reject`,
+    headers: { authorization: token },
+  });
+
+  assert.equal(created.statusCode, 201);
+  assert.equal(mine.statusCode, 200);
+  assert.equal(pending.statusCode, 200);
+  assert.equal(approved.statusCode, 200);
+  assert.equal(rejected.statusCode, 200);
+  assert.deepEqual(paths, [
+    ["http://campus:3000/professor-verification-requests", "POST", token],
+    ["http://campus:3000/professor-verification-requests/me", "GET", token],
+    [`http://campus:3000/departments/${departmentId}/professor-verification-requests`, "GET", token],
+    [`http://campus:3000/professor-verification-requests/${requestId}/approve`, "POST", token],
+    [`http://campus:3000/professor-verification-requests/${requestId}/reject`, "POST", token],
+  ]);
+
+  const noToken = await server.inject({ method: "GET", url: "/api/v1/web/opportunities/publisher-contexts" });
+  assert.equal(noToken.statusCode, 401);
 });

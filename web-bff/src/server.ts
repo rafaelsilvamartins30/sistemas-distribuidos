@@ -91,6 +91,50 @@ export function createServer(options: ServerOptions = {}) {
     ),
   );
 
+  server.post("/api/v1/web/professor-verification-requests", async (request, reply) =>
+    forwardToCampus(request, reply, "POST", "/professor-verification-requests", "Campus unavailable"),
+  );
+
+  server.get("/api/v1/web/professor-verification-requests/me", async (request, reply) =>
+    forwardToCampus(request, reply, "GET", "/professor-verification-requests/me", "Campus unavailable"),
+  );
+
+  server.get<{ Params: { departmentId: string } }>(
+    "/api/v1/web/departments/:departmentId/professor-verification-requests",
+    async (request, reply) =>
+      forwardToCampus(
+        request,
+        reply,
+        "GET",
+        `/departments/${encodeURIComponent(request.params.departmentId)}/professor-verification-requests`,
+        "Campus unavailable",
+      ),
+  );
+
+  server.post<{ Params: { requestId: string } }>(
+    "/api/v1/web/professor-verification-requests/:requestId/approve",
+    async (request, reply) =>
+      forwardToCampus(
+        request,
+        reply,
+        "POST",
+        `/professor-verification-requests/${encodeURIComponent(request.params.requestId)}/approve`,
+        "Campus unavailable",
+      ),
+  );
+
+  server.post<{ Params: { requestId: string } }>(
+    "/api/v1/web/professor-verification-requests/:requestId/reject",
+    async (request, reply) =>
+      forwardToCampus(
+        request,
+        reply,
+        "POST",
+        `/professor-verification-requests/${encodeURIComponent(request.params.requestId)}/reject`,
+        "Campus unavailable",
+      ),
+  );
+
   server.get("/api/v1/web/entities", async (request, reply) => {
     const query = new URL(request.url, "http://localhost").search;
     return forwardToCampus(request, reply, "GET", `/entities${query}`, "Campus unavailable", true);
@@ -168,6 +212,60 @@ export function createServer(options: ServerOptions = {}) {
   server.get<{ Params: { eventId: string } }>("/api/v1/web/events/:eventId", async (request, reply) => {
     return forwardToEngagementService(request, reply, `/api/v1/events/${encodeURIComponent(request.params.eventId)}`);
   });
+
+  server.get("/api/v1/web/opportunities", async (request, reply) => {
+    const query = new URL(request.url, "http://localhost").search;
+    return forwardToEngagementService(request, reply, `/api/v1/opportunities${query}`);
+  });
+
+  server.get("/api/v1/web/opportunities/publisher-contexts", async (request, reply) =>
+    forwardToEngagementService(request, reply, "/api/v1/opportunities/publisher-contexts"),
+  );
+
+  server.post("/api/v1/web/opportunities", async (request, reply) =>
+    forwardToEngagementService(request, reply, "/api/v1/opportunities", "POST"),
+  );
+
+  server.get<{ Params: { opportunityId: string } }>(
+    "/api/v1/web/opportunities/:opportunityId",
+    async (request, reply) =>
+      forwardToEngagementService(
+        request,
+        reply,
+        `/api/v1/opportunities/${encodeURIComponent(request.params.opportunityId)}`,
+      ),
+  );
+
+  server.get("/api/v1/web/sports", async (request, reply) => {
+    const query = new URL(request.url, "http://localhost").search;
+    return forwardToEngagementService(request, reply, `/api/v1/sports${query}`);
+  });
+
+  server.get<{ Params: { sportId: string } }>("/api/v1/web/sports/:sportId", async (request, reply) =>
+    forwardToEngagementService(request, reply, `/api/v1/sports/${encodeURIComponent(request.params.sportId)}`),
+  );
+
+  server.get("/api/v1/web/competitions", async (request, reply) => {
+    const query = new URL(request.url, "http://localhost").search;
+    return forwardToEngagementService(request, reply, `/api/v1/competitions${query}`);
+  });
+
+  server.get<{ Params: { competitionId: string } }>("/api/v1/web/competitions/:competitionId", async (request, reply) =>
+    forwardToEngagementService(
+      request,
+      reply,
+      `/api/v1/competitions/${encodeURIComponent(request.params.competitionId)}`,
+    ),
+  );
+
+  server.get("/api/v1/web/seasons", async (request, reply) => {
+    const query = new URL(request.url, "http://localhost").search;
+    return forwardToEngagementService(request, reply, `/api/v1/seasons${query}`);
+  });
+
+  server.get<{ Params: { seasonId: string } }>("/api/v1/web/seasons/:seasonId", async (request, reply) =>
+    forwardToEngagementService(request, reply, `/api/v1/seasons/${encodeURIComponent(request.params.seasonId)}`),
+  );
 
   server.post<{ Params: { eventId: string } }>("/api/v1/web/events/:eventId/registrations", async (request, reply) => {
     return forwardToEngagementService(

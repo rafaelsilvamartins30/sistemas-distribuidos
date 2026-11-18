@@ -47,6 +47,22 @@ public class SecurityConfiguration {
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/v1/web/events", "/api/v1/web/events/*")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/web/opportunities", "/api/v1/web/opportunities/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/web/opportunities")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/web/professor-verification-requests",
+                                "/api/v1/web/professor-verification-requests/*/approve",
+                                "/api/v1/web/professor-verification-requests/*/reject")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/web/professor-verification-requests/me")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/web/departments/*/professor-verification-requests")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/web/sports", "/api/v1/web/sports/*",
+                                "/api/v1/web/competitions", "/api/v1/web/competitions/*", "/api/v1/web/seasons",
+                                "/api/v1/web/seasons/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/web/events/*/registrations")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/v1/web/me/activities")

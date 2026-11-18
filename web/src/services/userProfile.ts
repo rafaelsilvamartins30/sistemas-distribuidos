@@ -28,6 +28,7 @@ export interface CreateProfileInput {
 
 export interface UpdateProfileInput {
   name: string;
+  institutionalId: string;
   affiliationStatus: AffiliationStatus;
   academicLevel: AcademicLevel;
   course: string;

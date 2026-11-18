@@ -28,6 +28,7 @@ class UsersControllerTest < ActionDispatch::IntegrationTest
   end
 
   test 'creates the profile with the Keycloak subject and the existing creation contract' do
+    ensure_profile_department!
     with_jwks { post '/users', params: valid_profile, headers: bearer_headers, as: :json }
 
     assert_response :created
@@ -91,5 +92,24 @@ class UsersControllerTest < ActionDispatch::IntegrationTest
     assert_equal 'MASTERS', response.parsed_body.fetch('academicLevel')
     assert_equal 'MASTER', UserProfile.sole.academic_level
     assert_nil UserProfile.sole.user_type
+  end
+
+  test 'profile department must refer to a department already registered in Campus' do
+    ensure_profile_department!
+    invalid_profile = valid_profile.merge(department: 'Departamento inventado')
+
+    with_jwks { post '/users', params: invalid_profile, headers: bearer_headers, as: :json }
+
+    assert_response :bad_request
+    assert_equal 'department must match an existing Campus department', response.parsed_body.fetch('detail')
+    assert_empty UserProfile.all
+
+    create_profile
+    with_jwks do
+      patch '/users/me', params: { department: 'Departamento inventado' }, headers: bearer_headers, as: :json
+    end
+
+    assert_response :bad_request
+    assert_equal 'Departamento de Ciência da Computação', UserProfile.sole.department
   end
 end

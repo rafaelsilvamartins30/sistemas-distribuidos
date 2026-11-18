@@ -8,6 +8,9 @@ class UserProfile < ApplicationRecord
 
   before_validation :assign_id, on: :create
 
+  has_one :professor_affiliation, foreign_key: :user_id, dependent: :restrict_with_error,
+                                  inverse_of: :user_profile
+
   validates :keycloak_user_id, presence: true, uniqueness: true, length: { maximum: 255 }
   validates :name, :registration_code, :course, :department, presence: true, length: { maximum: 255 }
   validates :registration_code, uniqueness: true

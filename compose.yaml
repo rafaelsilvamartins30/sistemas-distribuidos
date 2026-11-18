@@ -174,6 +174,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       KEYCLOAK_ISSUER_URI: http://localhost:${KEYCLOAK_PORT:-18081}/realms/unir
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/unir/protocol/openid-connect/certs
+      CAMPUS_URL: http://campus:3000
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-unir}
@@ -187,6 +188,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_started
+      campus:
+        condition: service_healthy
 
   payment:
     build:
