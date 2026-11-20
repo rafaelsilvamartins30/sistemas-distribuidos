@@ -3,7 +3,18 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { EventCard } from "../src/components/EventCard.js";
-import { EventApiError, getEvent, getEvents, type Event } from "../src/services/events.js";
+import {
+  EventApiError,
+  cancelEvent,
+  createEvent,
+  getEvent,
+  getEventOrganizerContexts,
+  getEvents,
+  getManagedEvents,
+  isExternalPaidOrganizer,
+  updateEvent,
+  type Event,
+} from "../src/services/events.js";
 
 const event: Event = {
   id: "10000000-0000-4000-8000-000000000001",
@@ -69,4 +80,57 @@ test("EventCard presents values returned by the Engagement contract", () => {
   assert.match(markup, /ACADEMIC/);
   assert.match(markup, /Gratuito/);
   assert.match(markup, /\/eventos\/10000000-0000-4000-8000-000000000001/);
+});
+
+test("organizer contexts, create, update, and cancel event routes use the authenticated Gateway contract", async () => {
+  assert.equal(isExternalPaidOrganizer("COMMUNITY"), true);
+  assert.equal(isExternalPaidOrganizer("ACADEMIC_ENTITY"), true);
+  assert.equal(isExternalPaidOrganizer("DEPARTMENT"), false);
+  assert.equal(isExternalPaidOrganizer("PROFESSOR"), false);
+  assert.equal(isExternalPaidOrganizer("ACADEMIC_UNIT"), false);
+
+  const calls: { url: string; method: string }[] = [];
+  const fetchImpl: typeof globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method ?? "GET" });
+    const payload = String(url).endsWith("/organizer-contexts")
+      ? { items: [{ organizerType: "DEPARTMENT", organizerId: event.organizerId, name: "DCC" }] }
+      : String(url).includes("/managed")
+        ? { items: [event], page: 0, size: 20, totalElements: 1, totalPages: 1 }
+        : init?.method === "DELETE"
+          ? { ...event, status: "CANCELLED" }
+          : event;
+    return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  await getEventOrganizerContexts("token", "http://localhost:18084", fetchImpl);
+  await getManagedEvents("token", 0, 20, "http://localhost:18084", fetchImpl);
+  await createEvent(
+    "token",
+    {
+      title: event.title,
+      description: event.description,
+      organizerType: "DEPARTMENT",
+      organizerId: event.organizerId,
+      location: event.location,
+      startsAt: event.startsAt,
+      endsAt: event.endsAt,
+      category: event.category,
+      registrationDeadline: event.registrationDeadline,
+      registrationMode: "INTERNAL_PAID",
+      price: 2500,
+    },
+    "http://localhost:18084",
+    fetchImpl,
+  );
+  await updateEvent("token", event.id, { title: "Novo título" }, "http://localhost:18084", fetchImpl);
+  const cancelled = await cancelEvent("token", event.id, "http://localhost:18084", fetchImpl);
+  assert.equal(cancelled.status, "CANCELLED");
+
+  assert.deepEqual(calls, [
+    { url: "http://localhost:18084/api/v1/web/events/organizer-contexts", method: "GET" },
+    { url: "http://localhost:18084/api/v1/web/events/managed?page=0&size=20", method: "GET" },
+    { url: "http://localhost:18084/api/v1/web/events", method: "POST" },
+    { url: `http://localhost:18084/api/v1/web/events/${event.id}`, method: "PATCH" },
+    { url: `http://localhost:18084/api/v1/web/events/${event.id}`, method: "DELETE" },
+  ]);
 });

@@ -6,6 +6,7 @@ import br.unir.engagement.dto.OpportunityListResponse;
 import br.unir.engagement.dto.OpportunityPublisherContext;
 import br.unir.engagement.dto.OpportunityPublisherContextsResponse;
 import br.unir.engagement.dto.OpportunityResponse;
+import br.unir.engagement.dto.UpdateOpportunityRequest;
 import br.unir.engagement.entity.Opportunity;
 import br.unir.engagement.repository.OpportunityRepository;
 import java.net.URI;
@@ -15,10 +16,12 @@ import java.util.Locale;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
@@ -26,6 +29,7 @@ public class OpportunityService {
 
     private static final int MAX_PAGE_SIZE = 100;
     private static final Set<String> PUBLISHER_TYPES = Set.of("PROFESSOR", "DEPARTMENT", "ACADEMIC_ENTITY");
+    private static final Set<String> ALLOWED_STATUSES = Set.of(Opportunity.activeStatus(), Opportunity.closedStatus());
 
     private final OpportunityRepository opportunityRepository;
     private final CampusOpportunityPublisherClient campusPublisherClient;
@@ -60,6 +64,24 @@ public class OpportunityService {
         return this.campusPublisherClient.getContexts(bearerToken);
     }
 
+    public OpportunityListResponse listManagedOpportunities(int page, int size, String bearerToken) {
+        if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "page must be non-negative and size must be between 1 and 100");
+        }
+        List<OpportunityPublisherContext> contexts = this.campusPublisherClient.getContexts(bearerToken).items();
+        Set<UUID> publisherIds = contexts.stream().map(OpportunityPublisherContext::publisherId)
+                .collect(Collectors.toSet());
+        if (publisherIds.isEmpty()) {
+            return new OpportunityListResponse(List.of(), page, size, 0, 0);
+        }
+        var pageable = PageRequest.of(page, size,
+                Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.ASC, "id")));
+        var result = this.opportunityRepository.findByPublisherIdIn(publisherIds, pageable)
+                .map(OpportunityResponse::from);
+        return OpportunityListResponse.from(result);
+    }
+
     public OpportunityResponse createOpportunity(CreateOpportunityRequest request, String bearerToken) {
         String publisherType = request.publisherType();
         if ("COMMUNITY".equals(publisherType)) {
@@ -89,6 +111,94 @@ public class OpportunityService {
                 request.category().trim(), request.deadline(), request.externalUrl().trim(),
                 trimToNull(request.imageUrl()), now, Opportunity.activeStatus());
         return OpportunityResponse.from(this.opportunityRepository.saveAndFlush(opportunity));
+    }
+
+    @Transactional
+    public OpportunityResponse updateOpportunity(UUID id, UpdateOpportunityRequest request, String bearerToken) {
+        Opportunity opportunity = this.opportunityRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Opportunity not found"));
+        this.verifyPublisherAuthorization(opportunity, bearerToken);
+
+        String title = request.title() == null
+                ? opportunity.getTitle()
+                : requireNonBlank(request.title(), "title must not be blank");
+        String description = request.description() == null
+                ? opportunity.getDescription()
+                : requireNonBlank(request.description(), "description must not be blank");
+        String category = request.category() == null
+                ? opportunity.getCategory()
+                : requireNonBlank(request.category(), "category must not be blank");
+        String externalUrl = request.externalUrl() == null
+                ? opportunity.getExternalUrl()
+                : requireNonBlank(request.externalUrl(), "externalUrl must not be blank");
+        if (!isWebUrl(externalUrl)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "URLs must use HTTP or HTTPS");
+        }
+
+        String imageUrl = opportunity.getImageUrl();
+        if (Boolean.TRUE.equals(request.clearImageUrl())) {
+            imageUrl = null;
+        } else if (request.imageUrl() != null) {
+            imageUrl = trimToNull(request.imageUrl());
+            if (imageUrl != null && !isWebUrl(imageUrl)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "URLs must use HTTP or HTTPS");
+            }
+        }
+
+        Instant now = Instant.now();
+        Instant deadline = opportunity.getDeadline();
+        if (Boolean.TRUE.equals(request.clearDeadline())) {
+            deadline = null;
+        } else if (request.deadline() != null) {
+            if (!request.deadline().isAfter(now)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "deadline must be in the future");
+            }
+            deadline = request.deadline();
+        }
+
+        String status = opportunity.getStatus();
+        if (request.status() != null) {
+            String normalizedStatus = request.status().trim().toUpperCase(Locale.ROOT);
+            if (!ALLOWED_STATUSES.contains(normalizedStatus)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "status must be ACTIVE or CLOSED");
+            }
+            status = normalizedStatus;
+        }
+        if (Opportunity.activeStatus().equals(status) && deadline != null && !deadline.isAfter(now)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Active opportunity deadline must be in the future");
+        }
+
+        opportunity.updateDetails(title, description, category, deadline, externalUrl, imageUrl, status);
+        return OpportunityResponse.from(this.opportunityRepository.saveAndFlush(opportunity));
+    }
+
+    @Transactional
+    public OpportunityResponse closeOpportunity(UUID id, String bearerToken) {
+        Opportunity opportunity = this.opportunityRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Opportunity not found"));
+        this.verifyPublisherAuthorization(opportunity, bearerToken);
+        opportunity.close();
+        return OpportunityResponse.from(this.opportunityRepository.saveAndFlush(opportunity));
+    }
+
+    private void verifyPublisherAuthorization(Opportunity opportunity, String bearerToken) {
+        List<OpportunityPublisherContext> contexts = this.campusPublisherClient.getContexts(bearerToken).items();
+        boolean authorized = contexts.stream()
+                .anyMatch(context -> opportunity.getPublisherType().equals(context.publisherType())
+                        && opportunity.getPublisherId().equals(context.publisherId()));
+        if (!authorized) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "The authenticated user is not authorized for this publisher");
+        }
+    }
+
+    private static String requireNonBlank(String value, String message) {
+        String trimmed = normalize(value);
+        if (trimmed.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        }
+        return trimmed;
     }
 
     private static String normalize(String value) {

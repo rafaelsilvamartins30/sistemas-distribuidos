@@ -4,6 +4,7 @@ import br.unir.engagement.entity.Event;
 import br.unir.engagement.entity.EventStatus;
 import br.unir.engagement.entity.RegistrationMode;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -26,4 +27,6 @@ public interface EventRepository extends JpaRepository<Event, UUID> {
             """)
     Page<Event> findDiscoverableEvents(@Param("status") EventStatus status,
             @Param("externalPaid") RegistrationMode externalPaid, @Param("now") Instant now, Pageable pageable);
+
+    Page<Event> findByOrganizerIdIn(Collection<UUID> organizerIds, Pageable pageable);
 }

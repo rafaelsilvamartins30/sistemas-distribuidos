@@ -1,15 +1,27 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { EventCard } from "../components/EventCard";
 import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
-import { SearchField } from "../components/SearchField";
 import { Section } from "../components/Section";
 import { ParticipantQrScanner } from "../components/ParticipantQrScanner";
-import { useEventList } from "../hooks/useEventList";
 import { AttendanceApiError, checkInWithEventQr, getMyAttendance, type MyAttendance } from "../services/attendance";
-import { EventApiError, getEvent, type Event } from "../services/events";
+import {
+  EventApiError,
+  cancelEvent,
+  createEvent,
+  getEvent,
+  getEventOrganizerContexts,
+  getEvents,
+  getManagedEvents,
+  isExternalPaidOrganizer,
+  updateEvent,
+  type AttendanceMode,
+  type Event,
+  type EventOrganizerContext,
+  type RegistrationMode,
+} from "../services/events";
 import {
   cancelRegistration,
   getMyRegistrations,
@@ -26,20 +38,47 @@ function dateTime(value: string): string {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "long", timeStyle: "short" }).format(new Date(value));
 }
 
+function toDateTimeLocalValue(iso?: string | null): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function organizerLabel(organizerType: string): string {
+  switch (organizerType) {
+    case "PROFESSOR":
+      return "Professor(a)";
+    case "DEPARTMENT":
+      return "Departamento";
+    case "ACADEMIC_UNIT":
+      return "Unidade acadêmica";
+    case "UNIVERSITY":
+      return "Universidade";
+    case "ACADEMIC_ENTITY":
+      return "Entidade acadêmica";
+    case "COMMUNITY":
+      return "Comunidade";
+    default:
+      return organizerType;
+  }
+}
+
 function registrationModeLabel(event: Event): string {
   switch (event.registrationMode) {
     case "INTERNAL_FREE":
       return "Inscrição gratuita pela UNIR";
     case "INTERNAL_PAID":
-      return "Inscrição paga pela UNIR";
+      return "Inscrição paga pela UNIR (Pix)";
     case "EXTERNAL_PAID":
-      return "Inscrição paga em plataforma externa";
+      return "Inscrição paga em link externo";
   }
 }
 
 function priceLabel(event: Event): string {
   if (event.registrationMode === "INTERNAL_FREE") return "Gratuito";
-  if (event.price == null) return "Valor a consultar";
+  if (event.price == null) return "Valor no link externo";
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(event.price / 100);
 }
 
@@ -69,16 +108,238 @@ function registrationErrorMessage(error: unknown): string {
 
 export function EventsPage() {
   const { keycloak } = useOutletContext<WebContext>();
-  const { events, loading, error } = useEventList(keycloak);
-  const [query, setQuery] = useState("");
-  const visibleEvents = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
-    return events.filter((event) =>
-      `${event.title} ${event.category} ${event.organizerType} ${event.description} ${event.location}`
-        .toLocaleLowerCase("pt-BR")
-        .includes(normalizedQuery),
-    );
-  }, [events, query]);
+  const [events, setEvents] = useState<Event[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [reloadCount, setReloadCount] = useState(0);
+
+  const [organizerContexts, setOrganizerContexts] = useState<EventOrganizerContext[]>([]);
+  const [managedEvents, setManagedEvents] = useState<Event[]>([]);
+  const [workflowLoading, setWorkflowLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [organizerKey, setOrganizerKey] = useState("");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("ACADEMIC");
+  const [location, setLocation] = useState("");
+  const [startsAt, setStartsAt] = useState("");
+  const [endsAt, setEndsAt] = useState("");
+  const [registrationDeadline, setRegistrationDeadline] = useState("");
+  const [capacity, setCapacity] = useState("");
+  const [isPaid, setIsPaid] = useState(false);
+  const [priceBrl, setPriceBrl] = useState("");
+  const [externalUrl, setExternalUrl] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+  const [attendanceEnabled, setAttendanceEnabled] = useState(true);
+  const [attendanceMode, setAttendanceMode] = useState<AttendanceMode>("PARTICIPANT_SCANS_EVENT");
+  const [submitting, setSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState("");
+
+  const [editingEvent, setEditingEvent] = useState<Event | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editLocation, setEditLocation] = useState("");
+  const [editStartsAt, setEditStartsAt] = useState("");
+  const [editEndsAt, setEditEndsAt] = useState("");
+  const [editDeadline, setEditDeadline] = useState("");
+  const [editCapacity, setEditCapacity] = useState("");
+  const [editPriceBrl, setEditPriceBrl] = useState("");
+  const [editExternalUrl, setEditExternalUrl] = useState("");
+  const [editImageUrl, setEditImageUrl] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(false);
+
+    async function loadEvents() {
+      try {
+        await keycloak.updateToken(30);
+        if (!keycloak.token) throw new Error("Token indisponível.");
+        const page = await getEvents(keycloak.token);
+        if (active) setEvents(page.items);
+      } catch {
+        if (active) setError(true);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    void loadEvents();
+    return () => {
+      active = false;
+    };
+  }, [keycloak, reloadCount]);
+
+  useEffect(() => {
+    let active = true;
+    setWorkflowLoading(true);
+
+    async function loadOrganizerWorkflow() {
+      try {
+        await keycloak.updateToken(30);
+        if (!keycloak.token) throw new Error("Token indisponível.");
+        const contexts = (await getEventOrganizerContexts(keycloak.token)).items;
+        const managed = contexts.length > 0 ? (await getManagedEvents(keycloak.token, 0, 50)).items : [];
+        if (active) {
+          setOrganizerContexts(contexts);
+          setManagedEvents(managed);
+          setOrganizerKey((current) =>
+            current && contexts.some((ctx) => `${ctx.organizerType}:${ctx.organizerId}` === current)
+              ? current
+              : contexts[0]
+                ? `${contexts[0].organizerType}:${contexts[0].organizerId}`
+                : "",
+          );
+        }
+      } catch {
+        if (active) {
+          setOrganizerContexts([]);
+          setManagedEvents([]);
+        }
+      } finally {
+        if (active) setWorkflowLoading(false);
+      }
+    }
+
+    void loadOrganizerWorkflow();
+    return () => {
+      active = false;
+    };
+  }, [keycloak, reloadCount]);
+
+  const selectedOrganizer = organizerContexts.find((ctx) => `${ctx.organizerType}:${ctx.organizerId}` === organizerKey);
+  const externalPaidMode = selectedOrganizer ? isExternalPaidOrganizer(selectedOrganizer.organizerType) : false;
+
+  async function handleCreateEvent(formEvent: FormEvent<HTMLFormElement>) {
+    formEvent.preventDefault();
+    if (!selectedOrganizer) return;
+    setSubmitting(true);
+    setFeedback("");
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token indisponível.");
+
+      const registrationMode: RegistrationMode = !isPaid
+        ? "INTERNAL_FREE"
+        : externalPaidMode
+          ? "EXTERNAL_PAID"
+          : "INTERNAL_PAID";
+
+      const parsedPriceMinor = isPaid && priceBrl.trim() ? Math.round(Number(priceBrl.replace(",", ".")) * 100) : null;
+
+      await createEvent(keycloak.token, {
+        title,
+        description,
+        organizerType: selectedOrganizer.organizerType,
+        organizerId: selectedOrganizer.organizerId,
+        location,
+        category,
+        startsAt: new Date(startsAt).toISOString(),
+        endsAt: new Date(endsAt).toISOString(),
+        registrationDeadline: new Date(registrationDeadline).toISOString(),
+        capacity: capacity.trim() ? Number(capacity) : null,
+        registrationMode,
+        price: isPaid ? parsedPriceMinor : null,
+        externalUrl: registrationMode === "EXTERNAL_PAID" ? externalUrl.trim() : null,
+        imageUrl: imageUrl.trim() || null,
+        attendanceEnabled: registrationMode !== "EXTERNAL_PAID" && attendanceEnabled,
+        attendanceMode: registrationMode !== "EXTERNAL_PAID" && attendanceEnabled ? attendanceMode : null,
+      });
+
+      setFeedback("Evento criado e publicado na programação.");
+      setTitle("");
+      setDescription("");
+      setLocation("");
+      setStartsAt("");
+      setEndsAt("");
+      setRegistrationDeadline("");
+      setCapacity("");
+      setPriceBrl("");
+      setExternalUrl("");
+      setImageUrl("");
+      setCreateOpen(false);
+      setReloadCount((value) => value + 1);
+    } catch {
+      setFeedback("Não foi possível criar o evento. Confira as datas, o valor/link e seus acessos.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function startEditing(item: Event) {
+    setEditingEvent(item);
+    setEditTitle(item.title);
+    setEditDescription(item.description);
+    setEditCategory(item.category);
+    setEditLocation(item.location);
+    setEditStartsAt(toDateTimeLocalValue(item.startsAt));
+    setEditEndsAt(toDateTimeLocalValue(item.endsAt));
+    setEditDeadline(toDateTimeLocalValue(item.registrationDeadline));
+    setEditCapacity(item.capacity != null ? String(item.capacity) : "");
+    setEditPriceBrl(item.price != null ? (item.price / 100).toFixed(2) : "");
+    setEditExternalUrl(item.externalUrl ?? "");
+    setEditImageUrl(item.imageUrl ?? "");
+    setFeedback("");
+  }
+
+  async function handleSaveEdit(formEvent: FormEvent<HTMLFormElement>) {
+    formEvent.preventDefault();
+    if (!editingEvent) return;
+    setSubmitting(true);
+    setFeedback("");
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token indisponível.");
+
+      const parsedPriceMinor =
+        editingEvent.registrationMode !== "INTERNAL_FREE" && editPriceBrl.trim()
+          ? Math.round(Number(editPriceBrl.replace(",", ".")) * 100)
+          : null;
+
+      await updateEvent(keycloak.token, editingEvent.id, {
+        title: editTitle,
+        description: editDescription,
+        category: editCategory,
+        location: editLocation,
+        startsAt: new Date(editStartsAt).toISOString(),
+        endsAt: new Date(editEndsAt).toISOString(),
+        registrationDeadline: new Date(editDeadline).toISOString(),
+        capacity: editCapacity.trim() ? Number(editCapacity) : null,
+        clearCapacity: !editCapacity.trim(),
+        price: parsedPriceMinor,
+        clearPrice: editingEvent.registrationMode === "INTERNAL_FREE" || !editPriceBrl.trim(),
+        externalUrl: editingEvent.registrationMode === "EXTERNAL_PAID" ? editExternalUrl.trim() : null,
+        imageUrl: editImageUrl.trim() || null,
+        clearImageUrl: !editImageUrl.trim(),
+      });
+
+      setFeedback("Evento atualizado com sucesso.");
+      setEditingEvent(null);
+      setReloadCount((value) => value + 1);
+    } catch {
+      setFeedback("Não foi possível atualizar o evento. Confira as datas e valores informados.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleCancelManagedEvent(targetEventId: string) {
+    setFeedback("");
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token indisponível.");
+      await cancelEvent(keycloak.token, targetEventId);
+      if (editingEvent?.id === targetEventId) {
+        setEditingEvent(null);
+      }
+      setFeedback("Evento cancelado. Inscrições vinculadas foram canceladas e eventuais estornos solicitados.");
+      setReloadCount((value) => value + 1);
+    } catch {
+      setFeedback("Não foi possível cancelar o evento.");
+    }
+  }
 
   return (
     <div className="browse-page events-page">
@@ -86,23 +347,329 @@ export function EventsPage() {
         <PageHeader
           eyebrow="Agenda oficial e comunidades"
           title="Eventos & encontros universitários"
-          description="Acompanhe atividades publicadas no Campus e consulte as informações de inscrição."
+          description="Atividades gratuitas, eventos pagos internamente via Pix (departamentos, unidades e professores) e eventos pagos externos (comunidades e entidades acadêmicas)."
         />
         <Link className="button button-secondary" to="/my-registrations">
           <Icon name="calendar" width="16" height="16" /> Minhas inscrições
         </Link>
       </div>
 
-      <div className="page-search-toolbar" role="search" aria-label="Buscar eventos">
-        <SearchField
-          label="Buscar eventos"
-          placeholder="Buscar por evento, tema ou entidade"
-          value={query}
-          onChange={setQuery}
-        />
-      </div>
+      {!workflowLoading && organizerContexts.length > 0 && (
+        <section className="opportunity-publishing-tools" aria-labelledby="event-organizing-title">
+          <div className="opportunity-publishing-heading">
+            <div>
+              <p className="eyebrow">Administração de eventos</p>
+              <h2 id="event-organizing-title">Criar e gerenciar eventos</h2>
+              <p>
+                Eventos pagos criados por <strong>Professor, Departamento ou Unidade Acadêmica</strong> usam pagamento
+                interno pela UNIR (Pix / Saga). Eventos pagos criados por{" "}
+                <strong>Comunidade ou Entidade Acadêmica</strong> usam inscrição externa.
+              </p>
+            </div>
+            <button className="button button-primary" type="button" onClick={() => setCreateOpen((open) => !open)}>
+              {createOpen ? "Fechar formulário" : "Novo evento"}
+            </button>
+          </div>
 
-      <Section title="Programação" description={loading ? "Carregando eventos…" : `${visibleEvents.length} eventos`}>
+          {feedback && (
+            <p className="notice" role="status">
+              {feedback}
+            </p>
+          )}
+
+          {createOpen && selectedOrganizer && (
+            <form className="opportunity-publish-form" onSubmit={handleCreateEvent}>
+              <label>
+                Organizar em nome de
+                <select value={organizerKey} onChange={(e) => setOrganizerKey(e.target.value)} required>
+                  {organizerContexts.map((context) => {
+                    const key = `${context.organizerType}:${context.organizerId}`;
+                    return (
+                      <option key={key} value={key}>
+                        {organizerLabel(context.organizerType)} · {context.name}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+
+              <div className="opportunity-publish-fields">
+                <label>
+                  Título do evento
+                  <input value={title} onChange={(e) => setTitle(e.target.value)} required />
+                </label>
+                <label>
+                  Categoria
+                  <input value={category} onChange={(e) => setCategory(e.target.value)} required />
+                </label>
+                <label className="opportunity-publish-wide">
+                  Descrição
+                  <textarea value={description} onChange={(e) => setDescription(e.target.value)} required rows={3} />
+                </label>
+                <label>
+                  Local
+                  <input value={location} onChange={(e) => setLocation(e.target.value)} required />
+                </label>
+                <label>
+                  Capacidade (opcional)
+                  <input
+                    type="number"
+                    min="1"
+                    value={capacity}
+                    onChange={(e) => setCapacity(e.target.value)}
+                    placeholder="Sem limite"
+                  />
+                </label>
+                <label>
+                  Início
+                  <input
+                    type="datetime-local"
+                    value={startsAt}
+                    onChange={(e) => setStartsAt(e.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  Término
+                  <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} required />
+                </label>
+                <label>
+                  Data limite de inscrição
+                  <input
+                    type="datetime-local"
+                    value={registrationDeadline}
+                    onChange={(e) => setRegistrationDeadline(e.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  Modalidade
+                  <select value={isPaid ? "PAID" : "FREE"} onChange={(e) => setIsPaid(e.target.value === "PAID")}>
+                    <option value="FREE">Gratuito (Inscrição interna UNIR)</option>
+                    <option value="PAID">
+                      {externalPaidMode
+                        ? "Pago externo (Link da comunidade/entidade)"
+                        : "Pago interno (Cobrança Pix pela UNIR — Saga)"}
+                    </option>
+                  </select>
+                </label>
+
+                {isPaid && !externalPaidMode && (
+                  <label>
+                    Valor da inscrição (R$)
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={priceBrl}
+                      onChange={(e) => setPriceBrl(e.target.value)}
+                      placeholder="Ex.: 25.00"
+                      required
+                    />
+                  </label>
+                )}
+
+                {isPaid && externalPaidMode && (
+                  <>
+                    <label>
+                      Link externo para pagamento e inscrição
+                      <input
+                        type="url"
+                        value={externalUrl}
+                        onChange={(e) => setExternalUrl(e.target.value)}
+                        placeholder="https://…"
+                        required
+                      />
+                    </label>
+                    <label>
+                      Valor informativo em R$ (opcional)
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={priceBrl}
+                        onChange={(e) => setPriceBrl(e.target.value)}
+                        placeholder="Ex.: 15.00"
+                      />
+                    </label>
+                  </>
+                )}
+
+                {(!isPaid || !externalPaidMode) && (
+                  <>
+                    <label>
+                      Lista de presença via QR
+                      <select
+                        value={attendanceEnabled ? "YES" : "NO"}
+                        onChange={(e) => setAttendanceEnabled(e.target.value === "YES")}
+                      >
+                        <option value="YES">Habilitada</option>
+                        <option value="NO">Desabilitada</option>
+                      </select>
+                    </label>
+                    {attendanceEnabled && (
+                      <label>
+                        Modo de validação do QR
+                        <select
+                          value={attendanceMode}
+                          onChange={(e) => setAttendanceMode(e.target.value as AttendanceMode)}
+                        >
+                          <option value="PARTICIPANT_SCANS_EVENT">Participante escaneia QR do evento</option>
+                          <option value="ORGANIZER_SCANS_PARTICIPANT">Organizador escaneia QR do participante</option>
+                        </select>
+                      </label>
+                    )}
+                  </>
+                )}
+
+                <label className="opportunity-publish-wide">
+                  Imagem (opcional)
+                  <input
+                    type="url"
+                    value={imageUrl}
+                    onChange={(e) => setImageUrl(e.target.value)}
+                    placeholder="https://…"
+                  />
+                </label>
+              </div>
+
+              <button className="button button-primary" type="submit" disabled={submitting}>
+                {submitting ? "Publicando…" : "Publicar evento"}
+              </button>
+            </form>
+          )}
+
+          {editingEvent && (
+            <form className="opportunity-publish-form" onSubmit={handleSaveEdit}>
+              <h3>Editar evento: {editingEvent.title}</h3>
+              <div className="opportunity-publish-fields">
+                <label>
+                  Título
+                  <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} required />
+                </label>
+                <label>
+                  Categoria
+                  <input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} required />
+                </label>
+                <label className="opportunity-publish-wide">
+                  Descrição
+                  <textarea
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    required
+                    rows={3}
+                  />
+                </label>
+                <label>
+                  Local
+                  <input value={editLocation} onChange={(e) => setEditLocation(e.target.value)} required />
+                </label>
+                <label>
+                  Capacidade (vazio = sem limite)
+                  <input type="number" min="1" value={editCapacity} onChange={(e) => setEditCapacity(e.target.value)} />
+                </label>
+                <label>
+                  Início
+                  <input
+                    type="datetime-local"
+                    value={editStartsAt}
+                    onChange={(e) => setEditStartsAt(e.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  Término
+                  <input
+                    type="datetime-local"
+                    value={editEndsAt}
+                    onChange={(e) => setEditEndsAt(e.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  Data limite de inscrição
+                  <input
+                    type="datetime-local"
+                    value={editDeadline}
+                    onChange={(e) => setEditDeadline(e.target.value)}
+                    required
+                  />
+                </label>
+                {editingEvent.registrationMode !== "INTERNAL_FREE" && (
+                  <label>
+                    Valor em R$
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={editPriceBrl}
+                      onChange={(e) => setEditPriceBrl(e.target.value)}
+                      required={editingEvent.registrationMode === "INTERNAL_PAID"}
+                    />
+                  </label>
+                )}
+                {editingEvent.registrationMode === "EXTERNAL_PAID" && (
+                  <label className="opportunity-publish-wide">
+                    Link externo de inscrição
+                    <input
+                      type="url"
+                      value={editExternalUrl}
+                      onChange={(e) => setEditExternalUrl(e.target.value)}
+                      required
+                    />
+                  </label>
+                )}
+                <label className="opportunity-publish-wide">
+                  Imagem (opcional)
+                  <input type="url" value={editImageUrl} onChange={(e) => setEditImageUrl(e.target.value)} />
+                </label>
+              </div>
+              <div className="opportunity-review-actions">
+                <button className="button button-primary" type="submit" disabled={submitting}>
+                  {submitting ? "Salvando…" : "Salvar alterações"}
+                </button>
+                <button className="button button-secondary" type="button" onClick={() => setEditingEvent(null)}>
+                  Cancelar edição
+                </button>
+              </div>
+            </form>
+          )}
+
+          {managedEvents.length > 0 && (
+            <div className="opportunity-review-queues">
+              <h3>Seus eventos administrados</h3>
+              {managedEvents.map((item) => (
+                <article className="opportunity-review-item" key={item.id}>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <span>
+                      {organizerLabel(item.organizerType)} · {registrationModeLabel(item)} · {priceLabel(item)} ·
+                      Inscrições até {dateTime(item.registrationDeadline)} · Status:{" "}
+                      {item.status === "ACTIVE" ? "Ativo" : "Cancelado"}
+                    </span>
+                  </div>
+                  {item.status === "ACTIVE" && (
+                    <div className="opportunity-review-actions">
+                      <button className="button button-secondary" type="button" onClick={() => startEditing(item)}>
+                        Editar / Datas
+                      </button>
+                      <button
+                        className="button button-secondary"
+                        type="button"
+                        onClick={() => void handleCancelManagedEvent(item.id)}
+                      >
+                        Cancelar evento
+                      </button>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      <Section title="Programação" description={loading ? "Carregando eventos…" : `${events.length} eventos`}>
         {loading ? (
           <p className="notice" role="status">
             Carregando eventos…
@@ -111,17 +678,17 @@ export function EventsPage() {
           <p className="notice notice-error" role="alert">
             Não foi possível carregar os eventos. Verifique a conexão com a plataforma e tente novamente.
           </p>
-        ) : visibleEvents.length ? (
+        ) : events.length ? (
           <div className="content-grid">
-            {visibleEvents.map((event) => (
+            {events.map((event) => (
               <EventCard key={event.id} event={event} />
             ))}
           </div>
         ) : (
           <div className="empty-state">
-            <Icon name="search" />
-            <strong>{events.length ? "Nenhum evento encontrado" : "Nenhum evento disponível"}</strong>
-            <span>{events.length ? "Tente outro termo." : "Os próximos eventos aparecerão aqui."}</span>
+            <Icon name="calendar" />
+            <strong>Nenhum evento disponível</strong>
+            <span>Os próximos eventos aparecerão aqui.</span>
           </div>
         )}
       </Section>
@@ -133,6 +700,7 @@ export function EventDetailPage() {
   const { keycloak } = useOutletContext<WebContext>();
   const { eventId } = useParams();
   const [event, setEvent] = useState<Event | null>(null);
+  const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<"not-found" | "unavailable" | null>(null);
   const [registration, setRegistration] = useState<Registration | null>(null);
@@ -143,6 +711,7 @@ export function EventDetailPage() {
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [attendanceBusy, setAttendanceBusy] = useState(false);
   const [attendanceError, setAttendanceError] = useState<string | null>(null);
+  const [manageFeedback, setManageFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -151,8 +720,18 @@ export function EventDetailPage() {
       try {
         await keycloak.updateToken(30);
         if (!keycloak.token || !eventId) throw new Error("Evento indisponível.");
-        const result = await getEvent(keycloak.token, eventId);
-        if (active) setEvent(result);
+        const [result, organizerContexts] = await Promise.all([
+          getEvent(keycloak.token, eventId),
+          getEventOrganizerContexts(keycloak.token).catch(() => ({ items: [] })),
+        ]);
+        if (active) {
+          setEvent(result);
+          setCanManage(
+            organizerContexts.items.some(
+              (ctx) => ctx.organizerType === result.organizerType && ctx.organizerId === result.organizerId,
+            ),
+          );
+        }
         if (result.registrationMode !== "EXTERNAL_PAID") {
           const page = await getMyRegistrations(keycloak.token);
           const ownRegistration = page.items.find((item) => item.eventId === result.id) ?? null;
@@ -244,6 +823,23 @@ export function EventDetailPage() {
       setRegistration(await cancelRegistration(keycloak.token, registration.id));
     } catch (error) {
       setRegistrationError(registrationErrorMessage(error));
+    } finally {
+      setRegistrationBusy(false);
+    }
+  }
+
+  async function handleCancelEventByOrganizer() {
+    if (!event) return;
+    setRegistrationBusy(true);
+    setManageFeedback(null);
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token indisponível.");
+      const updated = await cancelEvent(keycloak.token, event.id);
+      setEvent(updated);
+      setManageFeedback("Evento cancelado com sucesso.");
+    } catch {
+      setManageFeedback("Não foi possível cancelar o evento.");
     } finally {
       setRegistrationBusy(false);
     }
@@ -354,7 +950,7 @@ export function EventDetailPage() {
               <Icon name="communities" />
               <span>
                 <small>Organizador</small>
-                <strong>{event.organizerType}</strong>
+                <strong>{organizerLabel(event.organizerType)}</strong>
               </span>
             </div>
             <div>
@@ -376,8 +972,8 @@ export function EventDetailPage() {
           </div>
           {event.registrationMode === "EXTERNAL_PAID" && event.externalUrl && (
             <p className="event-external-link">
-              <a href={event.externalUrl} target="_blank" rel="noreferrer">
-                Informações da organização externa
+              <a className="button button-primary" href={event.externalUrl} target="_blank" rel="noreferrer">
+                Acessar link externo de inscrição <Icon name="arrowUpRight" width="16" height="16" />
               </a>
             </p>
           )}
@@ -389,12 +985,26 @@ export function EventDetailPage() {
                 : "Validação de presença não habilitada."}
             </p>
           </section>
+          {canManage && event.status === "ACTIVE" && (
+            <section className="detail-copy-section">
+              <h2>Administração do organizador</h2>
+              {manageFeedback && <p role="status">{manageFeedback}</p>}
+              <button
+                className="button button-secondary"
+                type="button"
+                disabled={registrationBusy}
+                onClick={() => void handleCancelEventByOrganizer()}
+              >
+                Cancelar evento (estorna inscrições pagas)
+              </button>
+            </section>
+          )}
         </article>
         <aside className="detail-aside-card">
           <section className="registration-action-panel" aria-labelledby="registration-action-title">
             <h2 id="registration-action-title">Minha inscrição</h2>
             {event.registrationMode === "EXTERNAL_PAID" ? (
-              <p>Consulte as informações da organização externa para concluir sua inscrição.</p>
+              <p>Este evento é organizado por comunidade/entidade com pagamento e inscrição no link externo oficial.</p>
             ) : registrationLoading ? (
               <p role="status">Consultando sua inscrição…</p>
             ) : registration?.status === "CONFIRMED" ? (
@@ -419,7 +1029,7 @@ export function EventDetailPage() {
             ) : registration?.status === "PENDING_PAYMENT" ? (
               <>
                 <p className="registration-pending" role="status">
-                  Aguardando confirmação do pagamento.
+                  Aguardando confirmação do pagamento Pix (Saga).
                 </p>
                 {registration.paymentDeadlineAt && (
                   <p>Prazo para pagamento: {dateTime(registration.paymentDeadlineAt)}.</p>
@@ -448,7 +1058,7 @@ export function EventDetailPage() {
                 <p>
                   {event.registrationMode === "INTERNAL_FREE"
                     ? "Inscreva-se gratuitamente usando sua conta UNIR."
-                    : `Reserve sua vaga por ${priceLabel(event)}. A cobrança Pix será simulada nesta etapa.`}
+                    : `Reserve sua vaga por ${priceLabel(event)}. A cobrança Pix será processada pela Saga da UNIR.`}
                 </p>
                 <button
                   className="button button-primary"
@@ -460,7 +1070,7 @@ export function EventDetailPage() {
                     ? "Inscrevendo…"
                     : event.registrationMode === "INTERNAL_FREE"
                       ? "Inscrever-se gratuitamente"
-                      : "Reservar vaga paga"}
+                      : "Reservar vaga paga (Pix)"}
                 </button>
               </>
             )}
@@ -519,7 +1129,7 @@ export function EventDetailPage() {
           <span className="eyebrow">Evento</span>
           <p>Identificador do evento</p>
           <code>{event.id}</code>
-          <p>Organizador: {event.organizerId}</p>
+          <p>Organizador: {organizerLabel(event.organizerType)}</p>
         </aside>
       </div>
     </div>

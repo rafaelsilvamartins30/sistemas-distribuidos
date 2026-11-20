@@ -17,6 +17,7 @@ Rails.application.routes.draw do
   get 'communities/:id', to: 'communities#show'
 
   get 'internal/v1/opportunity-publishers', to: 'opportunity_publishers#index'
+  get 'internal/v1/event-organizers', to: 'event_organizers#index'
   get 'professor-verification-requests/me', to: 'professor_verification_requests#index'
   post 'professor-verification-requests', to: 'professor_verification_requests#create'
   get 'departments/:department_id/professor-verification-requests',

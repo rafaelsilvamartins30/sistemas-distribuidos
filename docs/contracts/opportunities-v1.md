@@ -69,6 +69,23 @@ is always rejected. Campus outages fail closed. Engagement assigns `id`,
 must be HTTP(S), and a supplied deadline must be in the future. The Web
 equivalent is `POST /api/v1/web/opportunities`.
 
+- `GET /api/v1/opportunities/managed?page=0&size=20` (Web equivalent:
+  `GET /api/v1/web/opportunities/managed`) lists all opportunities belonging to
+  any `(publisherType, publisherId)` currently authorized for the authenticated
+  caller by Campus, regardless of `status` or `deadline`. Users without
+  publisher contexts receive an empty page.
+- `PATCH /api/v1/opportunities/{opportunityId}` (Web equivalent:
+  `PATCH /api/v1/web/opportunities/{opportunityId}`) allows an authorized
+  publisher for that record's `(publisherType, publisherId)` to update `title`,
+  `description`, `category`, `deadline` (or `clearDeadline=true`),
+  `externalUrl`, `imageUrl` (or `clearImageUrl=true`), and `status` (`ACTIVE`
+  or `CLOSED`).
+- `DELETE /api/v1/opportunities/{opportunityId}` (Web equivalent:
+  `DELETE /api/v1/web/opportunities/{opportunityId}`) performs a logical
+  deactivation (`status=CLOSED`) after verifying the caller's publisher context
+  with Campus, removing the record from the active board while preserving its
+  historical record.
+
 ## Professor verification flow
 
 Campus provides the minimum review flow defined in `Engagement — Core` and

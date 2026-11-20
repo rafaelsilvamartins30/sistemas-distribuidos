@@ -223,7 +223,7 @@ class GatewayRoutingAndSecurityTest {
                 .andExpect(status().isForbidden());
         this.mockMvc.perform(get("/users/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isForbidden());
-        this.mockMvc.perform(post("/api/v1/web/events").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+        this.mockMvc.perform(patch("/api/v1/web/events").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isForbidden());
         this.mockMvc.perform(patch("/api/v1/web/opportunities").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isForbidden());

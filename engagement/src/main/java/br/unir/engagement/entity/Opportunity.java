@@ -13,6 +13,7 @@ import java.util.UUID;
 public class Opportunity {
 
     private static final String ACTIVE_STATUS = "ACTIVE";
+    private static final String CLOSED_STATUS = "CLOSED";
 
     @Id
     private UUID id;
@@ -115,7 +116,26 @@ public class Opportunity {
         return this.status;
     }
 
+    public void updateDetails(String title, String description, String category, Instant deadline, String externalUrl,
+            String imageUrl, String status) {
+        this.title = title;
+        this.description = description;
+        this.category = category;
+        this.deadline = deadline;
+        this.externalUrl = externalUrl;
+        this.imageUrl = imageUrl;
+        this.status = status;
+    }
+
+    public void close() {
+        this.status = CLOSED_STATUS;
+    }
+
     public static String activeStatus() {
         return ACTIVE_STATUS;
+    }
+
+    public static String closedStatus() {
+        return CLOSED_STATUS;
     }
 }

@@ -8,11 +8,19 @@ The Sports catalog is documented in [`docs/contracts/sports-v1.md`](../docs/cont
 
 - `GET /health` verifica a conectividade com o banco PostgreSQL próprio (`unir_engagement`) e retorna `200`.
 - `GET /api/v1/events?page=0&size=20` lista eventos ativos em ordem de início, no envelope paginado compartilhado. Eventos pagos externos com prazo encerrado não aparecem na descoberta; eventos cancelados não aparecem na listagem.
+- `GET /api/v1/events/organizer-contexts` consulta no Campus (`/internal/v1/event-organizers`), com o token original do usuário, os contextos de organização disponíveis (`PROFESSOR`, `DEPARTMENT`, `ACADEMIC_UNIT`, `UNIVERSITY`, `ACADEMIC_ENTITY`, `COMMUNITY`).
+- `GET /api/v1/events/managed?page=0&size=20` lista todos os eventos (ativos e cancelados) pertencentes aos contextos de organização autorizados do usuário.
+- `POST /api/v1/events` cria um evento em nome de um contexto autorizado pelo Campus. Todos os organizadores podem criar `INTERNAL_FREE`. Eventos pagos criados por `PROFESSOR`, `DEPARTMENT`, `ACADEMIC_UNIT` ou `UNIVERSITY` usam obrigatoriamente `INTERNAL_PAID` (Saga de pagamento Pix); eventos pagos criados por `COMMUNITY` ou `ACADEMIC_ENTITY` usam obrigatoriamente `EXTERNAL_PAID` (com `externalUrl`).
 - `GET /api/v1/events/{eventId}` retorna os detalhes de um evento persistido (inclusive cancelado) ou `404`.
+- `PATCH /api/v1/events/{eventId}` permite ao organizador autorizado editar dados, datas, capacidade, preço/link e configuração de presença de um evento ativo.
+- `DELETE /api/v1/events/{eventId}` executa o cancelamento institucional (`status=CANCELLED`) quando solicitado pelo organizador autorizado, cancelando inscrições (`CANCELLED_BY_EVENT`) e disparando eventos de Outbox para Payment (estorno integral) e Access.
 - `GET /api/v1/opportunities?page=0&size=20` lista oportunidades ativas em ordem de publicação, com filtros opcionais `q`, `category` e `publisherType`. A página aceita de 1 a 100 itens; `publisherType` aceita `PROFESSOR`, `DEPARTMENT` ou `ACADEMIC_ENTITY`. O prazo encerrado ou status diferente de `ACTIVE` remove o registro da lista.
 - `GET /api/v1/opportunities/{opportunityId}` retorna detalhes persistidos inclusive após o prazo ou mudança de status, preservando o histórico consultável. O modelo e as regras estão em [`docs/contracts/opportunities-v1.md`](../docs/contracts/opportunities-v1.md).
 - `GET /api/v1/opportunities/publisher-contexts` consulta no Campus, com o token original do usuário, os contextos de publicação disponíveis.
+- `GET /api/v1/opportunities/managed?page=0&size=20` lista todas as oportunidades (ativas, expiradas ou encerradas) vinculadas aos contextos de publicação autorizados do usuário no Campus.
 - `POST /api/v1/opportunities` publica em um contexto retornado pelo Campus. Engagement confere novamente `publisherType` e `publisherId`, gera `id`, `createdAt` e `ACTIVE`, e falha fechado se Campus estiver indisponível. `COMMUNITY` é proibida. Não há candidatura interna.
+- `PATCH /api/v1/opportunities/{opportunityId}` permite ao publicador autorizado editar os dados da oportunidade, alterar/limpar a data de disponibilidade (`deadline`) e alternar o `status` (`ACTIVE` ou `CLOSED`).
+- `DELETE /api/v1/opportunities/{opportunityId}` encerra logicamente (`status=CLOSED`) a oportunidade no mural ativo quando solicitado pelo publicador autorizado, preservando o registro histórico.
 - A autorização de departamento/entidade vem dos vínculos mantidos pelo Campus; a autorização docente exige `ProfessorAffiliation` `ACTIVE`, criada após aprovação de administrador do departamento. `user_type` autodeclarado não autoriza publicação.
 - `POST /api/v1/events/{eventId}/registrations` inscreve o titular do JWT em evento `INTERNAL_FREE` (`201`, `CONFIRMED`) ou reserva vaga de evento `INTERNAL_PAID` (`201`, `PENDING_PAYMENT`). A reserva paga expõe `paymentDeadlineAt` (10 minutos) e `reservationExpiresAt` (15 minutos), com `RegistrationPaymentRequested` gravado no Outbox na mesma transação. Evento cancelado, prazo encerrado, modalidade não suportada, duplicidade ativa, lotação ou preço não configurado retornam `409`.
 - `GET /api/v1/registrations/me?page=0&size=20` lista as inscrições do `sub` autenticado, incluindo os dados do evento e o histórico de cancelamento.
@@ -41,6 +49,7 @@ Os seeds usam IDs fixos e `ON CONFLICT DO NOTHING`, portanto podem ser repetidos
 ## Qualidade
 
 Na pasta `engagement`: `make quality` (`mvn --batch-mode verify`) ou `make test` (`mvn --batch-mode test`), ou pela raiz com `make engagement`.
+
 # Presence handoff
 
 When a free registration is confirmed, or a paid registration is confirmed by a committed `PaymentConfirmed`, Engagement writes `RegistrationConfirmed` to the same transactional Outbox if attendance is enabled. The publisher sends it with routing key `engagement.registration.confirmed.v1`; Access creates its own attendance records idempotently. See [`../docs/contracts/registration-confirmed-v1.md`](../docs/contracts/registration-confirmed-v1.md).
