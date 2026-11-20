@@ -1,0 +1,596 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: campus-db-data
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: campus-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: campus-db
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: campus-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: campus-db
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: campus-db
+        app.kubernetes.io/part-of: unir-platform
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: unir_campus
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: DB_USERNAME
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: DB_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: campus-db-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: campus-db
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: campus-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: campus-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: engagement-db-data
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: engagement-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: engagement-db
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: engagement-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: engagement-db
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: engagement-db
+        app.kubernetes.io/part-of: unir-platform
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: unir_engagement
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: DB_USERNAME
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: DB_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: engagement-db-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: engagement-db
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: engagement-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: engagement-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: payment-db-data
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: payment-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-db
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: payment-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payment-db
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: payment-db
+        app.kubernetes.io/part-of: unir-platform
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: unir_payment
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: DB_USERNAME
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: DB_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: payment-db-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-db
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: payment-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: payment-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: access-db-data
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: access-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: access-db
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: access-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: access-db
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: access-db
+        app.kubernetes.io/part-of: unir-platform
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: unir_access
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: DB_USERNAME
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: DB_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: access-db-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: access-db
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: access-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: access-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: keycloak-db-data
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: keycloak-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak-db
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: keycloak-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak-db
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: keycloak-db
+        app.kubernetes.io/part-of: unir-platform
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: keycloak
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: unir-keycloak-credentials
+                  key: KEYCLOAK_DB_USERNAME
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-keycloak-credentials
+                  key: KEYCLOAK_DB_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: keycloak-db-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-db
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: keycloak-db
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: keycloak-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: engagement-read-db-data
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: engagement-read-db
+    app.kubernetes.io/component: cqrs-read-model
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: engagement-read-db
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: engagement-read-db
+    app.kubernetes.io/component: cqrs-read-model
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: engagement-read-db
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: engagement-read-db
+        app.kubernetes.io/component: cqrs-read-model
+        app.kubernetes.io/part-of: unir-platform
+    spec:
+      containers:
+        - name: mongodb
+          image: mongo:7.0
+          ports:
+            - containerPort: 27017
+              name: mongodb
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: unir-mongodb-credentials
+                  key: MONGODB_USERNAME
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-mongodb-credentials
+                  key: MONGODB_PASSWORD
+            - name: MONGO_INITDB_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-cqrs-mongodb-config
+                  key: MONGODB_DATABASE
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+          readinessProbe:
+            exec:
+              command:
+                - mongosh
+                - --quiet
+                - --eval
+                - db.adminCommand('ping').ok
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - mongosh
+                - --quiet
+                - --eval
+                - db.adminCommand('ping').ok
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: engagement-read-db-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: engagement-read-db
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: engagement-read-db
+    app.kubernetes.io/component: cqrs-read-model
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: engagement-read-db
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: 27017

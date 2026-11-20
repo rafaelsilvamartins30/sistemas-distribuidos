@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: keycloak
+        app.kubernetes.io/part-of: unir-platform
+    spec:
+      containers:
+        - name: keycloak
+          image: unir-keycloak:local
+          imagePullPolicy: Never
+          args:
+            - start-dev
+            - --import-realm
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 9000
+              name: management
+          env:
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: unir-keycloak-credentials
+                  key: KEYCLOAK_ADMIN_USERNAME
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-keycloak-credentials
+                  key: KEYCLOAK_ADMIN_PASSWORD
+            - name: KC_HOSTNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: KC_HOSTNAME
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: jdbc:postgresql://keycloak-db:5432/keycloak
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: unir-keycloak-credentials
+                  key: KEYCLOAK_DB_USERNAME
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-keycloak-credentials
+                  key: KEYCLOAK_DB_PASSWORD
+            - name: KC_HEALTH_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: KC_HEALTH_ENABLED
+            - name: KC_SPI_REQUIRED_ACTION__UPDATE_PASSWORD__MAX_AUTH_AGE
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: KC_SPI_REQUIRED_ACTION__UPDATE_PASSWORD__MAX_AUTH_AGE
+            - name: KC_SPI_REQUIRED_ACTION__UPDATE_EMAIL__MAX_AUTH_AGE
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: KC_SPI_REQUIRED_ACTION__UPDATE_EMAIL__MAX_AUTH_AGE
+            - name: KC_SPI_REQUIRED_ACTION__UPDATE_EMAIL__VERIFY_EMAIL
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: KC_SPI_REQUIRED_ACTION__UPDATE_EMAIL__VERIFY_EMAIL
+            - name: KC_SPI_REQUIRED_ACTION__CONFIGURE_TOTP__ADD_RECOVERY_CODES
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: KC_SPI_REQUIRED_ACTION__CONFIGURE_TOTP__ADD_RECOVERY_CODES
+          volumeMounts:
+            - name: realm-import
+              mountPath: /opt/keycloak/data/import/unir-realm.json
+              subPath: unir-realm.json
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 9000
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: realm-import
+          configMap:
+            name: unir-keycloak-realm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: keycloak
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+    - name: management
+      port: 9000
+      targetPort: 9000

@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: unir-common-config
+  namespace: unir
+  labels:
+    app.kubernetes.io/part-of: unir-platform
+data:
+  KC_HOSTNAME: "http://localhost:18080"
+  KC_HEALTH_ENABLED: "true"
+  KC_SPI_REQUIRED_ACTION__UPDATE_PASSWORD__MAX_AUTH_AGE: "0"
+  KC_SPI_REQUIRED_ACTION__UPDATE_EMAIL__MAX_AUTH_AGE: "0"
+  KC_SPI_REQUIRED_ACTION__UPDATE_EMAIL__VERIFY_EMAIL: "true"
+  KC_SPI_REQUIRED_ACTION__CONFIGURE_TOTP__ADD_RECOVERY_CODES: "true"
+  KEYCLOAK_ISSUER_URI: "http://localhost:18080/realms/unir"
+  KEYCLOAK_JWK_SET_URI: "http://keycloak:8080/realms/unir/protocol/openid-connect/certs"
+  KEYCLOAK_INTERNAL_URL: "http://keycloak:8080"
+  CAMPUS_URL: "http://campus:3000"
+  ENGAGEMENT_SERVICE_URL: "http://engagement:8080"
+  ACCESS_SERVICE_URL: "http://access:8080"
+  WEB_BFF_URL: "http://web-bff:3000"
+  ADMIN_BFF_URL: "http://admin-bff:3000"
+  WEB_ORIGIN: "http://localhost:18080"
+  ADMIN_WEB_ORIGIN: "http://admin.localhost:18080"
+  VITE_KEYCLOAK_URL: "http://localhost:18080"
+  VITE_KEYCLOAK_REALM: "unir"
+  VITE_KEYCLOAK_CLIENT_ID: "unir-web"
+  VITE_GATEWAY_URL: "http://localhost:18080"
+  RABBITMQ_HOST: "rabbitmq"
+  RABBITMQ_PORT: "5672"
+  PAYMENT_ENV: "local"
+  PAYMENT_SIMULATED_CONFIRMATION_ENABLED: "true"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: unir-cqrs-mongodb-config
+  namespace: unir
+  labels:
+    app.kubernetes.io/component: cqrs-read-model
+    app.kubernetes.io/part-of: unir-platform
+data:
+  MONGODB_HOST: "engagement-read-db"
+  MONGODB_PORT: "27017"
+  MONGODB_DATABASE: "unir_engagement_read"
+  SPRING_DATA_MONGODB_HOST: "engagement-read-db"
+  SPRING_DATA_MONGODB_PORT: "27017"
+  SPRING_DATA_MONGODB_DATABASE: "unir_engagement_read"
+  ENGAGEMENT_READ_DB_HOST: "engagement-read-db"
+  ENGAGEMENT_READ_DB_PORT: "27017"
+  ENGAGEMENT_READ_DB_NAME: "unir_engagement_read"
