@@ -1,20 +1,23 @@
 .DEFAULT_GOAL := quality
 
-UV ?= $(shell PATH="$$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$$PATH" command -v uv 2>/dev/null || echo uv)
+export PATH := $(HOME)/.local/bin:/opt/homebrew/bin:/usr/local/bin:$(PATH)
 
 .PHONY: dependencies quality test lint format
 
 dependencies:
-	PATH="$$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$$PATH" $(UV) sync --extra dev
+	@if ! command -v uv >/dev/null 2>&1; then \
+		curl -LsSf https://astral.sh/uv/install.sh | sh; \
+	fi
+	uv sync --extra dev
 
 lint: dependencies
-	PATH="$$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$$PATH" $(UV) run ruff check src tests
-	PATH="$$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$$PATH" $(UV) run ruff format --check src tests
+	uv run ruff check src tests
+	uv run ruff format --check src tests
 
 format: dependencies
-	PATH="$$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$$PATH" $(UV) run ruff format src tests
+	uv run ruff format src tests
 
 test: dependencies
-	PATH="$$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$$PATH" $(UV) run pytest -v
+	uv run pytest -v
 
 quality: lint test
