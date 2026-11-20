@@ -6,10 +6,18 @@ registrations to `CANCELLED_BY_EVENT`, and writes the integration messages below
 to its Outbox. Consumers use the existing `unir.events` durable topic exchange
 with at-least-once delivery.
 
-The current Campus API exposes manager and administrator IDs as entity data but
-does not provide a contextual authorization operation for a specific Event
-organizer. The cancellation operation therefore remains internal to Engagement;
-no public HTTP route is exposed until that check can use Campus authorization.
+Campus exposes `GET /internal/v1/event-organizers`, returning the authenticated
+subject's verified organizer contexts (`UNIVERSITY`, `ACADEMIC_UNIT`,
+`DEPARTMENT`, `ACADEMIC_ENTITY`, `COMMUNITY`, and verified `PROFESSOR`).
+Engagement validates the caller's original bearer token against Campus on
+`GET /api/v1/events/organizer-contexts`, `GET /api/v1/events/managed`,
+`POST /api/v1/events`, `PATCH /api/v1/events/{eventId}`, and
+`DELETE /api/v1/events/{eventId}` (Web equivalents under `/api/v1/web/events`).
+All authorized organizers may publish `INTERNAL_FREE` events. Paid events
+created by `PROFESSOR`, `DEPARTMENT`, `ACADEMIC_UNIT`, or `UNIVERSITY` must use
+`INTERNAL_PAID` (with the Payment Pix Saga), whereas paid events created by
+`COMMUNITY` or `ACADEMIC_ENTITY` must use `EXTERNAL_PAID` (with an external
+registration URL).
 
 ## `EventCancelled` v1
 

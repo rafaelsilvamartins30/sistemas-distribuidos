@@ -1,7 +1,9 @@
 package br.unir.engagement;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -239,6 +241,72 @@ class OpportunityEndpointTest {
 
         org.junit.jupiter.api.Assertions.assertThrows(DataIntegrityViolationException.class,
                 () -> this.opportunityRepository.saveAndFlush(communityPublished));
+    }
+
+    @Test
+    void publisherCanListManagedOpportunitiesUpdateDeadlineAndCloseOrReopen() throws Exception {
+        Instant now = Instant.now();
+        UUID departmentId = UUID.randomUUID();
+        UUID otherDepartmentId = UUID.randomUUID();
+        Opportunity managedActive = opportunity(UUID.randomUUID(), "Monitoria de Distribuídos",
+                "Apoio às aulas de laboratório.", "DEPARTMENT", departmentId, "MONITORIA", now.plusSeconds(86_400),
+                now.minusSeconds(120), "ACTIVE");
+        Opportunity managedClosed = opportunity(UUID.randomUUID(), "Monitoria encerrada", "Edital anterior.",
+                "DEPARTMENT", departmentId, "MONITORIA", now.minusSeconds(86_400), now.minusSeconds(3_600), "CLOSED");
+        Opportunity otherDepartmentOpportunity = opportunity(UUID.randomUUID(), "Bolsa de outro departamento",
+                "Não deve aparecer nas gerenciadas.", "DEPARTMENT", otherDepartmentId, "PESQUISA",
+                now.plusSeconds(86_400), now.minusSeconds(60), "ACTIVE");
+        this.opportunityRepository.saveAllAndFlush(List.of(managedActive, managedClosed, otherDepartmentOpportunity));
+
+        when(this.campusPublisherClient.getContexts("dept-admin-token"))
+                .thenReturn(new OpportunityPublisherContextsResponse(
+                        List.of(new OpportunityPublisherContext("DEPARTMENT", departmentId, "DCC"))));
+        when(this.campusPublisherClient.getContexts("regular-user-token"))
+                .thenReturn(new OpportunityPublisherContextsResponse(List.of()));
+
+        this.mockMvc.perform(get("/api/v1/opportunities/managed").with(userJwt("dept-admin-token")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.items[0].id").value(managedActive.getId().toString()))
+                .andExpect(jsonPath("$.items[1].id").value(managedClosed.getId().toString()));
+
+        this.mockMvc.perform(get("/api/v1/opportunities/managed").with(userJwt("regular-user-token")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(0))
+                .andExpect(jsonPath("$.items.length()").value(0));
+
+        String futureDeadline = now.plusSeconds(172_800).toString();
+        this.mockMvc
+                .perform(patch("/api/v1/opportunities/{id}", managedActive.getId()).with(userJwt("dept-admin-token"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Monitoria de Sistemas Distribuídos\",\"deadline\":\"" + futureDeadline
+                                + "\",\"externalUrl\":\"https://example.org/novo-edital\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.title").value("Monitoria de Sistemas Distribuídos"))
+                .andExpect(jsonPath("$.externalUrl").value("https://example.org/novo-edital"))
+                .andExpect(jsonPath("$.deadline").value(futureDeadline));
+
+        this.mockMvc
+                .perform(patch("/api/v1/opportunities/{id}", managedActive.getId()).with(userJwt("regular-user-token"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"Tentativa não autorizada\"}"))
+                .andExpect(status().isForbidden());
+
+        this.mockMvc
+                .perform(delete("/api/v1/opportunities/{id}", managedActive.getId()).with(userJwt("dept-admin-token")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
+
+        this.mockMvc.perform(get("/api/v1/opportunities").with(userJwt("regular-user-token")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(otherDepartmentOpportunity.getId().toString()));
+
+        this.mockMvc
+                .perform(patch("/api/v1/opportunities/{id}", managedClosed.getId()).with(userJwt("dept-admin-token"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"ACTIVE\"}"))
+                .andExpect(status().isBadRequest());
+
+        this.mockMvc
+                .perform(patch("/api/v1/opportunities/{id}", managedClosed.getId()).with(userJwt("dept-admin-token"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"ACTIVE\",\"clearDeadline\":true}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.deadline").isEmpty());
     }
 
     private static Opportunity opportunity(UUID id, String title, String description, String publisherType,

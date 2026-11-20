@@ -9,6 +9,15 @@ public record CompetitionResponse(UUID id, String title, UUID sportId, String sp
         long teamEntryPrice, long freeAgentPrice, Instant registrationDeadline, Long drawSeed, String status,
         String format) {
 
+    public CompetitionResponse {
+        tieBreakers = tieBreakers.clone();
+    }
+
+    @Override
+    public String[] tieBreakers() {
+        return tieBreakers.clone();
+    }
+
     public static CompetitionResponse from(Competition competition) {
         return new CompetitionResponse(competition.getId(), competition.getTitle(), competition.getSport().getId(),
                 competition.getSport().getName(), competition.getSkillLevel(), competition.getOrganizerType(),

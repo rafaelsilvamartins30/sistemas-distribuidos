@@ -2,6 +2,7 @@ package br.unir.engagement.repository;
 
 import br.unir.engagement.entity.Opportunity;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -27,4 +28,6 @@ public interface OpportunityRepository extends JpaRepository<Opportunity, UUID> 
             @Param("publisherType") String publisherType, Pageable pageable);
 
     Optional<Opportunity> findById(UUID id);
+
+    Page<Opportunity> findByPublisherIdIn(Collection<UUID> publisherIds, Pageable pageable);
 }

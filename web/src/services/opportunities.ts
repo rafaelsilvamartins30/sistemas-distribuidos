@@ -56,6 +56,18 @@ export interface CreateOpportunityInput {
   imageUrl: string | null;
 }
 
+export interface UpdateOpportunityInput {
+  title?: string;
+  description?: string;
+  category?: string;
+  deadline?: string | null;
+  clearDeadline?: boolean;
+  externalUrl?: string;
+  imageUrl?: string | null;
+  clearImageUrl?: boolean;
+  status?: "ACTIVE" | "CLOSED";
+}
+
 export class OpportunityApiError extends Error {
   constructor(public readonly status: number) {
     super(`Gateway respondeu com status ${status}.`);
@@ -68,7 +80,7 @@ async function request<T>(
   token: string,
   gatewayUrl: string,
   fetchImpl: typeof globalThis.fetch,
-  method: "GET" | "POST" = "GET",
+  method: "GET" | "POST" | "PATCH" | "DELETE" = "GET",
   body?: unknown,
 ): Promise<T> {
   const response = await fetchImpl(`${gatewayUrl.replace(/\/+$/, "")}${path}`, {
@@ -126,6 +138,54 @@ export function createOpportunity(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<Opportunity> {
   return request("/api/v1/web/opportunities", token, gatewayUrl, fetchImpl, "POST", payload);
+}
+
+export function getManagedOpportunities(
+  token: string,
+  page = 0,
+  size = 20,
+  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<OpportunityPage> {
+  const query = new URLSearchParams({ page: String(page), size: String(size) });
+  return request<OpportunityPage>(
+    `/api/v1/web/opportunities/managed?${query.toString()}`,
+    token,
+    gatewayUrl,
+    fetchImpl,
+  );
+}
+
+export function updateOpportunity(
+  token: string,
+  opportunityId: string,
+  payload: UpdateOpportunityInput,
+  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<Opportunity> {
+  return request<Opportunity>(
+    `/api/v1/web/opportunities/${encodeURIComponent(opportunityId)}`,
+    token,
+    gatewayUrl,
+    fetchImpl,
+    "PATCH",
+    payload,
+  );
+}
+
+export function closeOpportunity(
+  token: string,
+  opportunityId: string,
+  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<Opportunity> {
+  return request<Opportunity>(
+    `/api/v1/web/opportunities/${encodeURIComponent(opportunityId)}`,
+    token,
+    gatewayUrl,
+    fetchImpl,
+    "DELETE",
+  );
 }
 
 export function createProfessorVerificationRequest(

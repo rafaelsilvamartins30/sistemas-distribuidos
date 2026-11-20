@@ -32,9 +32,9 @@ public class SecurityConfiguration {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        return http.cors(cors -> cors.configurationSource(this.corsConfigurationSource()))
-                .csrf(AbstractHttpConfigurer::disable)
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        return http.cors(cors -> cors.configurationSource(this.corsConfigurationSource())).csrf(
+                AbstractHttpConfigurer::disable).sessionManagement(
+                        session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(requests -> requests.requestMatchers(HttpMethod.GET, "/api/v1/me")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/users")
@@ -47,9 +47,19 @@ public class SecurityConfiguration {
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/v1/web/events", "/api/v1/web/events/*")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/web/events")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/web/events/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/web/events/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/v1/web/opportunities", "/api/v1/web/opportunities/*")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/web/opportunities")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/web/opportunities/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/web/opportunities/*")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/web/professor-verification-requests",
                                 "/api/v1/web/professor-verification-requests/*/approve",

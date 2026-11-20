@@ -180,6 +180,26 @@ public class Event {
         return this.status;
     }
 
+    public void updateDetails(String title, String description, String imageUrl, String location, Instant startsAt,
+            Instant endsAt, String category, Integer capacity, Instant registrationDeadline,
+            RegistrationMode registrationMode, Long price, String externalUrl, boolean attendanceEnabled,
+            AttendanceMode attendanceMode) {
+        this.title = title;
+        this.description = description;
+        this.imageUrl = imageUrl;
+        this.location = location;
+        this.startsAt = startsAt;
+        this.endsAt = endsAt;
+        this.category = category;
+        this.capacity = capacity;
+        this.registrationDeadline = registrationDeadline;
+        this.registrationMode = registrationMode;
+        this.price = price;
+        this.externalUrl = externalUrl;
+        this.attendanceEnabled = attendanceEnabled;
+        this.attendanceMode = attendanceMode;
+    }
+
     /**
      * Marks this event terminally cancelled; this entity exposes no reactivation
      * operation.

@@ -4,15 +4,17 @@ import type Keycloak from "keycloak-js";
 import { Icon } from "../components/Icon";
 import { OpportunityCard } from "../components/OpportunityCard";
 import { PaginationControls } from "../components/PaginationControls";
-import { SearchField } from "../components/SearchField";
 import {
   OpportunityApiError,
+  closeOpportunity,
   createOpportunity,
+  getManagedOpportunities,
   getOpportunity,
   getOpportunities,
   getOpportunityPublisherContexts,
   getProfessorVerificationRequests,
   reviewProfessorVerificationRequest,
+  updateOpportunity,
   type OpportunityPublisherContext,
   type ProfessorVerificationRequest,
   type Opportunity,
@@ -24,12 +26,6 @@ interface WebContext {
 }
 
 const pageSize = 10;
-const publisherOptions = [
-  { value: "", label: "Todos" },
-  { value: "PROFESSOR", label: "Professores" },
-  { value: "DEPARTMENT", label: "Departamentos" },
-  { value: "ACADEMIC_ENTITY", label: "Entidades acadêmicas" },
-];
 
 function publisherLabel(publisherType: string): string {
   switch (publisherType) {
@@ -45,8 +41,16 @@ function publisherLabel(publisherType: string): string {
 }
 
 function formatDate(value?: string | null): string {
-  if (!value) return "Não informado";
+  if (!value) return "Sem data limite";
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "long" }).format(new Date(value));
+}
+
+function toDateTimeLocalValue(iso?: string | null): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 }
 
 function isAvailable(opportunity: Opportunity): boolean {
@@ -57,9 +61,6 @@ function isAvailable(opportunity: Opportunity): boolean {
 
 export function OpportunitiesPage() {
   const { keycloak } = useOutletContext<WebContext>();
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("");
-  const [publisherType, setPublisherType] = useState("");
   const [page, setPage] = useState(0);
   const [results, setResults] = useState<OpportunityPage | null>(null);
   const [loading, setLoading] = useState(true);
@@ -67,6 +68,7 @@ export function OpportunitiesPage() {
   const [workflowLoading, setWorkflowLoading] = useState(true);
   const [workflowError, setWorkflowError] = useState(false);
   const [publisherContexts, setPublisherContexts] = useState<OpportunityPublisherContext[]>([]);
+  const [managedOpportunities, setManagedOpportunities] = useState<Opportunity[]>([]);
   const [reviewQueues, setReviewQueues] = useState<
     { context: OpportunityPublisherContext; items: ProfessorVerificationRequest[] }[]
   >([]);
@@ -83,6 +85,14 @@ export function OpportunitiesPage() {
   const [publishing, setPublishing] = useState(false);
   const [publishingMessage, setPublishingMessage] = useState("");
   const [reviewMessage, setReviewMessage] = useState("");
+  const [editingOpportunity, setEditingOpportunity] = useState<Opportunity | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editDeadline, setEditDeadline] = useState("");
+  const [editExternalUrl, setEditExternalUrl] = useState("");
+  const [editImageUrl, setEditImageUrl] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
     document.title = "UNIR — Oportunidades";
@@ -97,9 +107,6 @@ export function OpportunitiesPage() {
         const response = await getOpportunities(keycloak.token, {
           page,
           size: pageSize,
-          q: query,
-          category,
-          publisherType,
         });
         if (active) setResults(response);
       } catch {
@@ -113,7 +120,7 @@ export function OpportunitiesPage() {
     return () => {
       active = false;
     };
-  }, [category, keycloak, opportunityReload, page, publisherType, query]);
+  }, [keycloak, opportunityReload, page]);
 
   useEffect(() => {
     let active = true;
@@ -126,15 +133,21 @@ export function OpportunitiesPage() {
         if (!keycloak.token) throw new Error("Token de acesso indisponível.");
         const contexts = (await getOpportunityPublisherContexts(keycloak.token)).items;
         const departmentContexts = contexts.filter((context) => context.publisherType === "DEPARTMENT");
-        const queues = await Promise.all(
-          departmentContexts.map(async (context) => ({
-            context,
-            items: (await getProfessorVerificationRequests(keycloak.token!, context.publisherId)).items,
-          })),
-        );
+        const [queues, managedPage] = await Promise.all([
+          Promise.all(
+            departmentContexts.map(async (context) => ({
+              context,
+              items: (await getProfessorVerificationRequests(keycloak.token!, context.publisherId)).items,
+            })),
+          ),
+          contexts.length > 0
+            ? getManagedOpportunities(keycloak.token, 0, 50)
+            : Promise.resolve({ items: [], page: 0, size: 50, totalElements: 0, totalPages: 0 }),
+        ]);
         if (active) {
           setPublisherContexts(contexts);
           setReviewQueues(queues);
+          setManagedOpportunities(managedPage.items);
           setPublisherKey((current) =>
             current && contexts.some((context) => `${context.publisherType}:${context.publisherId}` === current)
               ? current
@@ -154,16 +167,22 @@ export function OpportunitiesPage() {
     return () => {
       active = false;
     };
-  }, [keycloak, workflowReload]);
-
-  function updateFilter(update: () => void) {
-    update();
-    setPage(0);
-  }
+  }, [keycloak, opportunityReload, workflowReload]);
 
   const selectedPublisher = publisherContexts.find(
     (context) => `${context.publisherType}:${context.publisherId}` === publisherKey,
   );
+
+  function startEditing(opportunity: Opportunity) {
+    setEditingOpportunity(opportunity);
+    setEditTitle(opportunity.title);
+    setEditDescription(opportunity.description);
+    setEditCategory(opportunity.category);
+    setEditDeadline(toDateTimeLocalValue(opportunity.deadline));
+    setEditExternalUrl(opportunity.externalUrl);
+    setEditImageUrl(opportunity.imageUrl ?? "");
+    setPublishingMessage("");
+  }
 
   async function submitOpportunity(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -196,10 +215,74 @@ export function OpportunitiesPage() {
       setPublishingMessage(
         requestError instanceof OpportunityApiError && requestError.status === 403
           ? "O Campus não confirmou esse vínculo para publicação. Atualize a página e confira seus acessos."
-          : "Não foi possível publicar. Confira os campos e tente novamente.",
+          : "Não foi possível publicar. Confira os campos e a data de disponibilidade.",
       );
     } finally {
       setPublishing(false);
+    }
+  }
+
+  async function submitEditOpportunity(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingOpportunity) return;
+    setSavingEdit(true);
+    setPublishingMessage("");
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+      await updateOpportunity(keycloak.token, editingOpportunity.id, {
+        title: editTitle,
+        description: editDescription,
+        category: editCategory,
+        deadline: editDeadline ? new Date(editDeadline).toISOString() : null,
+        clearDeadline: !editDeadline,
+        externalUrl: editExternalUrl,
+        imageUrl: editImageUrl.trim() || null,
+        clearImageUrl: !editImageUrl.trim(),
+        status: "ACTIVE",
+      });
+      setPublishingMessage("Oportunidade atualizada com sucesso.");
+      setEditingOpportunity(null);
+      setOpportunityReload((value) => value + 1);
+    } catch {
+      setPublishingMessage(
+        "Não foi possível atualizar a oportunidade. Verifique se a data de disponibilidade é futura.",
+      );
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function handleRemoveOpportunity(opportunityId: string) {
+    setPublishingMessage("");
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+      await closeOpportunity(keycloak.token, opportunityId);
+      if (editingOpportunity?.id === opportunityId) {
+        setEditingOpportunity(null);
+      }
+      setPublishingMessage("Oportunidade removida do mural ativo.");
+      setOpportunityReload((value) => value + 1);
+    } catch {
+      setPublishingMessage("Não foi possível remover a oportunidade.");
+    }
+  }
+
+  async function handleReactivateOpportunity(opportunity: Opportunity) {
+    setPublishingMessage("");
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+      const deadlineExpired = opportunity.deadline != null && new Date(opportunity.deadline).getTime() <= Date.now();
+      await updateOpportunity(keycloak.token, opportunity.id, {
+        status: "ACTIVE",
+        ...(deadlineExpired ? { clearDeadline: true } : {}),
+      });
+      setPublishingMessage("Oportunidade reativada no mural.");
+      setOpportunityReload((value) => value + 1);
+    } catch {
+      setPublishingMessage("Não foi possível reativar. Ajuste a data de disponibilidade em Editar.");
     }
   }
 
@@ -221,11 +304,11 @@ export function OpportunitiesPage() {
     <div className="browse-page opportunities-page">
       <header className="opportunity-hero">
         <div className="opportunity-hero-copy">
-          <p className="eyebrow">Campus integrado · curadoria acadêmica e profissional</p>
+          <p className="eyebrow">Campus integrado · divulgação acadêmica e profissional</p>
           <h1>Mural de Oportunidades &amp; Bolsas</h1>
           <p>
-            Estágios, bolsas de iniciação científica, projetos de pesquisa e extensão divulgados por departamentos,
-            professores e entidades acadêmicas da universidade.
+            Estágios, bolsas de iniciação científica, projetos de pesquisa e extensão publicados por departamentos,
+            entidades acadêmicas e professores verificados.
           </p>
         </div>
         <div className="opportunity-active-count" aria-live="polite">
@@ -234,7 +317,7 @@ export function OpportunitiesPage() {
           </span>
           <span>
             <strong>{loading && !results ? "—" : total}</strong>
-            <small>oportunidades ativas</small>
+            <small>oportunidades disponíveis</small>
           </span>
         </div>
       </header>
@@ -245,237 +328,277 @@ export function OpportunitiesPage() {
         </div>
         <div>
           <div className="opportunity-disclosure-heading">
-            <h2 id="opportunity-disclosure-title">Canal de divulgação e encaminhamento externo</h2>
+            <h2 id="opportunity-disclosure-title">Informações da oportunidade e inscrição externa</h2>
             <span>Diretriz UNIR</span>
           </div>
           <p>
-            A UNIR divulga oportunidades validadas pelos publicadores cadastrados, mas não recebe currículos nem
-            intermedeia a seleção. Ao se candidatar, você será encaminhado ao link externo informado no edital.
+            Cada publicação traz as informações da vaga, a data de disponibilidade e o link oficial de inscrição
+            externa. A administração é feita diretamente pelo departamento, entidade acadêmica ou professor publicador.
           </p>
         </div>
       </section>
 
-      <section className="opportunity-publishing-tools" aria-labelledby="opportunity-publishing-title">
-        <div className="opportunity-publishing-heading">
-          <div>
-            <p className="eyebrow">Publicação institucional</p>
-            <h2 id="opportunity-publishing-title">Divulgue uma oportunidade</h2>
-            <p>O Campus confirma seus vínculos institucionais antes de aceitar uma publicação.</p>
-          </div>
-          {!workflowLoading && publisherContexts.length > 0 && (
-            <button className="button button-primary" type="button" onClick={() => setPublishOpen((open) => !open)}>
-              {publishOpen ? "Fechar formulário" : "Publicar oportunidade"}
-            </button>
-          )}
-        </div>
-
-        {workflowLoading ? (
-          <p className="notice" role="status">
-            Verificando acessos institucionais…
-          </p>
-        ) : workflowError ? (
-          <p className="notice notice-error" role="alert">
-            Não foi possível confirmar os acessos no Campus. A publicação está indisponível.
-          </p>
-        ) : publisherContexts.length === 0 ? (
-          <p className="opportunity-access-note">
-            Seu perfil não tem um vínculo de publicação ativo. Professores podem solicitar a verificação institucional
-            abaixo.
-          </p>
-        ) : null}
-
-        {publishingMessage && (
-          <p className="notice" role="status">
-            {publishingMessage}
-          </p>
-        )}
-        {publishOpen && selectedPublisher && (
-          <form className="opportunity-publish-form" onSubmit={submitOpportunity}>
-            <label>
-              Publicar em nome de
-              <select value={publisherKey} onChange={(event) => setPublisherKey(event.target.value)} required>
-                {publisherContexts.map((context) => {
-                  const key = `${context.publisherType}:${context.publisherId}`;
-                  return (
-                    <option key={key} value={key}>
-                      {publisherLabel(context.publisherType)} · {context.name}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-            <div className="opportunity-publish-fields">
-              <label>
-                Título
-                <input value={title} onChange={(event) => setTitle(event.target.value)} required />
-              </label>
-              <label>
-                Categoria
-                <input
-                  value={opportunityCategory}
-                  onChange={(event) => setOpportunityCategory(event.target.value)}
-                  required
-                />
-              </label>
-              <label className="opportunity-publish-wide">
-                Descrição
-                <textarea
-                  value={description}
-                  onChange={(event) => setDescription(event.target.value)}
-                  required
-                  rows={4}
-                />
-              </label>
-              <label>
-                Prazo
-                <input type="datetime-local" value={deadline} onChange={(event) => setDeadline(event.target.value)} />
-              </label>
-              <label>
-                Link externo de inscrição
-                <input
-                  type="url"
-                  value={externalUrl}
-                  onChange={(event) => setExternalUrl(event.target.value)}
-                  placeholder="https://…"
-                  required
-                />
-              </label>
-              <label className="opportunity-publish-wide">
-                Imagem (opcional)
-                <input
-                  type="url"
-                  value={imageUrl}
-                  onChange={(event) => setImageUrl(event.target.value)}
-                  placeholder="https://…"
-                />
-              </label>
+      {(!workflowLoading || publisherContexts.length > 0 || workflowError) && (
+        <section className="opportunity-publishing-tools" aria-labelledby="opportunity-publishing-title">
+          <div className="opportunity-publishing-heading">
+            <div>
+              <p className="eyebrow">Administração de oportunidades</p>
+              <h2 id="opportunity-publishing-title">
+                {publisherContexts.length > 0 ? "Publicar e gerenciar oportunidades" : "Publicação institucional"}
+              </h2>
+              <p>
+                {publisherContexts.length > 0
+                  ? "Publique em nome das entidades que você administra ou como professor verificado, defina a data de disponibilidade, edite ou remova quando quiser."
+                  : "Apenas administradores de departamentos/entidades acadêmicas e professores verificados podem publicar oportunidades."}
+              </p>
             </div>
-            <p className="opportunity-access-note">
-              A UNIR divulga a oportunidade e encaminha para o link externo. Não há candidatura interna.
+            {!workflowLoading && publisherContexts.length > 0 && (
+              <button className="button button-primary" type="button" onClick={() => setPublishOpen((open) => !open)}>
+                {publishOpen ? "Fechar formulário" : "Nova oportunidade"}
+              </button>
+            )}
+          </div>
+
+          {workflowError && (
+            <p className="notice notice-error" role="alert">
+              Não foi possível confirmar os acessos no Campus. A publicação está temporariamente indisponível.
             </p>
-            <button className="button button-primary" type="submit" disabled={publishing}>
-              {publishing ? "Publicando…" : "Publicar no mural"}
-            </button>
-          </form>
-        )}
+          )}
 
-        <details className="opportunity-professor-request">
-          <summary>Sou professor e preciso verificar minha afiliação</summary>
-          <p className="opportunity-access-note">
-            A solicitação usa o curso, o departamento e a matrícula/SIAPE salvos no seu perfil acadêmico. Revise ou
-            atualize esses dados antes de confirmar o pedido.
-          </p>
-          <Link className="button button-secondary" to="/perfil">
-            Revisar perfil acadêmico
-          </Link>
-        </details>
+          {publishingMessage && (
+            <p className="notice" role="status">
+              {publishingMessage}
+            </p>
+          )}
 
-        {reviewQueues.length > 0 && (
-          <div className="opportunity-review-queues">
-            <h3>Verificações docentes para seu departamento</h3>
-            {reviewMessage && <p role="status">{reviewMessage}</p>}
-            {reviewQueues.map(({ context, items }) => (
-              <section key={context.publisherId} aria-label={`Pedidos de ${context.name}`}>
-                <h4>{context.name}</h4>
-                {items.length === 0 ? (
-                  <p>Nenhum pedido pendente.</p>
-                ) : (
-                  items.map((item) => (
-                    <article className="opportunity-review-item" key={item.id}>
-                      <div>
-                        <strong>{item.requesterName ?? item.title}</strong>
-                        <span>Identificador informado: {item.payload.identifier ?? "não informado"}</span>
-                      </div>
-                      <div className="opportunity-review-actions">
+          {publishOpen && selectedPublisher && (
+            <form className="opportunity-publish-form" onSubmit={submitOpportunity}>
+              <label>
+                Publicar em nome de
+                <select value={publisherKey} onChange={(event) => setPublisherKey(event.target.value)} required>
+                  {publisherContexts.map((context) => {
+                    const key = `${context.publisherType}:${context.publisherId}`;
+                    return (
+                      <option key={key} value={key}>
+                        {publisherLabel(context.publisherType)} · {context.name}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+              <div className="opportunity-publish-fields">
+                <label>
+                  Título
+                  <input value={title} onChange={(event) => setTitle(event.target.value)} required />
+                </label>
+                <label>
+                  Categoria
+                  <input
+                    value={opportunityCategory}
+                    onChange={(event) => setOpportunityCategory(event.target.value)}
+                    placeholder="Ex.: Estágio, Pesquisa, Extensão, Monitoria"
+                    required
+                  />
+                </label>
+                <label className="opportunity-publish-wide">
+                  Informações da oportunidade
+                  <textarea
+                    value={description}
+                    onChange={(event) => setDescription(event.target.value)}
+                    required
+                    rows={4}
+                  />
+                </label>
+                <label>
+                  Data de disponibilidade (opcional)
+                  <input type="datetime-local" value={deadline} onChange={(event) => setDeadline(event.target.value)} />
+                </label>
+                <label>
+                  Link externo de inscrição
+                  <input
+                    type="url"
+                    value={externalUrl}
+                    onChange={(event) => setExternalUrl(event.target.value)}
+                    placeholder="https://…"
+                    required
+                  />
+                </label>
+                <label className="opportunity-publish-wide">
+                  Imagem (opcional)
+                  <input
+                    type="url"
+                    value={imageUrl}
+                    onChange={(event) => setImageUrl(event.target.value)}
+                    placeholder="https://…"
+                  />
+                </label>
+              </div>
+              <button className="button button-primary" type="submit" disabled={publishing}>
+                {publishing ? "Publicando…" : "Publicar no mural"}
+              </button>
+            </form>
+          )}
+
+          {editingOpportunity && (
+            <form className="opportunity-publish-form" onSubmit={submitEditOpportunity}>
+              <h3>Editar oportunidade: {editingOpportunity.title}</h3>
+              <div className="opportunity-publish-fields">
+                <label>
+                  Título
+                  <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} required />
+                </label>
+                <label>
+                  Categoria
+                  <input value={editCategory} onChange={(event) => setEditCategory(event.target.value)} required />
+                </label>
+                <label className="opportunity-publish-wide">
+                  Informações da oportunidade
+                  <textarea
+                    value={editDescription}
+                    onChange={(event) => setEditDescription(event.target.value)}
+                    required
+                    rows={4}
+                  />
+                </label>
+                <label>
+                  Data de disponibilidade (vazio = sem data limite)
+                  <input
+                    type="datetime-local"
+                    value={editDeadline}
+                    onChange={(event) => setEditDeadline(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Link externo de inscrição
+                  <input
+                    type="url"
+                    value={editExternalUrl}
+                    onChange={(event) => setEditExternalUrl(event.target.value)}
+                    required
+                  />
+                </label>
+                <label className="opportunity-publish-wide">
+                  Imagem (opcional)
+                  <input
+                    type="url"
+                    value={editImageUrl}
+                    onChange={(event) => setEditImageUrl(event.target.value)}
+                    placeholder="https://…"
+                  />
+                </label>
+              </div>
+              <div className="opportunity-review-actions">
+                <button className="button button-primary" type="submit" disabled={savingEdit}>
+                  {savingEdit ? "Salvando…" : "Salvar alterações"}
+                </button>
+                <button className="button button-secondary" type="button" onClick={() => setEditingOpportunity(null)}>
+                  Cancelar edição
+                </button>
+              </div>
+            </form>
+          )}
+
+          {publisherContexts.length > 0 && managedOpportunities.length > 0 && (
+            <div className="opportunity-review-queues">
+              <h3>Suas oportunidades administradas</h3>
+              {managedOpportunities.map((item) => {
+                const activeNow = isAvailable(item);
+                return (
+                  <article className="opportunity-review-item" key={item.id}>
+                    <div>
+                      <strong>{item.title}</strong>
+                      <span>
+                        {publisherLabel(item.publisherType)} · {item.category} · Disponível até:{" "}
+                        {formatDate(item.deadline)} · Status: {activeNow ? "Ativa no mural" : "Fora do mural"}
+                      </span>
+                    </div>
+                    <div className="opportunity-review-actions">
+                      <button className="button button-secondary" type="button" onClick={() => startEditing(item)}>
+                        Editar / Data
+                      </button>
+                      {item.status === "ACTIVE" ? (
                         <button
                           className="button button-secondary"
                           type="button"
-                          onClick={() => void reviewVerificationRequest(item.id, "reject")}
+                          onClick={() => void handleRemoveOpportunity(item.id)}
                         >
-                          Recusar
+                          Apagar do mural
                         </button>
+                      ) : (
                         <button
                           className="button button-primary"
                           type="button"
-                          onClick={() => void reviewVerificationRequest(item.id, "approve")}
+                          onClick={() => void handleReactivateOpportunity(item)}
                         >
-                          Aprovar vínculo
+                          Reativar
                         </button>
-                      </div>
-                    </article>
-                  ))
-                )}
-              </section>
-            ))}
-          </div>
-        )}
-      </section>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
 
-      <section className="opportunity-filter-panel" aria-label="Buscar e filtrar oportunidades">
-        <div className="opportunity-filter-search" role="search" aria-label="Buscar oportunidades">
-          <SearchField
-            label="Buscar oportunidades"
-            placeholder="Buscar por cargo, laboratório, tecnologia ou departamento…"
-            value={query}
-            onChange={(value) => updateFilter(() => setQuery(value))}
-          />
-          <label className="opportunity-category-filter">
-            <span>Categoria</span>
-            <input
-              type="search"
-              value={category}
-              onChange={(event) => updateFilter(() => setCategory(event.target.value))}
-              placeholder="Ex.: estágio, pesquisa…"
-              aria-label="Filtrar por categoria"
-            />
-          </label>
-        </div>
-        <div className="opportunity-publisher-filter">
-          <span className="opportunity-filter-label">Publicador:</span>
-          <div className="opportunity-filter-pills" role="group" aria-label="Filtrar por publicador">
-            {publisherOptions.map((option) => (
-              <button
-                key={option.value || "all"}
-                type="button"
-                className={publisherType === option.value ? "is-selected" : ""}
-                aria-pressed={publisherType === option.value}
-                onClick={() => updateFilter(() => setPublisherType(option.value))}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
+          {publisherContexts.length === 0 && (
+            <details className="opportunity-professor-request">
+              <summary>Sou professor e preciso verificar minha afiliação</summary>
+              <p className="opportunity-access-note">
+                A solicitação usa o departamento e a matrícula/SIAPE salvos no seu perfil acadêmico.
+              </p>
+              <Link className="button button-secondary" to="/perfil">
+                Revisar perfil acadêmico
+              </Link>
+            </details>
+          )}
 
-      <section className="opportunity-tips" aria-labelledby="opportunity-tips-title">
-        <div className="opportunity-tips-heading">
-          <h2 id="opportunity-tips-title">
-            <Icon name="shield" width="20" height="20" /> Antes de se inscrever
-          </h2>
-          <span>Orientações para candidatura</span>
-        </div>
-        <div className="opportunity-tip-grid">
-          <article>
-            <strong>Leia os requisitos</strong>
-            <span>Confira curso, período e documentos no edital.</span>
-          </article>
-          <article>
-            <strong>Confira o prazo</strong>
-            <span>O prazo exibido corresponde ao informado pelo publicador.</span>
-          </article>
-          <article>
-            <strong>Use o canal oficial</strong>
-            <span>A inscrição é feita diretamente no link externo.</span>
-          </article>
-        </div>
-      </section>
+          {reviewQueues.length > 0 && (
+            <div className="opportunity-review-queues">
+              <h3>Verificações docentes para seu departamento</h3>
+              {reviewMessage && <p role="status">{reviewMessage}</p>}
+              {reviewQueues.map(({ context, items }) => (
+                <section key={context.publisherId} aria-label={`Pedidos de ${context.name}`}>
+                  <h4>{context.name}</h4>
+                  {items.length === 0 ? (
+                    <p>Nenhum pedido pendente.</p>
+                  ) : (
+                    items.map((item) => (
+                      <article className="opportunity-review-item" key={item.id}>
+                        <div>
+                          <strong>{item.requesterName ?? item.title}</strong>
+                          <span>Identificador informado: {item.payload.identifier ?? "não informado"}</span>
+                        </div>
+                        <div className="opportunity-review-actions">
+                          <button
+                            className="button button-secondary"
+                            type="button"
+                            onClick={() => void reviewVerificationRequest(item.id, "reject")}
+                          >
+                            Recusar
+                          </button>
+                          <button
+                            className="button button-primary"
+                            type="button"
+                            onClick={() => void reviewVerificationRequest(item.id, "approve")}
+                          >
+                            Aprovar vínculo
+                          </button>
+                        </div>
+                      </article>
+                    ))
+                  )}
+                </section>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="opportunity-results" aria-labelledby="opportunity-results-title">
         <div className="opportunity-results-heading">
           <div>
-            <h2 id="opportunity-results-title">Oportunidades abertas</h2>
-            <p>{loading ? "Atualizando resultados…" : `${total} resultados`}</p>
+            <h2 id="opportunity-results-title">Oportunidades disponíveis</h2>
+            <p>{loading ? "Atualizando mural…" : `${total} oportunidades ativas`}</p>
           </div>
           {results && results.totalPages > 0 && (
             <span>
@@ -500,15 +623,9 @@ export function OpportunitiesPage() {
           </div>
         ) : (
           <div className="empty-state opportunity-empty-state">
-            <Icon name="search" width="24" height="24" />
-            <strong>
-              {query || category || publisherType ? "Nenhum resultado encontrado" : "Nenhuma oportunidade ativa"}
-            </strong>
-            <span>
-              {query || category || publisherType
-                ? "Ajuste os filtros para buscar outras oportunidades."
-                : "As oportunidades divulgadas pela universidade aparecerão aqui."}
-            </span>
+            <Icon name="opportunity" width="24" height="24" />
+            <strong>Nenhuma oportunidade ativa no momento</strong>
+            <span>As oportunidades divulgadas por departamentos, entidades e professores aparecerão aqui.</span>
           </div>
         )}
 
@@ -524,8 +641,18 @@ export function OpportunityDetailPage() {
   const { keycloak } = useOutletContext<WebContext>();
   const { opportunityId = "" } = useParams();
   const [opportunity, setOpportunity] = useState<Opportunity | null>(null);
+  const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<"not-found" | "unavailable" | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editDeadline, setEditDeadline] = useState("");
+  const [editExternalUrl, setEditExternalUrl] = useState("");
+  const [editImageUrl, setEditImageUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState("");
 
   useEffect(() => {
     document.title = "UNIR — Detalhes da oportunidade";
@@ -535,8 +662,22 @@ export function OpportunityDetailPage() {
       try {
         await keycloak.updateToken(30);
         if (!keycloak.token || !opportunityId) throw new Error("Oportunidade indisponível.");
-        const response = await getOpportunity(keycloak.token, opportunityId);
-        if (active) setOpportunity(response);
+        const [response, contextsResponse] = await Promise.all([
+          getOpportunity(keycloak.token, opportunityId),
+          getOpportunityPublisherContexts(keycloak.token).catch(() => ({ items: [] })),
+        ]);
+        if (!active) return;
+        setOpportunity(response);
+        const isManager = contextsResponse.items.some(
+          (ctx) => ctx.publisherType === response.publisherType && ctx.publisherId === response.publisherId,
+        );
+        setCanManage(isManager);
+        setEditTitle(response.title);
+        setEditDescription(response.description);
+        setEditCategory(response.category);
+        setEditDeadline(toDateTimeLocalValue(response.deadline));
+        setEditExternalUrl(response.externalUrl);
+        setEditImageUrl(response.imageUrl ?? "");
       } catch (requestError) {
         if (!active) return;
         setFailure(
@@ -552,6 +693,52 @@ export function OpportunityDetailPage() {
       active = false;
     };
   }, [keycloak, opportunityId]);
+
+  async function handleSaveEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!opportunity) return;
+    setBusy(true);
+    setFeedback("");
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token indisponível.");
+      const updated = await updateOpportunity(keycloak.token, opportunity.id, {
+        title: editTitle,
+        description: editDescription,
+        category: editCategory,
+        deadline: editDeadline ? new Date(editDeadline).toISOString() : null,
+        clearDeadline: !editDeadline,
+        externalUrl: editExternalUrl,
+        imageUrl: editImageUrl.trim() || null,
+        clearImageUrl: !editImageUrl.trim(),
+        status: "ACTIVE",
+      });
+      setOpportunity(updated);
+      setEditing(false);
+      setFeedback("Oportunidade atualizada.");
+    } catch {
+      setFeedback("Não foi possível salvar. Confira se a data de disponibilidade está no futuro.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleClose() {
+    if (!opportunity) return;
+    setBusy(true);
+    setFeedback("");
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token indisponível.");
+      const updated = await closeOpportunity(keycloak.token, opportunity.id);
+      setOpportunity(updated);
+      setFeedback("Oportunidade removida do mural ativo.");
+    } catch {
+      setFeedback("Não foi possível remover a oportunidade.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -591,20 +778,20 @@ export function OpportunityDetailPage() {
         <div className="opportunity-detail-badges">
           <span className="opportunity-type">{opportunity.category}</span>
           <span className={available ? "opportunity-detail-status" : "opportunity-detail-status is-closed"}>
-            {available ? "Oportunidade ativa" : "Não disponível para candidatura"}
+            {available ? "Oportunidade ativa" : "Inscrições encerradas"}
           </span>
         </div>
         <h1>{opportunity.title}</h1>
         <p className="opportunity-detail-publisher">Publicada por {publisherLabel(opportunity.publisherType)}</p>
         <section className="detail-copy-section">
-          <h2>Sobre a oportunidade</h2>
+          <h2>Informações da oportunidade</h2>
           <p>{opportunity.description}</p>
         </section>
         <div className="detail-info-grid opportunity-detail-info">
           <div>
             <Icon name="calendar" />
             <span>
-              <small>Prazo de inscrição</small>
+              <small>Disponível até</small>
               <strong>{formatDate(opportunity.deadline)}</strong>
             </span>
           </div>
@@ -618,15 +805,8 @@ export function OpportunityDetailPage() {
           <div>
             <Icon name="profile" />
             <span>
-              <small>Tipo de publicador</small>
+              <small>Publicador</small>
               <strong>{publisherLabel(opportunity.publisherType)}</strong>
-            </span>
-          </div>
-          <div>
-            <Icon name="shield" />
-            <span>
-              <small>Identificador do publicador</small>
-              <strong>{opportunity.publisherId}</strong>
             </span>
           </div>
           <div>
@@ -636,21 +816,14 @@ export function OpportunityDetailPage() {
               <strong>{formatDate(opportunity.createdAt)}</strong>
             </span>
           </div>
-          <div>
-            <Icon name="check" />
-            <span>
-              <small>Status informado</small>
-              <strong>{opportunity.status}</strong>
-            </span>
-          </div>
         </div>
         <div className="opportunity-application-panel">
           <div>
-            <strong>{available ? "Candidatura ou inscrição externa" : "Candidaturas encerradas"}</strong>
+            <strong>{available ? "Inscrição externa" : "Período de disponibilidade encerrado"}</strong>
             <p>
               {available
-                ? "Você seguirá para o endereço externo informado pelo publicador. A UNIR não recebe a candidatura."
-                : "Esta oportunidade continua disponível para consulta, mas não está aberta para candidatura."}
+                ? "Acesse o link oficial informado pelo publicador para realizar sua inscrição."
+                : "Esta oportunidade não está mais aberta para novas inscrições."}
             </p>
           </div>
           {available ? (
@@ -660,14 +833,97 @@ export function OpportunityDetailPage() {
               target="_blank"
               rel="noopener noreferrer"
             >
-              Acessar link externo <Icon name="arrowUpRight" width="17" height="17" />
+              Acessar link de inscrição <Icon name="arrowUpRight" width="17" height="17" />
             </a>
           ) : (
             <span className="button button-secondary" aria-disabled="true">
-              Prazo encerrado
+              Indisponível
             </span>
           )}
         </div>
+
+        {canManage && (
+          <section className="opportunity-publishing-tools" aria-label="Administrar esta oportunidade">
+            <div className="opportunity-publishing-heading">
+              <div>
+                <p className="eyebrow">Administração do publicador</p>
+                <h2>Gerenciar publicação</h2>
+              </div>
+              <div className="opportunity-review-actions">
+                <button className="button button-secondary" type="button" onClick={() => setEditing((open) => !open)}>
+                  {editing ? "Fechar edição" : "Editar / Alterar data"}
+                </button>
+                {opportunity.status === "ACTIVE" && (
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void handleClose()}
+                  >
+                    Apagar do mural
+                  </button>
+                )}
+              </div>
+            </div>
+            {feedback && (
+              <p className="notice" role="status">
+                {feedback}
+              </p>
+            )}
+            {editing && (
+              <form className="opportunity-publish-form" onSubmit={handleSaveEdit}>
+                <div className="opportunity-publish-fields">
+                  <label>
+                    Título
+                    <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} required />
+                  </label>
+                  <label>
+                    Categoria
+                    <input value={editCategory} onChange={(event) => setEditCategory(event.target.value)} required />
+                  </label>
+                  <label className="opportunity-publish-wide">
+                    Informações da oportunidade
+                    <textarea
+                      value={editDescription}
+                      onChange={(event) => setEditDescription(event.target.value)}
+                      required
+                      rows={4}
+                    />
+                  </label>
+                  <label>
+                    Data de disponibilidade (vazio = sem data limite)
+                    <input
+                      type="datetime-local"
+                      value={editDeadline}
+                      onChange={(event) => setEditDeadline(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Link externo de inscrição
+                    <input
+                      type="url"
+                      value={editExternalUrl}
+                      onChange={(event) => setEditExternalUrl(event.target.value)}
+                      required
+                    />
+                  </label>
+                  <label className="opportunity-publish-wide">
+                    Imagem (opcional)
+                    <input
+                      type="url"
+                      value={editImageUrl}
+                      onChange={(event) => setEditImageUrl(event.target.value)}
+                      placeholder="https://…"
+                    />
+                  </label>
+                </div>
+                <button className="button button-primary" type="submit" disabled={busy}>
+                  {busy ? "Salvando…" : "Salvar e manter ativa"}
+                </button>
+              </form>
+            )}
+          </section>
+        )}
       </article>
     </div>
   );

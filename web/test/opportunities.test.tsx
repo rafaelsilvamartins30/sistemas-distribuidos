@@ -5,8 +5,10 @@ import { MemoryRouter } from "react-router-dom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { OpportunityCard } from "../src/components/OpportunityCard.js";
 import {
+  closeOpportunity,
   createOpportunity,
   createProfessorVerificationRequest,
+  getManagedOpportunities,
   getMyProfessorVerificationRequests,
   getOpportunity,
   getOpportunities,
@@ -14,6 +16,7 @@ import {
   getProfessorVerificationRequests,
   OpportunityApiError,
   reviewProfessorVerificationRequest,
+  updateOpportunity,
   type Opportunity,
 } from "../src/services/opportunities.js";
 
@@ -174,4 +177,49 @@ test("the requester reads their own verification status through the Gateway", as
   assert.equal(requestedUrl, "http://localhost:18084/api/v1/web/professor-verification-requests/me");
   assert.deepEqual(requestedHeaders, { Authorization: "Bearer user-token" });
   assert.deepEqual(result, response);
+});
+
+test("managed opportunities, update, and logical close use the authenticated Gateway routes", async () => {
+  const managedPage = { items: [opportunity], page: 0, size: 20, totalElements: 1, totalPages: 1 };
+  const calls: { url: string; method: string; body?: unknown }[] = [];
+  const fetchImpl: typeof globalThis.fetch = async (url, init) => {
+    calls.push({
+      url: String(url),
+      method: init?.method ?? "GET",
+      ...(init?.body !== undefined ? { body: JSON.parse(String(init.body)) } : {}),
+    });
+    const payload =
+      init?.method === "DELETE"
+        ? { ...opportunity, status: "CLOSED" }
+        : init?.method === "PATCH"
+          ? opportunity
+          : managedPage;
+    return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  assert.deepEqual(
+    await getManagedOpportunities("user-token", 0, 20, "http://localhost:18084", fetchImpl),
+    managedPage,
+  );
+  assert.deepEqual(
+    await updateOpportunity(
+      "user-token",
+      opportunity.id,
+      { title: "Novo título", deadline: "2027-07-01T00:00:00Z" },
+      "http://localhost:18084",
+      fetchImpl,
+    ),
+    opportunity,
+  );
+  const closed = await closeOpportunity("user-token", opportunity.id, "http://localhost:18084", fetchImpl);
+  assert.equal(closed.status, "CLOSED");
+  assert.deepEqual(calls, [
+    { url: "http://localhost:18084/api/v1/web/opportunities/managed?page=0&size=20", method: "GET" },
+    {
+      url: `http://localhost:18084/api/v1/web/opportunities/${opportunity.id}`,
+      method: "PATCH",
+      body: { title: "Novo título", deadline: "2027-07-01T00:00:00Z" },
+    },
+    { url: `http://localhost:18084/api/v1/web/opportunities/${opportunity.id}`, method: "DELETE" },
+  ]);
 });

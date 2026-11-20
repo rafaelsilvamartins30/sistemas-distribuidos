@@ -2,13 +2,18 @@ package br.unir.engagement;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import br.unir.engagement.client.CampusEventOrganizerClient;
+import br.unir.engagement.dto.EventOrganizerContext;
+import br.unir.engagement.dto.EventOrganizerContextsResponse;
 import br.unir.engagement.entity.AttendanceMode;
 import br.unir.engagement.entity.Event;
 import br.unir.engagement.entity.EventStatus;
@@ -48,6 +53,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
@@ -84,6 +90,9 @@ class EngagementEndpointTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @MockitoBean
+    private CampusEventOrganizerClient campusOrganizerClient;
 
     @BeforeEach
     void clearEvents() {
@@ -606,6 +615,105 @@ class EngagementEndpointTest {
         org.junit.jupiter.api.Assertions.assertEquals(0, this.registrationRepository.count());
     }
 
+    @Test
+    void authorizedOrganizersCanCreateEditAndCancelEventsFollowingPaidModeRules() throws Exception {
+        UUID departmentId = UUID.randomUUID();
+        UUID communityId = UUID.randomUUID();
+        Instant now = Instant.now();
+        String startsAt = now.plus(Duration.ofDays(5)).toString();
+        String endsAt = now.plus(Duration.ofDays(5)).plusSeconds(7200).toString();
+        String deadline = now.plus(Duration.ofDays(4)).toString();
+
+        when(this.campusOrganizerClient.getContexts("organizer-token")).thenReturn(
+                new EventOrganizerContextsResponse(List.of(new EventOrganizerContext("DEPARTMENT", departmentId, "DCC"),
+                        new EventOrganizerContext("COMMUNITY", communityId, "Comunidade de Jogos"))));
+        when(this.campusOrganizerClient.getContexts("regular-token"))
+                .thenReturn(new EventOrganizerContextsResponse(List.of()));
+
+        String departmentInternalPaidBody = """
+                {
+                  "title": "Workshop de Sistemas Distribuídos",
+                  "description": "Laboratório prático com inscrição paga interna via Pix.",
+                  "organizerType": "DEPARTMENT",
+                  "organizerId": "%s",
+                  "location": "Auditório DCC",
+                  "startsAt": "%s",
+                  "endsAt": "%s",
+                  "category": "ACADEMIC",
+                  "capacity": 40,
+                  "registrationDeadline": "%s",
+                  "registrationMode": "INTERNAL_PAID",
+                  "price": 2500,
+                  "attendanceEnabled": true,
+                  "attendanceMode": "PARTICIPANT_SCANS_EVENT"
+                }
+                """.formatted(departmentId, startsAt, endsAt, deadline);
+
+        String createdResponse = this.mockMvc
+                .perform(post("/api/v1/events").with(userJwtWithToken("organizer-user", "organizer-token"))
+                        .contentType(MediaType.APPLICATION_JSON).content(departmentInternalPaidBody))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.organizerType").value("DEPARTMENT"))
+                .andExpect(jsonPath("$.registrationMode").value("INTERNAL_PAID"))
+                .andExpect(jsonPath("$.price").value(2500)).andReturn().getResponse().getContentAsString();
+        UUID departmentEventId = UUID.fromString(this.objectMapper.readTree(createdResponse).get("id").asText());
+
+        String departmentInvalidExternalBody = departmentInternalPaidBody
+                .replace("\"INTERNAL_PAID\"", "\"EXTERNAL_PAID\"")
+                .replace("\"price\": 2500", "\"price\": 2500, \"externalUrl\": \"https://example.org/ext\"");
+        this.mockMvc
+                .perform(post("/api/v1/events").with(userJwtWithToken("organizer-user", "organizer-token"))
+                        .contentType(MediaType.APPLICATION_JSON).content(departmentInvalidExternalBody))
+                .andExpect(status().isBadRequest());
+
+        String communityInvalidInternalPaidBody = departmentInternalPaidBody.replace("\"DEPARTMENT\"", "\"COMMUNITY\"")
+                .replace(departmentId.toString(), communityId.toString());
+        this.mockMvc
+                .perform(post("/api/v1/events").with(userJwtWithToken("organizer-user", "organizer-token"))
+                        .contentType(MediaType.APPLICATION_JSON).content(communityInvalidInternalPaidBody))
+                .andExpect(status().isBadRequest());
+
+        String communityExternalPaidBody = """
+                {
+                  "title": "Torneio Cultural da Comunidade",
+                  "description": "Inscrição paga em link externo da comunidade.",
+                  "organizerType": "COMMUNITY",
+                  "organizerId": "%s",
+                  "location": "Centro de Convivência",
+                  "startsAt": "%s",
+                  "endsAt": "%s",
+                  "category": "CULTURE",
+                  "capacity": 100,
+                  "registrationDeadline": "%s",
+                  "registrationMode": "EXTERNAL_PAID",
+                  "price": 1500,
+                  "externalUrl": "https://example.org/comunidade/inscricao"
+                }
+                """.formatted(communityId, startsAt, endsAt, deadline);
+        this.mockMvc
+                .perform(post("/api/v1/events").with(userJwtWithToken("organizer-user", "organizer-token"))
+                        .contentType(MediaType.APPLICATION_JSON).content(communityExternalPaidBody))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.organizerType").value("COMMUNITY"))
+                .andExpect(jsonPath("$.registrationMode").value("EXTERNAL_PAID"))
+                .andExpect(jsonPath("$.externalUrl").value("https://example.org/comunidade/inscricao"));
+
+        this.mockMvc.perform(get("/api/v1/events/managed").with(userJwtWithToken("organizer-user", "organizer-token")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2));
+
+        this.mockMvc.perform(patch("/api/v1/events/{eventId}", departmentEventId)
+                .with(userJwtWithToken("organizer-user", "organizer-token")).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"title\":\"Workshop Atualizado\",\"price\":3000}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Workshop Atualizado")).andExpect(jsonPath("$.price").value(3000));
+
+        this.mockMvc.perform(patch("/api/v1/events/{eventId}", departmentEventId)
+                .with(userJwtWithToken("regular-user", "regular-token")).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"title\":\"Hack\"}")).andExpect(status().isForbidden());
+
+        this.mockMvc
+                .perform(delete("/api/v1/events/{eventId}", departmentEventId)
+                        .with(userJwtWithToken("organizer-user", "organizer-token")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELLED"));
+    }
+
     private static Event event(UUID id, String title, EventStatus status, RegistrationMode registrationMode,
             Instant startsAt, Instant endsAt, Instant registrationDeadline, Long price, String externalUrl) {
         return new Event(id, title, "Descrição do evento persistido.", "UNIVERSITY", UUID.randomUUID(), null,
@@ -673,5 +781,10 @@ class EngagementEndpointTest {
 
     private static RequestPostProcessor userJwt(String subject) {
         return jwt().jwt(token -> token.subject(subject)).authorities(new SimpleGrantedAuthority("ROLE_USER"));
+    }
+
+    private static RequestPostProcessor userJwtWithToken(String subject, String tokenValue) {
+        return jwt().jwt(token -> token.subject(subject).tokenValue(tokenValue))
+                .authorities(new SimpleGrantedAuthority("ROLE_USER"));
     }
 }

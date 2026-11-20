@@ -171,7 +171,7 @@ export function createServer(options: ServerOptions = {}) {
     request: FastifyRequest,
     reply: FastifyReply,
     path: string,
-    method: "GET" | "POST" | "DELETE" = "GET",
+    method: "GET" | "POST" | "PATCH" | "DELETE" = "GET",
   ) {
     const authorization = request.headers.authorization;
     if (typeof authorization !== "string" || !/^Bearer\s+\S+$/i.test(authorization)) {
@@ -182,7 +182,7 @@ export function createServer(options: ServerOptions = {}) {
     let body: Buffer;
     const headers: Record<string, string> = { authorization };
     let requestBody: string | undefined;
-    if (method === "POST" && request.body !== undefined) {
+    if ((method === "POST" || method === "PATCH") && request.body !== undefined) {
       headers["content-type"] = "application/json";
       requestBody = typeof request.body === "string" ? request.body : JSON.stringify(request.body);
     }
@@ -209,9 +209,35 @@ export function createServer(options: ServerOptions = {}) {
     return forwardToEngagementService(request, reply, `/api/v1/events${query}`);
   });
 
+  server.get("/api/v1/web/events/organizer-contexts", async (request, reply) =>
+    forwardToEngagementService(request, reply, "/api/v1/events/organizer-contexts"),
+  );
+
+  server.get("/api/v1/web/events/managed", async (request, reply) => {
+    const query = new URL(request.url, "http://localhost").search;
+    return forwardToEngagementService(request, reply, `/api/v1/events/managed${query}`);
+  });
+
+  server.post("/api/v1/web/events", async (request, reply) =>
+    forwardToEngagementService(request, reply, "/api/v1/events", "POST"),
+  );
+
   server.get<{ Params: { eventId: string } }>("/api/v1/web/events/:eventId", async (request, reply) => {
     return forwardToEngagementService(request, reply, `/api/v1/events/${encodeURIComponent(request.params.eventId)}`);
   });
+
+  server.patch<{ Params: { eventId: string } }>("/api/v1/web/events/:eventId", async (request, reply) =>
+    forwardToEngagementService(request, reply, `/api/v1/events/${encodeURIComponent(request.params.eventId)}`, "PATCH"),
+  );
+
+  server.delete<{ Params: { eventId: string } }>("/api/v1/web/events/:eventId", async (request, reply) =>
+    forwardToEngagementService(
+      request,
+      reply,
+      `/api/v1/events/${encodeURIComponent(request.params.eventId)}`,
+      "DELETE",
+    ),
+  );
 
   server.get("/api/v1/web/opportunities", async (request, reply) => {
     const query = new URL(request.url, "http://localhost").search;
@@ -221,6 +247,11 @@ export function createServer(options: ServerOptions = {}) {
   server.get("/api/v1/web/opportunities/publisher-contexts", async (request, reply) =>
     forwardToEngagementService(request, reply, "/api/v1/opportunities/publisher-contexts"),
   );
+
+  server.get("/api/v1/web/opportunities/managed", async (request, reply) => {
+    const query = new URL(request.url, "http://localhost").search;
+    return forwardToEngagementService(request, reply, `/api/v1/opportunities/managed${query}`);
+  });
 
   server.post("/api/v1/web/opportunities", async (request, reply) =>
     forwardToEngagementService(request, reply, "/api/v1/opportunities", "POST"),
@@ -233,6 +264,28 @@ export function createServer(options: ServerOptions = {}) {
         request,
         reply,
         `/api/v1/opportunities/${encodeURIComponent(request.params.opportunityId)}`,
+      ),
+  );
+
+  server.patch<{ Params: { opportunityId: string } }>(
+    "/api/v1/web/opportunities/:opportunityId",
+    async (request, reply) =>
+      forwardToEngagementService(
+        request,
+        reply,
+        `/api/v1/opportunities/${encodeURIComponent(request.params.opportunityId)}`,
+        "PATCH",
+      ),
+  );
+
+  server.delete<{ Params: { opportunityId: string } }>(
+    "/api/v1/web/opportunities/:opportunityId",
+    async (request, reply) =>
+      forwardToEngagementService(
+        request,
+        reply,
+        `/api/v1/opportunities/${encodeURIComponent(request.params.opportunityId)}`,
+        "DELETE",
       ),
   );
 
