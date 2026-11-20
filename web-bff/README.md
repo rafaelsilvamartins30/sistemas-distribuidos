@@ -40,6 +40,11 @@ them and persists profiles.
   `GET /api/v1/web/departments/{departmentId}` forward the bearer token and
   list query to Campus. Department responses omit `administratorUserIds` from
   the Web contract; Campus retains those references in its model.
+- `GET /api/v1/web/academic-units`, `GET /api/v1/web/academic-units/{unitId}`,
+  `GET /api/v1/web/courses`, and `GET /api/v1/web/courses/{courseId}` forward
+  the bearer token and pagination/filter query to the Campus reference
+  catalogue. Course results are associated with their academic unit only; the
+  catalogue does not claim a course-to-department relationship.
 - `GET /api/v1/web/entities`, `GET /api/v1/web/entities/{entityId}`,
   `GET /api/v1/web/communities`, and
   `GET /api/v1/web/communities/{communityId}` forward the bearer token and

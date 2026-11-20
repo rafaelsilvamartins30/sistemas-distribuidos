@@ -37,12 +37,18 @@ class UsersControllerTest < ActionDispatch::IntegrationTest
     assert_equal 'STUDENT', response.parsed_body.fetch('affiliationStatus')
     assert_equal 'UNDERGRADUATE', response.parsed_body.fetch('academicLevel')
     assert_equal ['Sistemas distribuídos'], response.parsed_body.fetch('interests')
+    assert_equal valid_profile.fetch(:courseId), response.parsed_body.fetch('courseId')
+    assert_equal 'Computação', response.parsed_body.fetch('course')
+    assert_equal valid_profile.fetch(:departmentId), response.parsed_body.fetch('departmentId')
+    assert_not response.parsed_body.key?('academicUnitId')
     assert_not response.parsed_body.key?('email')
     profile = UserProfile.sole
     assert_equal SUBJECT, profile.keycloak_user_id
     assert_equal '12345', profile.registration_code
     assert_equal 'STUDENT', profile.user_type
     assert_equal 'UNDERGRAD', profile.academic_level
+    assert_equal valid_profile.fetch(:courseId), profile.course_id
+    assert_equal valid_profile.fetch(:departmentId), profile.department_id
   end
 
   test 'get me looks up the subject and returns email claims from the current token' do
@@ -92,24 +98,5 @@ class UsersControllerTest < ActionDispatch::IntegrationTest
     assert_equal 'MASTERS', response.parsed_body.fetch('academicLevel')
     assert_equal 'MASTER', UserProfile.sole.academic_level
     assert_nil UserProfile.sole.user_type
-  end
-
-  test 'profile department must refer to a department already registered in Campus' do
-    ensure_profile_department!
-    invalid_profile = valid_profile.merge(department: 'Departamento inventado')
-
-    with_jwks { post '/users', params: invalid_profile, headers: bearer_headers, as: :json }
-
-    assert_response :bad_request
-    assert_equal 'department must match an existing Campus department', response.parsed_body.fetch('detail')
-    assert_empty UserProfile.all
-
-    create_profile
-    with_jwks do
-      patch '/users/me', params: { department: 'Departamento inventado' }, headers: bearer_headers, as: :json
-    end
-
-    assert_response :bad_request
-    assert_equal 'Departamento de Ciência da Computação', UserProfile.sole.department
   end
 end

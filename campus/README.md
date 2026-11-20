@@ -1,65 +1,64 @@
 # Campus
 
-Campus é a API Ruby on Rails responsável pela estrutura da universidade, perfis, vínculos acadêmicos, entidades, comunidades e autorização contextual. O PostgreSQL é exclusivo deste serviço.
+Campus é a API Ruby on Rails responsável pela estrutura da universidade, perfis, vínculos acadêmicos, entidades, comunidades, publicações, notificações e autorização contextual. O PostgreSQL é exclusivo deste serviço.
 
-Campus é a fonte definitiva dos perfis da UNIR. Web e Administration usam os BFFs existentes, que encaminham as solicitações para esta API preservando o JWT do Keycloak. Os dados do ambiente anterior não são importados.
+Campus é a fonte definitiva dos perfis da UNIR. Web e Administration usam os BFFs existentes, que encaminham solicitações para esta API preservando o JWT do Keycloak. O tráfego do navegador passa pelo Gateway e pelos BFFs; Campus não habilita CORS nem publica portas de serviço no host.
 
-## Endpoints
+## Perfil do usuário
 
-- `GET /health/live` informa se o processo está em execução.
-- `GET /health/ready` executa `SELECT 1` no banco do Campus e retorna `503` quando ele está indisponível.
 - `POST /users` cria o perfil vinculado ao claim `sub` do JWT.
 - `GET /users/me` consulta o perfil pelo `sub` do JWT.
-- `PATCH /users/me` atualiza somente os campos editáveis do próprio perfil.
+- `PATCH /users/me` atualiza os campos editáveis do próprio perfil.
 
-As rotas de perfil exigem um bearer JWT assinado pelo Keycloak. Campus verifica assinatura RS256, issuer e validade temporal; o Gateway aplica os papéis exigidos por cada rota. O e-mail e a confirmação de e-mail retornados por GET/PATCH vêm do JWT e não são armazenados. A criação retorna 201 sem esses claims; GET/PATCH retornam 404 até a criação, e duplicidade de `sub` ou matrícula retorna 409. Payloads inválidos retornam 400 e JWT ausente/inválido retorna 401.
+O contrato preserva `institutionalId`, `affiliationStatus` (`STUDENT`, `PROFESSOR`, `ALUMNI`), `academicLevel` (`UNDERGRADUATE`, `MASTERS`, `DOCTORATE`), `course`, `department` e `interests`. Perfis recebem `courseId` e `departmentId`; Campus verifica que o curso pertence ao departamento. AcademicUnit não é relação do perfil de usuário. O retorno mantém `course` e `department` como nomes de exibição.
 
-O serviço e seu banco não publicam portas no host, e o Campus não habilita CORS. O tráfego do navegador passa pelo Gateway e pelos BFFs até Campus.
+Campus verifica assinatura RS256, issuer e validade temporal do JWT; o Gateway valida o papel de acesso à rota. E-mail vem do token e não é armazenado. `PROFESSOR` é autodeclarado no perfil e não concede afiliação nem permissão. A afiliação docente ativa só nasce da aprovação de um administrador do departamento.
 
-## Compatibilidade do perfil
+## Perfis institucionais e catálogo
 
-O contrato HTTP preserva os nomes e enums públicos existentes: `institutionalId`, `affiliationStatus` (`STUDENT`, `PROFESSOR`, `ALUMNI`), `academicLevel` (`UNDERGRADUATE`, `MASTERS`, `DOCTORATE`), `course`, `department` e `interests`. O `id` retornado é o `sub`; o UUID interno do registro é separado, e `keycloak_user_id` tem unicidade no banco.
+`University` é singleton. `AcademicUnit` e `Department` são perfis pares. Um Department administra os cursos com nomes selecionáveis nos perfis. O catálogo de referência que não tem vínculo comprovado com Department permanece fora dos seletores. `administratorUserIds` guarda subjects do Keycloak sem foreign key e é removido das respostas públicas pelo Web BFF.
 
-O armazenamento segue o vocabulário de Campus onde a conversão é direta: `institutionalId` é persistido como `registration_code`; os níveis são guardados como `UNDERGRAD`, `MASTER` e `PHD`, mantendo a tradução de ida e volta para o contrato HTTP. `legacy_affiliation_status` preserva os estados públicos que ainda não possuem equivalente interno. `STUDENT` e `PROFESSOR` também preenchem `user_type`; `ALUMNI` permanece sem conversão para `STAFF` até uma decisão de domínio. O campo `department` permanece texto por compatibilidade, mas criação e alteração devem usar o nome de um Department cadastrado no Campus. O curso continua sendo texto até existir um catálogo de cursos aprovado. `email` vem do JWT e bio/avatar não fazem parte do contrato atual.
+- `GET /university` e `PATCH /university` consultam e editam a universidade. A inicialização local configura o primeiro administrador da lista.
+- `GET, POST /departments`; `GET, PATCH /departments/{id}` listam, criam e editam Departamentos.
+- `GET, POST /academic-units`; `GET, PATCH /academic-units/{id}` listam, criam e editam Unidades Acadêmicas.
+- University administrators podem criar departamentos e unidades. A pessoa criadora é adicionada aos administradores do novo perfil.
+- `GET /courses?departmentId={id}` lista apenas cursos vinculados ao departamento. `POST /courses` e `PATCH /courses/{id}` exigem administrador do Departamento.
+- Department, AcademicUnit, University, AcademicEntity e Community compartilham descrição, links de contato, Markdown e administradores. Alterações exigem administrador do perfil.
 
-`PATCH /users/me` aceita atualizar `institutionalId`, mantendo a unicidade de `registration_code`. Esse identificador e a situação `PROFESSOR` continuam autodeclarados; nenhum deles concede afiliação docente ou permissão.
+Veja os relacionamentos, campos e payloads em [`../docs/contracts/campus-academic-catalog.md`](../docs/contracts/campus-academic-catalog.md).
 
-## Universidade e departamentos
+## Entidades, comunidades e solicitações
 
-Campus persiste o singleton `University` e os registros `Department`, seguindo a página **Campus — Classes** do tldraw. Como University é singleton e Department não possui `universityId` no modelo aprovado, a associação é implícita: todos os departamentos pertencem à universidade do Campus. `administratorUserIds` guarda referências ao Keycloak sem foreign key para perfis.
+`GET /entities`, `GET /entities/{id}`, `GET /communities` e `GET /communities/{id}` retornam listas paginadas e detalhes. `PATCH` no perfil exige um administrador listado. Entidades e comunidades são criadas por solicitação; a solicitação pode ser enviada a um Department (`targetDepartmentId`) ou à University (campo ausente/nulo). Administradores do destino podem aprovar ou recusar:
 
-Consultas internas exigem Bearer JWT do Keycloak:
+- `POST /requests` envia pedido de `COMMUNITY_CREATION` ou `ENTITY_CREATION`.
+- `GET /requests/me` lista os pedidos da pessoa autenticada.
+- `GET /requests/pending` lista pedidos dos destinos que ela administra.
+- `POST /requests/{id}/approve` e `/reject` fazem revisão, revalidada no Campus.
+- `POST /professor-verification-requests` e as rotas de revisão de Department mantêm a solicitação docente existente.
 
-- `GET /university` retorna o registro singleton; retorna `404` até ele existir.
-- `GET /departments?page=0&size=20&sort=name` lista departamentos em páginas; `sort` aceita `name`, `acronym` e prefixo `-` para ordem decrescente.
-- `GET /departments/{id}` retorna o departamento ou `404`.
+Uma Community pode ser de um Department ou da University. Ao aprovar uma solicitação, Campus cria o perfil e inclui a pessoa solicitante como sua primeira administradora. Os campos `entityType` e `category` permanecem texto livre porque a fonte não define enums.
 
-As listas usam `items`, `page`, `size`, `totalElements` e `totalPages`, conforme as convenções REST. O endpoint interno inclui `administratorUserIds`; o Web BFF remove esse campo da resposta ao navegador. As consultas são somente leitura. O seed local cria uma universidade UFRJ e dois departamentos, usando IDs estáveis e sem substituir registros com esses IDs.
+## Feed, publicações, comunidade e notificações
 
-## Entidades acadêmicas e comunidades
+- `GET,POST /profiles/{profileType}/{profileId}/posts` consulta e publica avisos oficiais. Publicar exige administrador do perfil. O semestre atual vem do singleton University; `availableUntil` esconde o aviso da visualização ativa sem apagar seu histórico de semestre.
+- `POST /follows` segue um perfil; `GET /follows` lista somente os próprios follows; `DELETE /follows/{id}` encerra somente um follow próprio.
+- `GET /feed` retorna publicações do semestre ativo dos perfis seguidos.
+- `POST /polls/{pollId}/votes` aceita um voto por pessoa e poll, até `closesAt`.
+- Comunidades têm a central em `/communities/{communityId}/space/posts`. Qualquer seguidor ativo pode publicar, comentar e responder. `GET,POST /community-space-posts/{postId}/comments` lista e escreve comentários. Não há curtidas nem contagem de seguidores.
+- `GET /notifications` é a central privada de notificações. `POST /notifications/{id}/read` marca uma como lida e `/notifications/read-all` marca todas as da pessoa autenticada.
 
-`AcademicEntity` e `Community` seguem os campos da página **Campus — Classes** do tldraw. Ambos possuem `id`, `name`, `description`, `generalInfoMarkdown`, `logoUrl`, `bannerUrl`, `links` e `managerUserIds`; `AcademicEntity` também possui `entityType` e `departmentId` opcional, enquanto `Community` possui `category` opcional. `entityType` e `category` são armazenados como texto: os documentos consultados não definem enums para esses campos. A associação opcional de entidade a departamento é uma foreign key local; IDs de gestores continuam sendo referências ao Keycloak sem foreign key.
-
-- `GET /entities?page=0&size=20&sort=name` lista entidades; `sort` aceita `name`, `entityType` e prefixo `-` para ordem decrescente.
-- `GET /entities/{id}` retorna uma entidade ou `404`.
-- `GET /communities?page=0&size=20&sort=name` lista comunidades; `sort` aceita `name`, `category` e prefixo `-` para ordem decrescente.
-- `GET /communities/{id}` retorna uma comunidade ou `404`.
-
-As listas usam o mesmo contrato paginado de Department. O Campus retorna `managerUserIds` internamente; o Web BFF remove os IDs de gestores das respostas públicas. Estas rotas são somente leitura nesta leva. O seed adiciona registros locais explicitamente marcados como demonstração, com IDs estáveis, apenas quando esses IDs ainda não existem.
-
-```sh
-docker compose exec campus bin/rails db:seed
-```
+Os contratos estão em [`../docs/contracts/campus-social.md`](../docs/contracts/campus-social.md). Solicitações, publicações e notificações permanecem no banco de Campus para manter o histórico; não são apagadas por expiração ou por deixar de seguir.
 
 ## Desenvolvimento local
 
-O Compose usa Ruby 3.4.12, o PostgreSQL privado `campus-db` (`unir_campus`) e o Keycloak para validar tokens. O banco possui o volume nomeado exclusivo `campus_data` e não é compartilhado com outros domínios. Após iniciar os serviços, aplique migrations pendentes com `docker compose exec campus bin/rails db:migrate`.
+O Compose usa Ruby 3.4.12, PostgreSQL privado `campus-db` (`unir_campus`) e Keycloak para validar tokens. Aplique migrations pendentes com `docker compose exec campus bin/rails db:migrate`.
 
-Para desenvolver no host, instale a versão indicada em `.ruby-version` e execute:
+Para desenvolver no host, instale a versão em `.ruby-version` e execute:
 
 ```sh
 make quality
 make test
 ```
 
-Desenvolvimento e produção usam PostgreSQL. Os testes automatizados usam um arquivo SQLite privado, JWTs de teste assinados e um JWKS simulado; a validação adicional em Compose usa o PostgreSQL local real.
+Desenvolvimento e produção usam PostgreSQL. Os testes automatizados usam SQLite, JWTs assinados e um JWKS simulado.

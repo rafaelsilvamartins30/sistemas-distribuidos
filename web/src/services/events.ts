@@ -10,6 +10,7 @@ export interface Event {
   description: string;
   organizerType: string;
   organizerId: string;
+  createdByUserId?: string | null;
   imageUrl?: string | null;
   location: string;
   startsAt: string;

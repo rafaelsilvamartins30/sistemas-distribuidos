@@ -8,16 +8,20 @@ class UserProfile < ApplicationRecord
 
   before_validation :assign_id, on: :create
 
+  belongs_to :course, optional: true
+  belongs_to :department, optional: true
   has_one :professor_affiliation, foreign_key: :user_id, dependent: :restrict_with_error,
                                   inverse_of: :user_profile
 
   validates :keycloak_user_id, presence: true, uniqueness: true, length: { maximum: 255 }
-  validates :name, :registration_code, :course, :department, presence: true, length: { maximum: 255 }
+  validates :name, :registration_code, presence: true, length: { maximum: 255 }
+  validates :course, :department, presence: true
   validates :registration_code, uniqueness: true
   validates :legacy_affiliation_status, inclusion: { in: LEGACY_AFFILIATION_STATUSES }
   validates :user_type, inclusion: { in: USER_TYPES }, allow_nil: true
   validates :academic_level, inclusion: { in: ACADEMIC_LEVELS }
   validate :interests_must_be_a_list_of_valid_strings
+  validate :course_must_belong_to_selected_department
 
   private
 
@@ -32,5 +36,9 @@ class UserProfile < ApplicationRecord
     return if valid
 
     errors.add(:interests, :invalid)
+  end
+
+  def course_must_belong_to_selected_department
+    errors.add(:course, :invalid) if course && department && course.department_id != department_id
   end
 end

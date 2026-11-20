@@ -1,76 +1,92 @@
 # frozen_string_literal: true
 
-# Lists and reads the university's departments.
+# Lists, creates, and edits department institutional profiles.
 class DepartmentsController < ApplicationController
-  before_action :authenticate_keycloak!
+  include KeycloakAuthenticated
+  include InstitutionalProfileAuthorization
+  include InstitutionalProfileSerialization
+
+  wrap_parameters false
 
   def index
-    page = integer_parameter(:page, 0)
-    size = integer_parameter(:size, 20)
-    sort = sort_parameter
-    unless valid_department_query?(page, size, sort)
-      return render_problem(:bad_request, 'Invalid department list parameters')
-    end
+    page, size, sort = pagination_parameters(%w[name acronym])
+    return render_problem(:bad_request, 'Invalid department list parameters') unless page
 
-    render json: department_page(page, size, sort)
+    departments = Department.order(sort)
+    render json: page_response(departments, page, size) { |department| department_response(department) }
   end
 
   def show
     department = Department.find_by(id: params[:id])
     return render_problem(:not_found, 'Department not found') unless department
 
-    render json: department_response(department)
+    render json: department_response(department, include_courses: true)
+  end
+
+  def create
+    return unless require_university_admin
+
+    payload = profile_payload(%w[name acronym description generalInfoMarkdown logoUrl bannerUrl links administratorUserIds])
+    return unless payload
+
+    department = Department.new(id: SecureRandom.uuid)
+    assign_profile_fields(department, payload.except('acronym'))
+    department.administrator_user_ids = (Array(department.administrator_user_ids) + [current_subject]).uniq
+    department.acronym = payload['acronym']
+    return render(json: department_response(department), status: :created) if department.save
+
+    render_profile_validation_error(department)
+  end
+
+  def update
+    department = Department.find_by(id: params[:id])
+    return render_problem(:not_found, 'Department not found') unless department
+    payload = profile_payload(%w[name acronym description generalInfoMarkdown logoUrl bannerUrl links administratorUserIds])
+    return unless payload
+    return unless require_profile_update_permissions(department, payload)
+
+    assign_profile_fields(department, payload.except('acronym'))
+    department.acronym = payload['acronym'] if payload.key?('acronym')
+    return render(json: department_response(department)) if department.save
+
+    render_profile_validation_error(department)
   end
 
   private
 
-  def authenticate_keycloak!
-    match = request.authorization.to_s.match(/\ABearer\s+(\S+)\z/i)
-    return render_problem(:unauthorized, 'Bearer token is required') unless match
+  def pagination_parameters(fields)
+    page = Integer(params.fetch(:page, '0'), 10)
+    size = Integer(params.fetch(:size, '20'), 10)
+    sort = params.fetch(:sort, 'name')
+    direction = sort.start_with?('-') ? :desc : :asc
+    field = sort.delete_prefix('-')
+    return unless page >= 0 && size.between?(1, 100) && fields.include?(field)
 
-    @token_claims = KeycloakJwt.decode(match[1])
-    return if @token_claims['sub'].present?
-
-    render_problem(:unauthorized, 'Bearer token subject is required')
-  rescue JWT::DecodeError, JWT::JWKError
-    render_problem(:unauthorized, 'Invalid bearer token')
-  rescue KeycloakJwt::Unavailable
-    render_problem(:service_unavailable, 'Keycloak is unavailable')
-  end
-
-  def integer_parameter(name, default)
-    Integer(params.fetch(name, default.to_s), 10)
+    [page, size, { field => direction }]
   rescue ArgumentError, TypeError
     nil
   end
 
-  def sort_parameter
-    sort = params.fetch(:sort, 'name')
-    direction = sort.start_with?('-') ? :desc : :asc
-    field = sort.delete_prefix('-')
-    return { field => direction } if %w[name acronym].include?(field)
-
-    nil
+  def page_response(scope, page, size)
+    total = scope.count
+    { items: scope.offset(page * size).limit(size).map { |record| yield record }, page: page, size: size,
+      totalElements: total, totalPages: (total.to_f / size).ceil }
   end
 
-  def valid_department_query?(page, size, sort)
-    page && page >= 0 && size&.positive? && sort
+  def department_response(department, include_courses: false)
+    response = institutional_profile_fields(department).merge(acronym: department.acronym,
+                                                               sourceUrl: department.source_url)
+    response[:courses] = department.courses.where(reference_only: false).order(:name).map do |course|
+      course_response(course)
+    end if include_courses
+    response
   end
 
-  def department_response(department)
-    {
-      id: department.id, name: department.name, acronym: department.acronym,
-      description: department.description, generalInfoMarkdown: department.general_info_markdown,
-      logoUrl: department.logo_url, bannerUrl: department.banner_url, links: department.links,
-      administratorUserIds: department.administrator_user_ids
-    }
+  def course_response(course)
+    { id: course.id, name: course.name, departmentId: course.department_id }
   end
 
-  def department_page(page, size, sort)
-    departments = Department.order(sort)
-    total_elements = departments.count
-    items = departments.offset(page * size).limit(size).map { |department| department_response(department) }
-    { items: items, page: page, size: size, totalElements: total_elements,
-      totalPages: (total_elements.to_f / size).ceil }
+  def render_profile_validation_error(profile)
+    render_problem(:unprocessable_entity, "Invalid fields: #{profile.errors.attribute_names.uniq.sort.join(', ')}")
   end
 end

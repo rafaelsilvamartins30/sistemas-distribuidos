@@ -11,8 +11,8 @@ class UsersController < ApplicationController
   def create
     payload = load_payload(CREATE_FIELDS)
     return unless payload
-    unless valid_department_catalog?(payload, required: true)
-      return render_problem(:bad_request, 'department must match an existing Campus department')
+    unless valid_catalog_relations?(payload, required: true)
+      return render_problem(:bad_request, 'Course must belong to the selected department')
     end
 
     profile = UserProfile.new(create_attributes(payload, current_subject))
@@ -33,12 +33,12 @@ class UsersController < ApplicationController
   def update_me
     payload = load_payload(UPDATE_FIELDS)
     return unless payload
-    unless valid_department_catalog?(payload, required: false)
-      return render_problem(:bad_request, 'department must match an existing Campus department')
-    end
 
     profile = find_my_profile
     return unless profile
+    unless valid_catalog_relations?(payload, profile: profile, required: false)
+      return render_problem(:bad_request, 'Course must belong to the selected department')
+    end
 
     profile.assign_attributes(profile_update_attributes(payload))
     return render(json: profile_response(profile, include_token_claims: true)) if profile.save
@@ -65,10 +65,14 @@ class UsersController < ApplicationController
     end
   end
 
-  def valid_department_catalog?(payload, required:)
-    return true unless required || payload.key?('department')
+  def valid_catalog_relations?(payload, required:, profile: nil)
+    course_id = payload.fetch('courseId', profile&.course_id)
+    department_id = payload.fetch('departmentId', profile&.department_id)
+    return false if required && [course_id, department_id].any?(&:blank?)
+    return true if course_id.blank? && department_id.blank?
+    return false if course_id.blank? || department_id.blank?
 
-    Department.exists?(name: payload['department'])
+    Course.exists?(id: course_id, department_id: department_id, reference_only: false)
   end
 
   def current_subject

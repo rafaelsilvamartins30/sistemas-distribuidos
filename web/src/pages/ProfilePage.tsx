@@ -2,7 +2,14 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { Icon } from "../components/Icon";
-import { getDepartments, type Department } from "../services/campus.js";
+import {
+  getCourses,
+  getDepartments,
+  getUniversity,
+  type CatalogCourse,
+  type Department,
+  type University,
+} from "../services/campus.js";
 import {
   createProfessorVerificationRequest,
   getMyProfessorVerificationRequests,
@@ -25,8 +32,8 @@ interface ProfileForm {
   institutionalId: string;
   affiliationStatus: AffiliationStatus | "";
   academicLevel: AcademicLevel | "";
-  course: string;
-  department: string;
+  courseId: string;
+  departmentId: string;
   interests: string;
 }
 
@@ -39,8 +46,8 @@ const emptyForm: ProfileForm = {
   institutionalId: "",
   affiliationStatus: "",
   academicLevel: "",
-  course: "",
-  department: "",
+  courseId: "",
+  departmentId: "",
   interests: "",
 };
 
@@ -50,8 +57,8 @@ function formFromProfile(profile: UserProfile): ProfileForm {
     institutionalId: profile.institutionalId,
     affiliationStatus: profile.affiliationStatus ?? "",
     academicLevel: profile.academicLevel ?? "",
-    course: profile.course,
-    department: profile.department,
+    courseId: profile.courseId ?? "",
+    departmentId: profile.departmentId ?? "",
     interests: profile.interests.join("\n"),
   };
 }
@@ -82,8 +89,12 @@ export function ProfilePage() {
   const [error, setError] = useState("");
   const [savedMessage, setSavedMessage] = useState("");
   const [professorConfirmationOpen, setProfessorConfirmationOpen] = useState(false);
+  const [university, setUniversity] = useState<University | null>(null);
+  const [courses, setCourses] = useState<CatalogCourse[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [departmentsLoadFailed, setDepartmentsLoadFailed] = useState(false);
+  const [catalogLoadFailed, setCatalogLoadFailed] = useState(false);
+  const [coursesLoadFailed, setCoursesLoadFailed] = useState(false);
   const [professorRequest, setProfessorRequest] = useState<ProfessorVerificationRequest | null>(null);
   const [professorRequestLoadFailed, setProfessorRequestLoadFailed] = useState(false);
   const professorDialogRef = useRef<HTMLDialogElement>(null);
@@ -97,13 +108,21 @@ export function ProfilePage() {
         if (!keycloak.token) throw new Error("Token de acesso indisponível.");
         const currentProfile = await getMyProfile(keycloak.token);
         try {
-          const departmentPage = await getDepartments(keycloak.token);
+          const [universityResult, departmentPage] = await Promise.all([
+            getUniversity(keycloak.token),
+            getDepartments(keycloak.token, 0, 100),
+          ]);
           if (active) {
+            setUniversity(universityResult);
             setDepartments(departmentPage.items);
             setDepartmentsLoadFailed(false);
+            setCatalogLoadFailed(false);
           }
         } catch {
-          if (active) setDepartmentsLoadFailed(true);
+          if (active) {
+            setDepartmentsLoadFailed(true);
+            setCatalogLoadFailed(true);
+          }
         }
         if (active) {
           const nextForm = currentProfile ? formFromProfile(currentProfile) : emptyForm;
@@ -137,13 +156,39 @@ export function ProfilePage() {
     };
   }, [keycloak]);
 
+  useEffect(() => {
+    let active = true;
+    setCourses([]);
+    setCoursesLoadFailed(false);
+    if (!form.departmentId)
+      return () => {
+        active = false;
+      };
+
+    async function loadCourses() {
+      try {
+        await keycloak.updateToken(30);
+        if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+        const page = await getCourses(keycloak.token, form.departmentId, 0, 100);
+        if (active) setCourses(page.items);
+      } catch {
+        if (active) setCoursesLoadFailed(true);
+      }
+    }
+
+    void loadCourses();
+    return () => {
+      active = false;
+    };
+  }, [form.departmentId, keycloak]);
+
   const dirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(savedForm), [form, savedForm]);
   const displayName = profile?.name || String(keycloak.tokenParsed?.name ?? "");
   const avatarInitial = displayName.trim().charAt(0).toLocaleUpperCase("pt-BR") || "U";
   const accountEmail = String(keycloak.tokenParsed?.email ?? profile?.email ?? "");
   const emailVerified = Boolean(keycloak.tokenParsed?.email_verified);
-  const selectedDepartment = departments.find((department) => department.name === form.department) ?? null;
-  const departmentSelectValue = selectedDepartment?.id ?? (form.department ? "__unavailable__" : "");
+  const selectedDepartment = departments.find((department) => department.id === form.departmentId) ?? null;
+  const selectedCourse = courses.find((course) => course.id === form.courseId) ?? null;
 
   useEffect(() => {
     const dialog = professorDialogRef.current;
@@ -162,8 +207,8 @@ export function ProfilePage() {
       institutionalId: form.institutionalId,
       affiliationStatus,
       academicLevel,
-      course: form.course,
-      department: form.department,
+      courseId: form.courseId,
+      departmentId: form.departmentId,
       interests: interestsFromForm(form.interests),
     };
     return profile
@@ -183,11 +228,14 @@ export function ProfilePage() {
     setPreparingProfessorRequest(true);
     setError("");
     try {
-      if (departmentsLoadFailed || departments.length === 0) {
+      if (catalogLoadFailed || departmentsLoadFailed || departments.length === 0) {
         setError("Perfil salvo, mas não foi possível validar o departamento cadastrado no Campus.");
         return;
       }
-      if (!departments.some((department) => department.name === savedProfile.department)) {
+      if (
+        !savedProfile.departmentId ||
+        !departments.some((department) => department.id === savedProfile.departmentId)
+      ) {
         setError(
           "Selecione um departamento existente nos dados acadêmicos do perfil antes de solicitar a verificação.",
         );
@@ -200,7 +248,13 @@ export function ProfilePage() {
   }
 
   async function startProfessorRequest() {
-    if (profile?.affiliationStatus !== "PROFESSOR" || professorRequest || professorRequestLoadFailed) return;
+    if (
+      profile?.affiliationStatus !== "PROFESSOR" ||
+      !profile.departmentId ||
+      professorRequest ||
+      professorRequestLoadFailed
+    )
+      return;
     setPreparingProfessorRequest(true);
     setError("");
     try {
@@ -247,7 +301,7 @@ export function ProfilePage() {
   }
 
   async function confirmProfessorRequest() {
-    if (!profile?.department || !departments.some((department) => department.name === profile.department)) return;
+    if (!profile?.departmentId || !departments.some((department) => department.id === profile.departmentId)) return;
     setSaving(true);
     setError("");
     setSavedMessage("");
@@ -316,7 +370,7 @@ export function ProfilePage() {
         <>
           <section className="profile-hero-card" aria-label="Resumo do perfil">
             <div className="profile-hero-banner">
-              <span className="profile-campus-badge">UFRJ · CAMPUS CENTRAL</span>
+              <span className="profile-campus-badge">{university?.acronym ?? "UNIR"} · REDE UNIVERSITÁRIA</span>
             </div>
             <div className="profile-hero-content">
               <span className="avatar avatar-large profile-avatar" aria-hidden="true">
@@ -459,45 +513,57 @@ export function ProfilePage() {
               </label>
 
               <label className="field">
-                <span>Curso</span>
-                <input
-                  maxLength={255}
-                  placeholder="Informe seu curso"
-                  required
-                  value={form.course}
-                  onChange={(event) => {
-                    setForm({ ...form, course: event.target.value });
-                    setSavedMessage("");
-                  }}
-                />
-              </label>
-
-              <label className="field profile-field-full">
                 <span>Departamento</span>
                 <select
                   required
-                  value={departmentSelectValue}
+                  value={form.departmentId}
+                  disabled={catalogLoadFailed || departmentsLoadFailed}
                   onChange={(event) => {
-                    const department = departments.find((item) => item.id === event.target.value);
-                    setForm({ ...form, department: department?.name ?? "" });
+                    setForm({ ...form, departmentId: event.target.value, courseId: "" });
                     setSavedMessage("");
                   }}
                 >
                   <option value="">
                     {departmentsLoadFailed ? "Departamentos indisponíveis" : "Selecione seu departamento"}
                   </option>
-                  {form.department && !selectedDepartment && (
-                    <option value="__unavailable__" disabled>
-                      Departamento atual não está no catálogo: {form.department}
-                    </option>
-                  )}
                   {departments.map((department) => (
                     <option key={department.id} value={department.id}>
                       {department.name} ({department.acronym})
                     </option>
                   ))}
                 </select>
-                <small>Selecione um departamento cadastrado no Campus.</small>
+                <small>O departamento selecionado define os cursos disponíveis no catálogo do Campus.</small>
+              </label>
+
+              <label className="field">
+                <span>Curso</span>
+                <select
+                  required
+                  value={form.courseId}
+                  disabled={!selectedDepartment || coursesLoadFailed}
+                  onChange={(event) => {
+                    setForm({ ...form, courseId: event.target.value });
+                    setSavedMessage("");
+                  }}
+                >
+                  <option value="">
+                    {coursesLoadFailed
+                      ? "Cursos indisponíveis"
+                      : selectedDepartment
+                        ? "Selecione seu curso"
+                        : "Selecione primeiro o departamento"}
+                  </option>
+                  {courses.map((course) => (
+                    <option key={course.id} value={course.id}>
+                      {course.name}
+                    </option>
+                  ))}
+                </select>
+                <small>
+                  {selectedCourse
+                    ? `Curso cadastrado em ${selectedDepartment?.name ?? "seu departamento"}.`
+                    : "Selecione um curso cadastrado para o departamento escolhido."}
+                </small>
               </label>
 
               <label className="field profile-field-full">
@@ -709,8 +775,8 @@ export function ProfilePage() {
                   type="button"
                   disabled={
                     saving ||
-                    !profile?.department ||
-                    !departments.some((department) => department.name === profile.department)
+                    !profile?.departmentId ||
+                    !departments.some((department) => department.id === profile.departmentId)
                   }
                   onClick={() => void confirmProfessorRequest()}
                 >

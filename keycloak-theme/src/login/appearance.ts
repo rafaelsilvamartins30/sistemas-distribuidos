@@ -1,7 +1,7 @@
 const storageKey = "unir.keycloakAppearance";
 const accentByPalette: Record<string, string> = {
   green: "#16745e",
-  blue: "#3468b1",
+  blue: "#1739b5",
   violet: "#7853a6",
   ember: "#c24132",
   amber: "#c24132",

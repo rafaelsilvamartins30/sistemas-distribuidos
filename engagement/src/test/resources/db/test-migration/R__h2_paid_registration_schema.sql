@@ -1,3 +1,6 @@
+ALTER TABLE events
+    ADD COLUMN created_by_user_id VARCHAR(255);
+
 ALTER TABLE registrations
     ADD COLUMN payment_deadline_at TIMESTAMP WITH TIME ZONE;
 

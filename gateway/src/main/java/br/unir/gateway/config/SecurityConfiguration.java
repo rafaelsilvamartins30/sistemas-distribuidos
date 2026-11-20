@@ -41,9 +41,32 @@ public class SecurityConfiguration {
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/me")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/web/university", "/api/v1/web/departments",
+                        .requestMatchers(HttpMethod.GET, "/api/v1/web/university", "/api/v1/web/semesters",
+                                "/api/v1/web/semesters/*", "/api/v1/web/departments", "/api/v1/web/academic-units",
+                                "/api/v1/web/academic-units/*", "/api/v1/web/courses", "/api/v1/web/courses/*",
                                 "/api/v1/web/departments/*", "/api/v1/web/entities", "/api/v1/web/entities/*",
                                 "/api/v1/web/communities", "/api/v1/web/communities/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/web/university", "/api/v1/web/academic-units/*",
+                                "/api/v1/web/courses/*", "/api/v1/web/departments/*", "/api/v1/web/entities/*",
+                                "/api/v1/web/communities/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/web/academic-units", "/api/v1/web/courses",
+                                "/api/v1/web/departments")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/web/feed", "/api/v1/web/profiles/*/*/posts",
+                                "/api/v1/web/communities/*/space/posts", "/api/v1/web/community-space-posts/*/comments",
+                                "/api/v1/web/follows", "/api/v1/web/notifications", "/api/v1/web/requests/me",
+                                "/api/v1/web/requests/pending")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/web/profiles/*/*/posts",
+                                "/api/v1/web/communities/*/space/posts", "/api/v1/web/community-space-posts/*/comments",
+                                "/api/v1/web/polls/*/votes", "/api/v1/web/follows",
+                                "/api/v1/web/notifications/read-all", "/api/v1/web/notifications/*/read",
+                                "/api/v1/web/requests", "/api/v1/web/requests/*/approve",
+                                "/api/v1/web/requests/*/reject")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/web/follows/*")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/v1/web/events", "/api/v1/web/events/*")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
@@ -83,6 +106,13 @@ public class SecurityConfiguration {
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/web/attendance/check-ins")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/web/me/tickets")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/web/attendance/events/*/qr",
+                                "/api/v1/web/attendance/tickets/*/qr",
+                                "/api/v1/web/attendance/organizer-check-ins/preview",
+                                "/api/v1/web/attendance/organizer-check-ins/confirm")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/me").hasRole(GlobalRoles.PLATFORM_ADMIN)
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(resourceServer -> resourceServer
@@ -102,7 +132,18 @@ public class SecurityConfiguration {
         adminConfiguration.setAllowedMethods(List.of("GET", "OPTIONS"));
         adminConfiguration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
 
+        CorsConfiguration adminOverviewConfiguration = new CorsConfiguration();
+        adminOverviewConfiguration.setAllowedOrigins(List.of(this.webOrigin, this.adminWebOrigin));
+        adminOverviewConfiguration.setAllowedMethods(List.of("GET", "OPTIONS"));
+        adminOverviewConfiguration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        // The administration dashboard reads these four public Campus summaries
+        // through the Web BFF; keep its browser access limited to those GETs.
+        source.registerCorsConfiguration("/api/v1/web/university", adminOverviewConfiguration);
+        source.registerCorsConfiguration("/api/v1/web/departments", adminOverviewConfiguration);
+        source.registerCorsConfiguration("/api/v1/web/entities", adminOverviewConfiguration);
+        source.registerCorsConfiguration("/api/v1/web/communities", adminOverviewConfiguration);
         source.registerCorsConfiguration("/api/v1/me", webConfiguration);
         source.registerCorsConfiguration("/api/v1/users", webConfiguration);
         source.registerCorsConfiguration("/api/v1/web/**", webConfiguration);

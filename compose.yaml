@@ -138,6 +138,7 @@ services:
     build:
       context: ./campus
     image: unir-campus:local
+    command: ["sh", "-c", "bin/rails db:migrate && bin/rails server -b 0.0.0.0"]
     environment:
       RAILS_ENV: development
       DB_HOST: campus-db

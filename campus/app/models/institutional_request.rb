@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Stores only the department-reviewed professor verification request flow from Campus.
+# Stores professor verification and institutional-profile creation requests.
 class InstitutionalRequest < ApplicationRecord
   self.table_name = 'requests'
   self.inheritance_column = :_type_disabled
@@ -29,6 +29,17 @@ class InstitutionalRequest < ApplicationRecord
       targetDepartmentId: target_department_id, targetDepartmentName: target_department&.name,
       payload: payload_json, status: status,
       createdAt: created_at, reviewedAt: reviewed_at, reviewedByUserId: reviewed_by_user_id
+    }
+  end
+
+  def api_json
+    profile = UserProfile.find_by(keycloak_user_id: requested_by_user_id)
+    {
+      id: id, type: type, title: title, requestedByUserId: requested_by_user_id,
+      requesterName: profile&.name, targetDepartmentId: target_department_id,
+      targetDepartmentName: target_department&.name, targetType: target_department_id ? 'DEPARTMENT' : 'UNIVERSITY',
+      payload: payload_json, status: status, createdAt: created_at,
+      reviewedAt: reviewed_at, reviewedByUserId: reviewed_by_user_id
     }
   end
 

@@ -29,6 +29,9 @@ public class Event {
     @Column(name = "organizer_id", nullable = false)
     private UUID organizerId;
 
+    @Column(name = "created_by_user_id", length = 255)
+    private String createdByUserId;
+
     @Column(name = "image_url", length = 2048)
     private String imageUrl;
 
@@ -80,11 +83,22 @@ public class Event {
             String location, Instant startsAt, Instant endsAt, String category, Integer capacity,
             Instant registrationDeadline, RegistrationMode registrationMode, Long price, String externalUrl,
             boolean attendanceEnabled, AttendanceMode attendanceMode, EventStatus status, Instant createdAt) {
+        this(id, title, description, organizerType, organizerId, imageUrl, location, startsAt, endsAt, category,
+                capacity, registrationDeadline, registrationMode, price, externalUrl, attendanceEnabled, attendanceMode,
+                status, createdAt, null);
+    }
+
+    public Event(UUID id, String title, String description, String organizerType, UUID organizerId, String imageUrl,
+            String location, Instant startsAt, Instant endsAt, String category, Integer capacity,
+            Instant registrationDeadline, RegistrationMode registrationMode, Long price, String externalUrl,
+            boolean attendanceEnabled, AttendanceMode attendanceMode, EventStatus status, Instant createdAt,
+            String createdByUserId) {
         this.id = id;
         this.title = title;
         this.description = description;
         this.organizerType = organizerType;
         this.organizerId = organizerId;
+        this.createdByUserId = createdByUserId;
         this.imageUrl = imageUrl;
         this.location = location;
         this.startsAt = startsAt;
@@ -126,6 +140,10 @@ public class Event {
 
     public UUID getOrganizerId() {
         return this.organizerId;
+    }
+
+    public String getCreatedByUserId() {
+        return this.createdByUserId;
     }
 
     public String getImageUrl() {

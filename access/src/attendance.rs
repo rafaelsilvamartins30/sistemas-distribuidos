@@ -20,11 +20,14 @@ pub const EXCHANGE: &str = "unir.events";
 pub const QUEUE: &str = "access.registration-confirmed";
 pub const ROUTING_KEY: &str = "engagement.registration.confirmed.v1";
 pub const EVENT_CANCELLED_ROUTING_KEY: &str = "engagement.event.cancelled.v1";
+pub const REGISTRATION_CANCELLED_ROUTING_KEY: &str = "engagement.registration.cancelled.v1";
 
 const EVENT_TYPE: &str = "RegistrationConfirmed";
 const AGGREGATE_TYPE: &str = "Registration";
 const EVENT_CANCELLED_TYPE: &str = "EventCancelled";
 const EVENT_AGGREGATE_TYPE: &str = "Event";
+const REGISTRATION_CANCELLED_TYPE: &str = "RegistrationCancelled";
+const REGISTRATION_AGGREGATE_TYPE: &str = "Registration";
 const SESSION_SOURCE_TYPE: &str = "EVENT";
 const PARTICIPANT_SCANS_EVENT: &str = "PARTICIPANT_SCANS_EVENT";
 
@@ -70,6 +73,7 @@ pub enum CheckInError {
     OutsideWindow,
     NotEligible,
     EntryUnavailable,
+    NotEventCreator,
     Database(sqlx::Error),
 }
 
@@ -81,6 +85,7 @@ impl fmt::Display for CheckInError {
             Self::OutsideWindow => write!(formatter, "CHECK_IN_WINDOW_CLOSED"),
             Self::NotEligible => write!(formatter, "ATTENDANCE_NOT_ELIGIBLE"),
             Self::EntryUnavailable => write!(formatter, "ATTENDANCE_ENTRY_NOT_ELIGIBLE"),
+            Self::NotEventCreator => write!(formatter, "EVENT_CREATOR_REQUIRED"),
             Self::Database(error) => write!(formatter, "could not persist check-in: {error}"),
         }
     }
@@ -122,8 +127,325 @@ pub struct MyAttendance {
     pub checked_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MyTicket {
+    pub event_id: Uuid,
+    pub registration_id: Option<Uuid>,
+    pub session_id: Uuid,
+    pub attendance_entry_id: Uuid,
+    pub event_title: String,
+    pub starts_at: DateTime<Utc>,
+    pub ends_at: DateTime<Utc>,
+    pub mode: String,
+    pub status: String,
+    pub registered_at: DateTime<Utc>,
+    pub checked_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QrArtifact {
+    pub token: String,
+    pub qr_svg: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizerCheckInPreview {
+    pub event_id: Uuid,
+    pub event_title: String,
+    pub attendance_entry_id: Uuid,
+    pub registration_id: Option<Uuid>,
+    pub participant_user_id: String,
+    pub status: String,
+}
+
 fn shared_token_hash(token: &str) -> String {
     format!("{:x}", Sha256::digest(token.as_bytes()))
+}
+
+fn qr_artifact(token: String) -> Result<QrArtifact, CheckInError> {
+    let qr = qrcodegen::QrCode::encode_text(&token, qrcodegen::QrCodeEcc::Medium)
+        .map_err(|_| CheckInError::SessionUnavailable)?;
+    let border = 4;
+    let dimension = qr.size() + border * 2;
+    let mut path = String::new();
+    for y in 0..qr.size() {
+        for x in 0..qr.size() {
+            if qr.get_module(x, y) {
+                path.push_str(&format!("M{} {}h1v1h-1z", x + border, y + border));
+            }
+        }
+    }
+    Ok(QrArtifact {
+        token,
+        qr_svg: format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {dimension} {dimension}\" shape-rendering=\"crispEdges\"><rect width=\"100%\" height=\"100%\" fill=\"white\"/><path d=\"{path}\"/></svg>"
+        ),
+    })
+}
+
+fn new_qr_token() -> String {
+    // UUID v4 is backed by the operating system CSPRNG; two UUIDs provide 244 random bits.
+    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
+}
+
+async fn finalize_expired_tickets(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    let now = Utc::now();
+    sqlx::query(
+        "UPDATE attendance_sessions SET status = 'CLOSED' \
+         WHERE status = 'OPEN' AND ends_at < $1",
+    )
+    .bind(now)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE attendance_entries entries SET status = 'NO_SHOW', finalized_at = $1 \
+         FROM attendance_sessions sessions \
+         WHERE entries.session_id = sessions.id AND entries.status = 'ELIGIBLE' \
+           AND sessions.status = 'CLOSED' AND sessions.ends_at < $1",
+    )
+    .bind(now)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await
+}
+
+/// Lists this user's attendance tickets, finalizing expired eligible entries as no-shows.
+pub async fn get_my_tickets(pool: &PgPool, user_id: &str) -> Result<Vec<MyTicket>, sqlx::Error> {
+    finalize_expired_tickets(pool).await?;
+    let rows = sqlx::query(
+        "SELECT sessions.source_id AS event_id, entries.registration_id, sessions.id AS session_id, \
+         entries.id AS attendance_entry_id, sessions.source_title AS event_title, sessions.starts_at, \
+         sessions.ends_at, sessions.mode, entries.status, entries.registered_at, check_ins.checked_at \
+         FROM attendance_sessions sessions \
+         JOIN attendance_entries entries ON entries.session_id = sessions.id \
+         LEFT JOIN check_ins ON check_ins.attendance_entry_id = entries.id \
+         WHERE sessions.source_type = $1 AND entries.user_id = $2 \
+         ORDER BY sessions.starts_at DESC, entries.registered_at DESC",
+    )
+    .bind(SESSION_SOURCE_TYPE)
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(MyTicket {
+                event_id: row.try_get("event_id")?,
+                registration_id: row.try_get("registration_id")?,
+                session_id: row.try_get("session_id")?,
+                attendance_entry_id: row.try_get("attendance_entry_id")?,
+                event_title: row.try_get("event_title")?,
+                starts_at: row.try_get("starts_at")?,
+                ends_at: row.try_get("ends_at")?,
+                mode: row.try_get("mode")?,
+                status: row.try_get("status")?,
+                registered_at: row.try_get("registered_at")?,
+                checked_at: row.try_get("checked_at")?,
+            })
+        })
+        .collect()
+}
+
+/// Issues the event QR to its recorded creator. Only its hash is stored.
+pub async fn issue_event_qr_for_creator(
+    pool: &PgPool,
+    event_id: Uuid,
+    user_id: &str,
+) -> Result<QrArtifact, CheckInError> {
+    let mut transaction = pool.begin().await?;
+    let row = sqlx::query(
+        "SELECT id, mode, status, event_creator_user_id FROM attendance_sessions \
+         WHERE source_type = $1 AND source_id = $2 FOR UPDATE",
+    )
+    .bind(SESSION_SOURCE_TYPE)
+    .bind(event_id)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or(CheckInError::SessionUnavailable)?;
+    let session_id: Uuid = row.try_get("id")?;
+    let mode: String = row.try_get("mode")?;
+    let status: String = row.try_get("status")?;
+    let owner_id: Option<String> = row.try_get("event_creator_user_id")?;
+    if owner_id.as_deref() != Some(user_id) {
+        return Err(CheckInError::NotEventCreator);
+    }
+    if mode != PARTICIPANT_SCANS_EVENT || status != "OPEN" {
+        return Err(CheckInError::SessionUnavailable);
+    }
+    let token = new_qr_token();
+    sqlx::query("UPDATE attendance_sessions SET shared_token_hash = $2 WHERE id = $1")
+        .bind(session_id)
+        .bind(shared_token_hash(&token))
+        .execute(&mut *transaction)
+        .await?;
+    transaction.commit().await?;
+    qr_artifact(token)
+}
+
+/// Issues the participant's QR for organizer-scanned events; each new QR invalidates the prior one.
+pub async fn issue_participant_qr(
+    pool: &PgPool,
+    event_id: Uuid,
+    user_id: &str,
+) -> Result<QrArtifact, CheckInError> {
+    let mut transaction = pool.begin().await?;
+    let row = sqlx::query(
+        "SELECT sessions.id AS session_id, sessions.mode, sessions.status, entries.id AS entry_id, \
+         entries.status AS entry_status \
+         FROM attendance_sessions sessions JOIN attendance_entries entries ON entries.session_id = sessions.id \
+         WHERE sessions.source_type = $1 AND sessions.source_id = $2 AND entries.user_id = $3 \
+         ORDER BY entries.registered_at DESC LIMIT 1 FOR UPDATE OF sessions, entries",
+    )
+    .bind(SESSION_SOURCE_TYPE)
+    .bind(event_id)
+    .bind(user_id)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or(CheckInError::NotEligible)?;
+    let mode: String = row.try_get("mode")?;
+    let session_status: String = row.try_get("status")?;
+    let entry_status: String = row.try_get("entry_status")?;
+    let entry_id: Uuid = row.try_get("entry_id")?;
+    if mode != "ORGANIZER_SCANS_PARTICIPANT" || session_status != "OPEN" {
+        return Err(CheckInError::SessionUnavailable);
+    }
+    if entry_status != "ELIGIBLE" {
+        return Err(CheckInError::EntryUnavailable);
+    }
+    let token = new_qr_token();
+    sqlx::query("UPDATE attendance_entries SET participant_token_hash = $2 WHERE id = $1")
+        .bind(entry_id)
+        .bind(shared_token_hash(&token))
+        .execute(&mut *transaction)
+        .await?;
+    transaction.commit().await?;
+    qr_artifact(token)
+}
+
+/// Validates the organizer and ticket, but does not mark attendance.
+pub async fn preview_organizer_check_in(
+    pool: &PgPool,
+    token: &str,
+    organizer_user_id: &str,
+) -> Result<OrganizerCheckInPreview, CheckInError> {
+    let row = sqlx::query(
+        "SELECT sessions.source_id AS event_id, sessions.source_title AS event_title, sessions.mode, \
+         sessions.status AS session_status, sessions.event_creator_user_id, sessions.check_in_opens_at, \
+         sessions.check_in_closes_at, entries.id AS entry_id, entries.registration_id, entries.user_id, \
+         entries.status AS entry_status \
+         FROM attendance_sessions sessions JOIN attendance_entries entries ON entries.session_id = sessions.id \
+         WHERE entries.participant_token_hash = $1",
+    )
+    .bind(shared_token_hash(token))
+    .fetch_optional(pool)
+    .await?
+    .ok_or(CheckInError::InvalidToken)?;
+    validate_organizer_scan(&row, organizer_user_id)?;
+    Ok(OrganizerCheckInPreview {
+        event_id: row.try_get("event_id")?,
+        event_title: row.try_get("event_title")?,
+        attendance_entry_id: row.try_get("entry_id")?,
+        registration_id: row.try_get("registration_id")?,
+        participant_user_id: row.try_get("user_id")?,
+        status: row.try_get("entry_status")?,
+    })
+}
+
+fn validate_organizer_scan(
+    row: &sqlx::postgres::PgRow,
+    organizer_user_id: &str,
+) -> Result<(), CheckInError> {
+    let owner_id: Option<String> = row.try_get("event_creator_user_id")?;
+    let mode: String = row.try_get("mode")?;
+    let session_status: String = row.try_get("session_status")?;
+    let opens_at: DateTime<Utc> = row.try_get("check_in_opens_at")?;
+    let closes_at: DateTime<Utc> = row.try_get("check_in_closes_at")?;
+    let entry_status: String = row.try_get("entry_status")?;
+    if owner_id.as_deref() != Some(organizer_user_id) {
+        return Err(CheckInError::NotEventCreator);
+    }
+    if mode != "ORGANIZER_SCANS_PARTICIPANT" || session_status != "OPEN" {
+        return Err(CheckInError::SessionUnavailable);
+    }
+    let now = Utc::now();
+    if now < opens_at || now > closes_at {
+        return Err(CheckInError::OutsideWindow);
+    }
+    if entry_status != "ELIGIBLE" && entry_status != "ATTENDED" {
+        return Err(CheckInError::EntryUnavailable);
+    }
+    Ok(())
+}
+
+/// Confirms attendance only after the event owner explicitly approves the scan.
+pub async fn confirm_organizer_check_in(
+    pool: &PgPool,
+    token: &str,
+    organizer_user_id: &str,
+) -> Result<CheckInResult, CheckInError> {
+    let mut transaction = pool.begin().await?;
+    let row = sqlx::query(
+        "SELECT sessions.id AS session_id, sessions.mode, \
+         sessions.status AS session_status, sessions.event_creator_user_id, sessions.check_in_opens_at, \
+         sessions.check_in_closes_at, entries.id AS entry_id, entries.user_id, \
+         entries.status AS entry_status, check_ins.id AS check_in_id, check_ins.checked_at \
+         FROM attendance_sessions sessions JOIN attendance_entries entries ON entries.session_id = sessions.id \
+         LEFT JOIN check_ins ON check_ins.attendance_entry_id = entries.id \
+         WHERE entries.participant_token_hash = $1 FOR UPDATE OF sessions, entries",
+    )
+    .bind(shared_token_hash(token))
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or(CheckInError::InvalidToken)?;
+    validate_organizer_scan(&row, organizer_user_id)?;
+    let session_id: Uuid = row.try_get("session_id")?;
+    let entry_id: Uuid = row.try_get("entry_id")?;
+    let entry_status: String = row.try_get("entry_status")?;
+    if entry_status == "ATTENDED" {
+        let check_in_id: Option<Uuid> = row.try_get("check_in_id")?;
+        let checked_at: Option<DateTime<Utc>> = row.try_get("checked_at")?;
+        let result = CheckInResult {
+            check_in_id: check_in_id.ok_or(CheckInError::EntryUnavailable)?,
+            session_id,
+            attendance_entry_id: entry_id,
+            status: "ATTENDED".to_string(),
+            checked_at: checked_at.ok_or(CheckInError::EntryUnavailable)?,
+        };
+        transaction.commit().await?;
+        return Ok(result);
+    }
+    let checked_at = Utc::now();
+    let check_in_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO check_ins (id, session_id, attendance_entry_id, method, validated_by_user_id, checked_at) \
+         VALUES ($1, $2, $3, 'ORGANIZER_SCANS_PARTICIPANT', $4, $5)",
+    )
+    .bind(check_in_id)
+    .bind(session_id)
+    .bind(entry_id)
+    .bind(organizer_user_id)
+    .bind(checked_at)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE attendance_entries SET status = 'ATTENDED', attended_at = $2 \
+         WHERE id = $1 AND status = 'ELIGIBLE'",
+    )
+    .bind(entry_id)
+    .bind(checked_at)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(CheckInResult {
+        check_in_id,
+        session_id,
+        attendance_entry_id: entry_id,
+        status: "ATTENDED".to_string(),
+        checked_at,
+    })
 }
 
 /// Records the authenticated participant's check-in under the session row lock.
@@ -239,6 +561,7 @@ pub async fn get_my_attendance(
     event_id: Uuid,
     user_id: &str,
 ) -> Result<Option<MyAttendance>, sqlx::Error> {
+    finalize_expired_tickets(pool).await?;
     let row = sqlx::query(
         "SELECT s.source_id AS event_id, s.id AS session_id, e.id AS attendance_entry_id, \
          e.status, e.registered_at, c.checked_at \
@@ -286,8 +609,7 @@ pub async fn issue_event_qr_token(pool: &PgPool, event_id: Uuid) -> Result<Strin
         return Err(CheckInError::SessionUnavailable);
     }
 
-    // UUID v4 is backed by the operating system CSPRNG; two UUIDs provide 244 random bits.
-    let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let token = new_qr_token();
     sqlx::query("UPDATE attendance_sessions SET shared_token_hash = $2 WHERE id = $1")
         .bind(session_id)
         .bind(shared_token_hash(&token))
@@ -320,6 +642,8 @@ struct RegistrationConfirmed {
     event_title: String,
     starts_at: DateTime<Utc>,
     ends_at: DateTime<Utc>,
+    #[serde(default)]
+    event_creator_user_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
@@ -363,6 +687,27 @@ struct EventCancelled {
     cancelled_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RegistrationCancelledEnvelope {
+    message_id: Uuid,
+    event_type: String,
+    aggregate_type: String,
+    aggregate_id: Uuid,
+    occurred_at: DateTime<Utc>,
+    schema_version: i32,
+    payload_json: Value,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RegistrationCancelled {
+    registration_id: Uuid,
+    event_id: Uuid,
+    user_id: String,
+    cancelled_at: DateTime<Utc>,
+}
+
 struct ValidatedCancellation {
     envelope: EventCancelledEnvelope,
     payload: EventCancelled,
@@ -393,6 +738,10 @@ fn decode_message(body: &[u8]) -> Result<ValidatedMessage, ProcessError> {
         || payload.event_title.trim().is_empty()
         || payload.event_title.chars().count() > 200
         || payload.ends_at <= payload.starts_at
+        || payload
+            .event_creator_user_id
+            .as_ref()
+            .is_some_and(|owner| owner.trim().is_empty() || owner.len() > 255)
         || (payload.attendance_enabled && payload.attendance_mode.is_none())
     {
         return Err(ProcessError::Invalid(
@@ -416,10 +765,57 @@ pub async fn process_message(pool: &PgPool, body: &[u8]) -> Result<(), ProcessEr
     match header.get("eventType").and_then(Value::as_str) {
         Some(EVENT_TYPE) => process_registration_confirmed(pool, body).await,
         Some(EVENT_CANCELLED_TYPE) => process_event_cancelled(pool, body).await,
+        Some(REGISTRATION_CANCELLED_TYPE) => process_registration_cancelled(pool, body).await,
         _ => Err(ProcessError::Invalid(
             "unsupported Access event type".into(),
         )),
     }
+}
+
+async fn process_registration_cancelled(pool: &PgPool, body: &[u8]) -> Result<(), ProcessError> {
+    let envelope: RegistrationCancelledEnvelope = serde_json::from_slice(body)
+        .map_err(|error| ProcessError::Invalid(format!("invalid envelope JSON: {error}")))?;
+    let payload: RegistrationCancelled = serde_json::from_value(envelope.payload_json.clone())
+        .map_err(|error| ProcessError::Invalid(format!("invalid payload JSON: {error}")))?;
+    if envelope.message_id.is_nil()
+        || envelope.event_type != REGISTRATION_CANCELLED_TYPE
+        || envelope.aggregate_type != REGISTRATION_AGGREGATE_TYPE
+        || envelope.aggregate_id != payload.registration_id
+        || envelope.schema_version != 1
+        || payload.registration_id.is_nil()
+        || payload.event_id.is_nil()
+        || payload.user_id.trim().is_empty()
+        || payload.user_id.len() > 255
+        || payload.cancelled_at < envelope.occurred_at
+    {
+        return Err(ProcessError::Invalid(
+            "unsupported cancellation identity or inconsistent payload".into(),
+        ));
+    }
+    let mut transaction = pool.begin().await?;
+    let session = sqlx::query(
+        "SELECT id FROM attendance_sessions WHERE source_type = $1 AND source_id = $2 FOR UPDATE",
+    )
+    .bind(SESSION_SOURCE_TYPE)
+    .bind(payload.event_id)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    if let Some(session) = session {
+        let session_id: Uuid = session.try_get("id")?;
+        sqlx::query(
+            "UPDATE attendance_entries SET status = 'CANCELLED', cancelled_at = $2, \
+             participant_token_hash = NULL \
+             WHERE session_id = $1 AND registration_id = $3 AND user_id = $4 AND status = 'ELIGIBLE'",
+        )
+        .bind(session_id)
+        .bind(payload.cancelled_at)
+        .bind(payload.registration_id)
+        .bind(&payload.user_id)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    transaction.commit().await?;
+    Ok(())
 }
 
 async fn process_registration_confirmed(pool: &PgPool, body: &[u8]) -> Result<(), ProcessError> {
@@ -495,11 +891,12 @@ async fn process_registration_confirmed(pool: &PgPool, body: &[u8]) -> Result<()
     let session_id = ensure_session(&mut transaction, &message).await?;
     let entry_id = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO attendance_entries (id, session_id, user_id, status, registered_at) \
-         VALUES ($1, $2, $3, 'ELIGIBLE', $4)",
+        "INSERT INTO attendance_entries (id, session_id, registration_id, user_id, status, registered_at) \
+         VALUES ($1, $2, $3, $4, 'ELIGIBLE', $5)",
     )
     .bind(entry_id)
     .bind(session_id)
+    .bind(message.payload.registration_id)
     .bind(&message.payload.user_id)
     .bind(message.envelope.occurred_at)
     .execute(&mut *transaction)
@@ -659,6 +1056,14 @@ pub async fn process_event_cancelled(pool: &PgPool, body: &[u8]) -> Result<(), P
     .bind(cancellation.payload.event_id)
     .execute(&mut *transaction)
     .await?;
+    sqlx::query(
+        "UPDATE attendance_entries SET participant_token_hash = NULL \
+         WHERE session_id IN (SELECT id FROM attendance_sessions WHERE source_type = $1 AND source_id = $2)",
+    )
+    .bind(SESSION_SOURCE_TYPE)
+    .bind(cancellation.payload.event_id)
+    .execute(&mut *transaction)
+    .await?;
     transaction.commit().await?;
     Ok(())
 }
@@ -673,9 +1078,9 @@ async fn ensure_session(
     let candidate_id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO attendance_sessions \
-         (id, source_type, source_id, source_title, starts_at, ends_at, mode, status, \
+         (id, source_type, source_id, source_title, starts_at, ends_at, mode, status, event_creator_user_id, \
           check_in_opens_at, check_in_closes_at, shared_token_hash, created_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'OPEN', $5, $6, NULL, $8) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'OPEN', $8, $5, $6, NULL, $9) \
          ON CONFLICT (source_type, source_id) DO NOTHING",
     )
     .bind(candidate_id)
@@ -685,12 +1090,13 @@ async fn ensure_session(
     .bind(message.payload.starts_at)
     .bind(message.payload.ends_at)
     .bind(mode.as_str())
+    .bind(&message.payload.event_creator_user_id)
     .bind(message.envelope.occurred_at)
     .execute(&mut **transaction)
     .await?;
 
     let row = sqlx::query(
-        "SELECT id, source_title, starts_at, ends_at, mode FROM attendance_sessions \
+        "SELECT id, source_title, starts_at, ends_at, mode, event_creator_user_id FROM attendance_sessions \
          WHERE source_type = $1 AND source_id = $2",
     )
     .bind(SESSION_SOURCE_TYPE)
@@ -702,14 +1108,26 @@ async fn ensure_session(
     let starts_at: DateTime<Utc> = row.try_get("starts_at")?;
     let ends_at: DateTime<Utc> = row.try_get("ends_at")?;
     let stored_mode: String = row.try_get("mode")?;
+    let stored_owner_id: Option<String> = row.try_get("event_creator_user_id")?;
     if source_title != message.payload.event_title
         || starts_at.timestamp_micros() != message.payload.starts_at.timestamp_micros()
         || ends_at.timestamp_micros() != message.payload.ends_at.timestamp_micros()
         || stored_mode != mode.as_str()
+        || stored_owner_id
+            .as_ref()
+            .zip(message.payload.event_creator_user_id.as_ref())
+            .is_some_and(|(stored, incoming)| stored != incoming)
     {
         return Err(ProcessError::Invalid(
             "event attendance data differs from the existing session".into(),
         ));
+    }
+    if stored_owner_id.is_none() && message.payload.event_creator_user_id.is_some() {
+        sqlx::query("UPDATE attendance_sessions SET event_creator_user_id = $2 WHERE id = $1")
+            .bind(session_id)
+            .bind(&message.payload.event_creator_user_id)
+            .execute(&mut **transaction)
+            .await?;
     }
     Ok(session_id)
 }
@@ -805,6 +1223,15 @@ async fn consume_once(
             QUEUE,
             EXCHANGE,
             EVENT_CANCELLED_ROUTING_KEY,
+            QueueBindOptions::default(),
+            FieldTable::default(),
+        )
+        .await?;
+    channel
+        .queue_bind(
+            QUEUE,
+            EXCHANGE,
+            REGISTRATION_CANCELLED_ROUTING_KEY,
             QueueBindOptions::default(),
             FieldTable::default(),
         )
@@ -923,6 +1350,15 @@ mod tests {
             decode_message(envelope(missing_mode).to_string().as_bytes()),
             Err(ProcessError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn creates_an_svg_qr_artifact() {
+        let artifact = qr_artifact("attendance-token".into()).unwrap();
+        assert_eq!(artifact.token, "attendance-token");
+        assert!(artifact.qr_svg.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""));
+        assert!(artifact.qr_svg.contains("<path d=\"M"));
+        assert!(artifact.qr_svg.ends_with("</svg>"));
     }
 
     #[test]

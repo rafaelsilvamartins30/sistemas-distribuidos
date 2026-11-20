@@ -17,6 +17,61 @@ export interface CheckInResult {
   checkedAt: string;
 }
 
+export interface MyTicket extends MyAttendance {
+  registrationId: string | null;
+  eventTitle: string;
+  startsAt: string;
+  endsAt: string;
+  mode: "PARTICIPANT_SCANS_EVENT" | "ORGANIZER_SCANS_PARTICIPANT";
+}
+
+export interface TicketRegistration {
+  id: string;
+  eventId: string;
+  userId: string;
+  status: string;
+  registeredAt: string;
+  confirmedAt: string | null;
+  cancelledAt: string | null;
+  event: {
+    id: string;
+    title: string;
+    description: string;
+    organizerType: string;
+    organizerId: string;
+    imageUrl: string | null;
+    location: string;
+    startsAt: string;
+    endsAt: string;
+    category: string;
+    attendanceEnabled: boolean;
+    attendanceMode: MyTicket["mode"] | null;
+  };
+  attendance: MyTicket | null;
+}
+
+export interface TicketPage {
+  items: TicketRegistration[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+}
+
+export interface QrArtifact {
+  token: string;
+  qrSvg: string;
+}
+
+export interface OrganizerCheckInPreview {
+  eventId: string;
+  eventTitle: string;
+  attendanceEntryId: string;
+  registrationId: string | null;
+  participantUserId: string;
+  status: AttendanceEntryStatus;
+}
+
 export class AttendanceApiError extends Error {
   constructor(
     public readonly status: number,
@@ -79,4 +134,52 @@ export function checkInWithEventQr(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<CheckInResult> {
   return request("POST", "/api/v1/web/attendance/check-ins", token, gatewayUrl, fetchImpl, { token: qrToken });
+}
+
+export function getMyTickets(
+  token: string,
+  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<TicketPage> {
+  return request("GET", "/api/v1/web/me/tickets", token, gatewayUrl, fetchImpl);
+}
+
+export function issueMyTicketQr(
+  token: string,
+  eventId: string,
+  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<QrArtifact> {
+  return request("POST", `/api/v1/web/attendance/tickets/${encodeURIComponent(eventId)}/qr`, token, gatewayUrl, fetchImpl);
+}
+
+export function issueEventAttendanceQr(
+  token: string,
+  eventId: string,
+  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<QrArtifact> {
+  return request("POST", `/api/v1/web/attendance/events/${encodeURIComponent(eventId)}/qr`, token, gatewayUrl, fetchImpl);
+}
+
+export function previewOrganizerCheckIn(
+  token: string,
+  qrToken: string,
+  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<OrganizerCheckInPreview> {
+  return request("POST", "/api/v1/web/attendance/organizer-check-ins/preview", token, gatewayUrl, fetchImpl, {
+    token: qrToken,
+  });
+}
+
+export function confirmOrganizerCheckIn(
+  token: string,
+  qrToken: string,
+  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<CheckInResult> {
+  return request("POST", "/api/v1/web/attendance/organizer-check-ins/confirm", token, gatewayUrl, fetchImpl, {
+    token: qrToken,
+  });
 }

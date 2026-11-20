@@ -4,6 +4,7 @@ import type Keycloak from "keycloak-js";
 import { CampusSpaceCard } from "../components/CampusSpaceCard";
 import { Icon } from "../components/Icon";
 import { PaginationControls } from "../components/PaginationControls";
+import { RequestProfileForm } from "./CampusRequestsPage";
 import { CampusApiError, getCommunities, type Community } from "../services/campus";
 
 interface WebContext {
@@ -63,6 +64,7 @@ export function CommunitiesPage() {
         <Link className="text-link" to="/entidades">
           Explorar entidades acadêmicas <Icon name="arrowUpRight" width="15" height="15" />
         </Link>
+        <RequestProfileForm token={keycloak.token ?? ""} type="COMMUNITY_CREATION" />
       </div>
 
       {loading ? (

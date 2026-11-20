@@ -1,5 +1,6 @@
 use access::attendance::{
-    get_my_attendance, issue_event_qr_token, process_message, record_participant_check_in,
+    confirm_organizer_check_in, get_my_attendance, get_my_tickets, issue_event_qr_token,
+    issue_participant_qr, preview_organizer_check_in, process_message, record_participant_check_in,
     CheckInError,
 };
 use chrono::{Duration as ChronoDuration, Utc};
@@ -117,6 +118,49 @@ async fn check_in_fixture(pool: &PgPool, user_id: &str) -> (Uuid, Uuid) {
     (event_id, entry_id)
 }
 
+async fn organizer_check_in_fixture(
+    pool: &PgPool,
+    user_id: &str,
+    owner_id: &str,
+) -> (Uuid, Uuid, Uuid) {
+    let event_id = Uuid::new_v4();
+    let registration_id = Uuid::new_v4();
+    let session_id = Uuid::new_v4();
+    let entry_id = Uuid::new_v4();
+    let now = Utc::now();
+    let starts_at = now - ChronoDuration::minutes(5);
+    let ends_at = now + ChronoDuration::hours(1);
+    sqlx::query(
+        "INSERT INTO attendance_sessions \
+         (id, source_type, source_id, source_title, starts_at, ends_at, mode, status, event_creator_user_id, \
+          check_in_opens_at, check_in_closes_at, created_at) \
+         VALUES ($1, 'EVENT', $2, 'Evento com leitura pelo organizador', $3, $4, \
+                 'ORGANIZER_SCANS_PARTICIPANT', 'OPEN', $5, $3, $4, $6)",
+    )
+    .bind(session_id)
+    .bind(event_id)
+    .bind(starts_at)
+    .bind(ends_at)
+    .bind(owner_id)
+    .bind(now)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO attendance_entries (id, session_id, registration_id, user_id, status, registered_at) \
+         VALUES ($1, $2, $3, $4, 'ELIGIBLE', $5)",
+    )
+    .bind(entry_id)
+    .bind(session_id)
+    .bind(registration_id)
+    .bind(user_id)
+    .bind(now)
+    .execute(pool)
+    .await
+    .unwrap();
+    (event_id, registration_id, entry_id)
+}
+
 fn event_cancelled(event_id: Uuid, message_id: Uuid) -> Vec<u8> {
     json!({
         "messageId": message_id,
@@ -127,6 +171,30 @@ fn event_cancelled(event_id: Uuid, message_id: Uuid) -> Vec<u8> {
         "schemaVersion": 1,
         "payloadJson": {
             "eventId": event_id,
+            "cancelledAt": "2026-11-16T15:00:00Z"
+        }
+    })
+    .to_string()
+    .into_bytes()
+}
+
+fn registration_cancelled(
+    registration_id: Uuid,
+    event_id: Uuid,
+    user_id: &str,
+    message_id: Uuid,
+) -> Vec<u8> {
+    json!({
+        "messageId": message_id,
+        "eventType": "RegistrationCancelled",
+        "aggregateType": "Registration",
+        "aggregateId": registration_id,
+        "occurredAt": "2026-11-16T15:00:00Z",
+        "schemaVersion": 1,
+        "payloadJson": {
+            "registrationId": registration_id,
+            "eventId": event_id,
+            "userId": user_id,
             "cancelledAt": "2026-11-16T15:00:00Z"
         }
     })
@@ -240,6 +308,102 @@ async fn concurrent_duplicate_scan_creates_one_check_in_and_marks_entry_attended
     assert_eq!(attendance.status, "ATTENDED");
     assert_eq!(attendance.checked_at, Some(left.checked_at));
     cleanup(&pool, Uuid::nil(), event_id).await;
+}
+
+#[tokio::test]
+#[ignore = "requires ACCESS_TEST_DATABASE_URL pointing to an isolated PostgreSQL database"]
+async fn organizer_qr_requires_event_owner_and_explicit_confirmation() {
+    let pool = test_pool().await;
+    let participant_id = format!("kc-{}", Uuid::new_v4());
+    let organizer_id = format!("kc-{}", Uuid::new_v4());
+    let (event_id, _, entry_id) =
+        organizer_check_in_fixture(&pool, &participant_id, &organizer_id).await;
+
+    let qr = issue_participant_qr(&pool, event_id, &participant_id)
+        .await
+        .unwrap();
+    assert!(!qr.qr_svg.is_empty());
+    assert_ne!(qr.token, "");
+    assert!(matches!(
+        preview_organizer_check_in(&pool, &qr.token, "another-organizer").await,
+        Err(CheckInError::NotEventCreator)
+    ));
+    let preview = preview_organizer_check_in(&pool, &qr.token, &organizer_id)
+        .await
+        .unwrap();
+    assert_eq!(preview.attendance_entry_id, entry_id);
+    assert_eq!(preview.participant_user_id, participant_id);
+    assert_eq!(preview.status, "ELIGIBLE");
+
+    let check_in = confirm_organizer_check_in(&pool, &qr.token, &organizer_id)
+        .await
+        .unwrap();
+    assert_eq!(check_in.status, "ATTENDED");
+    let (status, validator): (String, Option<String>) = sqlx::query_as(
+        "SELECT entries.status, check_ins.validated_by_user_id \
+         FROM attendance_entries entries JOIN check_ins ON check_ins.attendance_entry_id = entries.id \
+         WHERE entries.id = $1",
+    )
+    .bind(entry_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "ATTENDED");
+    assert_eq!(validator.as_deref(), Some(organizer_id.as_str()));
+    cleanup(&pool, Uuid::nil(), event_id).await;
+}
+
+#[tokio::test]
+#[ignore = "requires ACCESS_TEST_DATABASE_URL pointing to an isolated PostgreSQL database"]
+async fn registration_cancellation_revokes_ticket_and_past_eligible_entries_are_finalized() {
+    let pool = test_pool().await;
+    let participant_id = format!("kc-{}", Uuid::new_v4());
+    let organizer_id = format!("kc-{}", Uuid::new_v4());
+    let (event_id, registration_id, entry_id) =
+        organizer_check_in_fixture(&pool, &participant_id, &organizer_id).await;
+    let qr = issue_participant_qr(&pool, event_id, &participant_id)
+        .await
+        .unwrap();
+    process_message(
+        &pool,
+        &registration_cancelled(registration_id, event_id, &participant_id, Uuid::new_v4()),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        preview_organizer_check_in(&pool, &qr.token, &organizer_id).await,
+        Err(CheckInError::InvalidToken)
+    ));
+    let attendance = get_my_tickets(&pool, &participant_id).await.unwrap();
+    assert_eq!(attendance[0].status, "CANCELLED");
+    assert_eq!(attendance[0].registration_id, Some(registration_id));
+    cleanup(&pool, Uuid::nil(), event_id).await;
+
+    let (past_event_id, past_entry_id) = check_in_fixture(&pool, &participant_id).await;
+    sqlx::query(
+        "UPDATE attendance_sessions SET starts_at = $2, ends_at = $3, \
+         check_in_opens_at = $2, check_in_closes_at = $3 WHERE source_id = $1",
+    )
+    .bind(past_event_id)
+    .bind(Utc::now() - ChronoDuration::hours(2))
+    .bind(Utc::now() - ChronoDuration::hours(1))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let tickets = get_my_tickets(&pool, &participant_id).await.unwrap();
+    let no_show = tickets
+        .iter()
+        .find(|ticket| ticket.event_id == past_event_id)
+        .unwrap();
+    assert_eq!(no_show.status, "NO_SHOW");
+    let stored_status: String =
+        sqlx::query_scalar("SELECT status FROM attendance_entries WHERE id = $1")
+            .bind(past_entry_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_status, "NO_SHOW");
+    cleanup(&pool, Uuid::nil(), past_event_id).await;
 }
 
 #[tokio::test]

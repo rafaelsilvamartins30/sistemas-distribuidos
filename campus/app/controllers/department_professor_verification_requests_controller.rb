@@ -25,6 +25,7 @@ class DepartmentProfessorVerificationRequestsController < ApplicationController
       verification.update!(status: InstitutionalRequest::APPROVED,
                            reviewed_at: Time.current,
                            reviewed_by_user_id: current_subject)
+      CampusNotifications.request_decided!(verification, current_subject)
       render json: verification.opportunity_verification_json(profile)
     end
   end
@@ -34,6 +35,7 @@ class DepartmentProfessorVerificationRequestsController < ApplicationController
       verification.update!(status: InstitutionalRequest::REJECTED,
                            reviewed_at: Time.current,
                            reviewed_by_user_id: current_subject)
+      CampusNotifications.request_decided!(verification, current_subject)
       render json: verification.opportunity_verification_json(profile)
     end
   end

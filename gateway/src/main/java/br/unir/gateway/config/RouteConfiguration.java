@@ -26,12 +26,29 @@ public class RouteConfiguration {
                 .route(RequestPredicates.POST("/api/v1/users"), HandlerFunctions.http())
                 .route(RequestPredicates.PATCH("/api/v1/me"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/university"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/web/university"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/semesters"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/semesters/{semesterId}"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/semesters"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/web/semesters/{semesterId}"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/academic-units"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/academic-units/{unitId}"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/academic-units"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/web/academic-units/{unitId}"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/courses"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/courses/{courseId}"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/courses"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/web/courses/{courseId}"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/departments"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/departments/{departmentId}"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/departments"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/web/departments/{departmentId}"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/entities"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/entities/{entityId}"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/web/entities/{entityId}"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/communities"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/communities/{communityId}"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/web/communities/{communityId}"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/events"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/events/organizer-contexts"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/events/managed"), HandlerFunctions.http())
@@ -54,6 +71,32 @@ public class RouteConfiguration {
                         HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/professor-verification-requests/{requestId}/reject"),
                         HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/requests/me"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/requests/pending"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/requests"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/requests/{requestId}/approve"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/requests/{requestId}/reject"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/feed"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/profiles/{profileType}/{profileId}/posts"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/profiles/{profileType}/{profileId}/posts"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/communities/{communityId}/space/posts"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/communities/{communityId}/space/posts"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/community-space-posts/{postId}/comments"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/community-space-posts/{postId}/comments"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/polls/{pollId}/votes"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/follows"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/follows"), HandlerFunctions.http())
+                .route(RequestPredicates.DELETE("/api/v1/web/follows/{followId}"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/notifications"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/notifications/read-all"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/notifications/{notificationId}/read"),
+                        HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/sports"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/sports/{sportId}"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/competitions"), HandlerFunctions.http())
@@ -65,6 +108,13 @@ public class RouteConfiguration {
                 .route(RequestPredicates.DELETE("/api/v1/web/registrations/{registrationId}"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/attendance/me"), HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/attendance/check-ins"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/me/tickets"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/attendance/events/{eventId}/qr"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/attendance/tickets/{eventId}/qr"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/attendance/organizer-check-ins/preview"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/attendance/organizer-check-ins/confirm"),
+                        HandlerFunctions.http())
                 .before(BeforeFilterFunctions.uri(this.webBffUrl)).build();
     }
 

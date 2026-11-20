@@ -16,14 +16,14 @@ class EventOrganizersControllerTest < ActionDispatch::IntegrationTest
       entity_type: 'ACADEMIC_CENTER',
       department: department,
       links: [],
-      manager_user_ids: [KeycloakJwtTestHelpers::SUBJECT]
+      administrator_user_ids: [KeycloakJwtTestHelpers::SUBJECT]
     )
     community = Community.create!(
       name: 'Comunidade de Jogos e Cultura',
       description: 'Encontros semanais.',
       general_info_markdown: 'Informações da comunidade.',
       links: [],
-      manager_user_ids: [KeycloakJwtTestHelpers::SUBJECT]
+      administrator_user_ids: [KeycloakJwtTestHelpers::SUBJECT]
     )
     create_profile(subject: KeycloakJwtTestHelpers::SUBJECT)
     profile = UserProfile.find_by!(keycloak_user_id: KeycloakJwtTestHelpers::SUBJECT)

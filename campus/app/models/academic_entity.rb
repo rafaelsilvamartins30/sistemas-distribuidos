@@ -17,6 +17,6 @@ class AcademicEntity < ApplicationRecord
 
   def list_fields_must_be_arrays
     errors.add(:links, :invalid) unless links.is_a?(Array)
-    errors.add(:manager_user_ids, :invalid) unless manager_user_ids.is_a?(Array)
+    errors.add(:administrator_user_ids, :invalid) unless administrator_user_ids.is_a?(Array)
   end
 end

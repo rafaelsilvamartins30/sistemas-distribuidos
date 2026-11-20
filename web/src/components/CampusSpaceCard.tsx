@@ -8,6 +8,7 @@ interface CampusSpaceCardProps {
   detailPath: string;
   logoUrl: string | null;
   bannerUrl: string | null;
+  referenceNotice?: string;
 }
 
 function initials(name: string): string {
@@ -20,7 +21,16 @@ function initials(name: string): string {
     .toLocaleUpperCase("pt-BR");
 }
 
-export function CampusSpaceCard({ id, name, description, kind, detailPath, logoUrl, bannerUrl }: CampusSpaceCardProps) {
+export function CampusSpaceCard({
+  id,
+  name,
+  description,
+  kind,
+  detailPath,
+  logoUrl,
+  bannerUrl,
+  referenceNotice,
+}: CampusSpaceCardProps) {
   return (
     <article className="entity-directory-card campus-space-directory-card" data-record-id={id}>
       <div className="entity-banner">
@@ -36,6 +46,7 @@ export function CampusSpaceCard({ id, name, description, kind, detailPath, logoU
           <Link to={detailPath}>{name}</Link>
         </h3>
         <p>{description}</p>
+        {referenceNotice && <small className="catalog-reference-notice">{referenceNotice}</small>}
       </div>
     </article>
   );

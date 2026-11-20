@@ -22,14 +22,14 @@ module KeycloakJwtTestHelpers
       institutionalId: '12345',
       affiliationStatus: 'STUDENT',
       academicLevel: 'UNDERGRADUATE',
-      course: 'Computação',
-      department: 'Departamento de Ciência da Computação',
+      courseId: '20000000-0000-4000-8000-000000000002',
+      departmentId: '20000000-0000-4000-8000-000000000003',
       interests: ['Sistemas distribuídos']
     }
   end
 
   def create_profile(subject: SUBJECT, institutional_id: '12345')
-    ensure_profile_department!
+    ensure_profile_catalog!
     with_jwks do
       post '/users',
            params: valid_profile.merge(institutionalId: institutional_id),
@@ -40,17 +40,40 @@ module KeycloakJwtTestHelpers
   end
 
   def ensure_profile_department!
-    Department.find_or_create_by!(name: valid_profile.fetch(:department)) do |department|
-      department.acronym = 'DCC'
-      department.description = 'Departamento de teste.'
-      department.general_info_markdown = 'Informações de teste.'
-      department.links = []
-      department.administrator_user_ids = []
+    ensure_profile_catalog![:department]
+  end
+
+  def ensure_profile_catalog!
+    department = ensure_profile_test_department
+    course = ensure_profile_course(department)
+    { course: course, department: department }
+  end
+
+  def ensure_profile_course(department)
+    Course.find_or_create_by!(id: valid_profile.fetch(:courseId)) do |record|
+      record.department = department
+      record.name = 'Computação'
+      record.source_url = 'https://example.edu.br/catalogo'
+      record.source_note = 'Curso de teste.'
+      record.reference_only = false
     end
   end
 
-  def bearer_headers(subject: SUBJECT, email: 'ana@unir.br', issuer: ISSUER, expires_at: 5.minutes.from_now)
-    claims = { iss: issuer, sub: subject, exp: expires_at.to_i, email: email, email_verified: true }.compact
+  def ensure_profile_test_department
+    Department.find_or_create_by!(id: valid_profile.fetch(:departmentId)) do |record|
+      record.name = 'Departamento de Ciência da Computação'
+      record.acronym = 'DCC'
+      record.description = 'Departamento de teste.'
+      record.general_info_markdown = 'Informações de teste.'
+      record.links = []
+      record.administrator_user_ids = []
+    end
+  end
+
+  def bearer_headers(subject: SUBJECT, email: 'ana@unir.br', issuer: ISSUER, expires_at: 5.minutes.from_now,
+                     roles: [])
+    claims = { iss: issuer, sub: subject, exp: expires_at.to_i, email: email, email_verified: true,
+               realm_access: { roles: roles } }.compact
     token = JWT.encode(claims, PRIVATE_KEY, 'RS256', kid: KEY_ID)
     { 'Authorization' => "Bearer #{token}" }
   end

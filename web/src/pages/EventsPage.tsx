@@ -6,7 +6,17 @@ import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
 import { Section } from "../components/Section";
 import { ParticipantQrScanner } from "../components/ParticipantQrScanner";
-import { AttendanceApiError, checkInWithEventQr, getMyAttendance, type MyAttendance } from "../services/attendance";
+import {
+  AttendanceApiError,
+  checkInWithEventQr,
+  confirmOrganizerCheckIn,
+  getMyAttendance,
+  issueEventAttendanceQr,
+  previewOrganizerCheckIn,
+  type MyAttendance,
+  type OrganizerCheckInPreview,
+  type QrArtifact,
+} from "../services/attendance";
 import {
   EventApiError,
   cancelEvent,
@@ -349,8 +359,8 @@ export function EventsPage() {
           title="Eventos & encontros universitários"
           description="Atividades gratuitas, eventos pagos internamente via Pix (departamentos, unidades e professores) e eventos pagos externos (comunidades e entidades acadêmicas)."
         />
-        <Link className="button button-secondary" to="/my-registrations">
-          <Icon name="calendar" width="16" height="16" /> Minhas inscrições
+        <Link className="button button-secondary" to="/tickets">
+          <Icon name="calendar" width="16" height="16" /> Meus tickets
         </Link>
       </div>
 
@@ -712,6 +722,11 @@ export function EventDetailPage() {
   const [attendanceBusy, setAttendanceBusy] = useState(false);
   const [attendanceError, setAttendanceError] = useState<string | null>(null);
   const [manageFeedback, setManageFeedback] = useState<string | null>(null);
+  const [organizerBusy, setOrganizerBusy] = useState(false);
+  const [organizerError, setOrganizerError] = useState<string | null>(null);
+  const [organizerQr, setOrganizerQr] = useState<QrArtifact | null>(null);
+  const [scannedTicketToken, setScannedTicketToken] = useState("");
+  const [scannedTicket, setScannedTicket] = useState<OrganizerCheckInPreview | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -893,6 +908,57 @@ export function EventDetailPage() {
       }
     } finally {
       setAttendanceLoading(false);
+    }
+  }
+
+  async function handleIssueEventQr() {
+    if (!event) return;
+    setOrganizerBusy(true);
+    setOrganizerError(null);
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+      setOrganizerQr(await issueEventAttendanceQr(keycloak.token, event.id));
+    } catch (error) {
+      const detail = error instanceof AttendanceApiError ? error.detail : "Tente novamente mais tarde.";
+      setOrganizerError(`Não foi possível gerar o QR: ${detail}`);
+    } finally {
+      setOrganizerBusy(false);
+    }
+  }
+
+  async function handlePreviewOrganizerCheckIn(token: string) {
+    setOrganizerBusy(true);
+    setOrganizerError(null);
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+      setScannedTicketToken(token);
+      setScannedTicket(await previewOrganizerCheckIn(keycloak.token, token));
+    } catch (error) {
+      const detail = error instanceof AttendanceApiError ? error.detail : "Tente novamente mais tarde.";
+      setOrganizerError(`Não foi possível validar o ticket: ${detail}`);
+      setScannedTicket(null);
+      setScannedTicketToken("");
+    } finally {
+      setOrganizerBusy(false);
+    }
+  }
+
+  async function handleConfirmOrganizerCheckIn() {
+    if (!scannedTicketToken) return;
+    setOrganizerBusy(true);
+    setOrganizerError(null);
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+      await confirmOrganizerCheckIn(keycloak.token, scannedTicketToken);
+      setScannedTicket((current) => current ? { ...current, status: "ATTENDED" } : current);
+    } catch (error) {
+      const detail = error instanceof AttendanceApiError ? error.detail : "Tente novamente mais tarde.";
+      setOrganizerError(`Não foi possível confirmar a presença: ${detail}`);
+    } finally {
+      setOrganizerBusy(false);
     }
   }
 
@@ -1100,7 +1166,7 @@ export function EventDetailPage() {
                   <p className="attendance-window">
                     Janela: {dateTime(event.startsAt)} a {dateTime(event.endsAt)}.
                   </p>
-                  <ParticipantQrScanner busy={attendanceBusy} onToken={(token) => void handleCheckIn(token)} />
+                  <ParticipantQrScanner busy={attendanceBusy} autoSubmitOnScan onToken={(token) => void handleCheckIn(token)} />
                 </>
               ) : attendance?.status === "CANCELLED" ? (
                 <p role="status">Sua elegibilidade para presença foi cancelada.</p>
@@ -1124,6 +1190,40 @@ export function EventDetailPage() {
                   {attendanceError}
                 </p>
               )}
+            </section>
+          )}
+          {event.attendanceEnabled && event.createdByUserId && keycloak.subject === event.createdByUserId && (
+            <section className="registration-action-panel attendance-action-panel" aria-labelledby="organizer-attendance-title">
+              <h2 id="organizer-attendance-title">Organização do evento</h2>
+              {event.attendanceMode === "PARTICIPANT_SCANS_EVENT" ? (
+                <>
+                  <p>Gere o QR compartilhado para os participantes registrarem a presença.</p>
+                  <button className="button button-secondary" type="button" disabled={organizerBusy}
+                    onClick={() => void handleIssueEventQr()}>
+                    {organizerBusy ? "Gerando QR…" : organizerQr ? "Gerar novo QR" : "Gerar QR do evento"}
+                  </button>
+                  {organizerQr && <div className="my-ticket-qr">
+                    <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(organizerQr.qrSvg)}`} alt={`QR de presença para ${event.title}`} />
+                    <span>Mostre este QR durante o evento. Gerar outro invalida o anterior.</span>
+                  </div>}
+                </>
+              ) : (
+                <>
+                  <p>Leia o QR do participante e confira o identificador antes de confirmar a presença.</p>
+                  <ParticipantQrScanner busy={organizerBusy} submitLabel="Verificar ticket"
+                    onToken={(token) => void handlePreviewOrganizerCheckIn(token)} />
+                  {scannedTicket && <div className="organizer-ticket-preview" role="status">
+                    <strong>{scannedTicket.status === "ATTENDED" ? "Presença já registrada" : "Ticket válido"}</strong>
+                    <span>Evento: {scannedTicket.eventTitle}</span>
+                    <span>Identificador do participante: {scannedTicket.participantUserId}</span>
+                    {scannedTicket.status !== "ATTENDED" && <button className="button button-primary" type="button"
+                      disabled={organizerBusy} onClick={() => void handleConfirmOrganizerCheckIn()}>
+                      Confirmar presença
+                    </button>}
+                  </div>}
+                </>
+              )}
+              {organizerError && <p className="notice notice-error" role="alert">{organizerError}</p>}
             </section>
           )}
           <span className="eyebrow">Evento</span>

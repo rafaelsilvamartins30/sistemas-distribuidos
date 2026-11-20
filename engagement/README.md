@@ -36,7 +36,7 @@ The Sports catalog is documented in [`docs/contracts/sports-v1.md`](../docs/cont
 No `compose.yaml`, `engagement` expõe a porta `18085` (`ENGAGEMENT_PORT`), conecta ao banco `engagement-db` (`unir_engagement`, porta `15434`) e publica pelo RabbitMQ interno `rabbitmq` (`unir.events`). O broker não expõe porta no host e usa o volume `rabbitmq_data`.
 O Compose aponta `CAMPUS_URL` para `http://campus:3000`; fora do Compose, o padrão local é `http://localhost:3000`.
 
-Para carregar os exemplos determinísticos locais, com o banco do Compose já iniciado e as migrations aplicadas:
+O procedimento completo e repetível é `scripts/seed-local-demo.sh`, que aplica as migrations Campus, provisiona as contas locais e então carrega o catálogo e as demonstrações. Ele não remove volumes. Após o preparo, os arquivos SQL também podem ser reaplicados individualmente:
 
 ```sh
 docker compose exec -T engagement-db psql -v ON_ERROR_STOP=1 -U unir -d unir_engagement < engagement/seed/local-events.sql
@@ -44,7 +44,7 @@ docker compose exec -T engagement-db psql -v ON_ERROR_STOP=1 -U unir -d unir_eng
 docker compose exec -T engagement-db psql -v ON_ERROR_STOP=1 -U unir -d unir_engagement < engagement/seed/local-sports.sql
 ```
 
-Os seeds usam IDs fixos e `ON CONFLICT DO NOTHING`, portanto podem ser repetidos sem sobrescrever ou remover dados existentes. Os links das oportunidades são domínios de demonstração `example.org`, não editais reais.
+Os seeds criam 18 eventos, 12 oportunidades, três modalidades, duas competições e duas temporadas, todas explicitamente sintéticas. Todos usam IDs estáveis e `ON CONFLICT DO NOTHING`; reaplicar não altera nem remove registros existentes. Os links das oportunidades são domínios reservados `example.org`, não editais reais. Não são criadas inscrições, pagamentos ou históricos de presença.
 
 ## Qualidade
 

@@ -8,6 +8,7 @@ import br.unir.engagement.dto.RegistrationConfirmedPayload;
 import br.unir.engagement.dto.RegistrationPaymentRequestedPayload;
 import br.unir.engagement.dto.EventCancelledPayload;
 import br.unir.engagement.dto.RegistrationCancelledByEventPayload;
+import br.unir.engagement.dto.RegistrationCancelledPayload;
 import br.unir.engagement.entity.OutboxEvent;
 import br.unir.engagement.repository.OutboxRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -69,6 +70,7 @@ public class OutboxPublisher {
                 case RegistrationConfirmedPayload.EVENT_TYPE -> RegistrationConfirmedPayload.ROUTING_KEY;
                 case EventCancelledPayload.EVENT_TYPE -> EventCancelledPayload.ROUTING_KEY;
                 case RegistrationCancelledByEventPayload.EVENT_TYPE -> RegistrationCancelledByEventPayload.ROUTING_KEY;
+                case RegistrationCancelledPayload.EVENT_TYPE -> RegistrationCancelledPayload.ROUTING_KEY;
                 default -> throw new IllegalArgumentException("Unsupported Outbox event type: " + event.getEventType());
             };
             this.rabbitTemplate.send(RabbitMqConfiguration.EXCHANGE_NAME, routingKey, message, correlationData);

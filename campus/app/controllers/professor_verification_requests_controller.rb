@@ -24,7 +24,7 @@ class ProfessorVerificationRequestsController < ApplicationController
     profile = UserProfile.find_by(keycloak_user_id: current_subject)
     return render_problem(:not_found, 'UNIR user profile is required') unless profile
 
-    department = Department.find_by(name: profile.department)
+    department = profile.department
     return render_problem(:bad_request, 'Profile department must match an existing Campus department') unless department
 
     create_request(profile, department)
@@ -73,8 +73,12 @@ class ProfessorVerificationRequestsController < ApplicationController
       payload_json: { identifier: profile.registration_code },
       status: InstitutionalRequest::PENDING
     )
-    return render json: verification.opportunity_verification_json(profile), status: :created if verification.save
-
+    InstitutionalRequest.transaction do
+      verification.save!
+      CampusNotifications.request_submitted!(verification)
+    end
+    render json: verification.opportunity_verification_json(profile), status: :created
+  rescue ActiveRecord::RecordInvalid
     render_problem(:bad_request, 'Professor verification request is invalid')
   end
 end

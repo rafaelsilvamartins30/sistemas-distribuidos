@@ -44,7 +44,14 @@ class AcademicEntitiesControllerTest < ActionDispatch::IntegrationTest
     assert_equal 'Representação estudantil', response.parsed_body.fetch('entityType')
     assert_equal department.id, response.parsed_body.fetch('departmentId')
     assert_equal ['https://example.edu.br'], response.parsed_body.fetch('links')
-    assert_equal ['keycloak-manager-id'], response.parsed_body.fetch('managerUserIds')
+
+    assert_nil response.parsed_body.fetch('administratorUserIds')
+
+    with_jwks do
+      get "/entities/#{entity.id}", headers: bearer_headers(subject: 'keycloak-manager-id')
+    end
+    assert_response :success
+    assert_equal ['keycloak-manager-id'], response.parsed_body.fetch('administratorUserIds')
 
     with_jwks { get '/entities/10000000-0000-4000-8000-000000000199', headers: bearer_headers }
     assert_response :not_found
@@ -58,7 +65,7 @@ class AcademicEntitiesControllerTest < ActionDispatch::IntegrationTest
       get '/entities?size=0', headers: bearer_headers
       assert_response :bad_request
 
-      get '/entities?sort=manager_user_ids', headers: bearer_headers
+      get '/entities?sort=administrator_user_ids', headers: bearer_headers
     end
     assert_response :bad_request
   end
@@ -66,13 +73,13 @@ class AcademicEntitiesControllerTest < ActionDispatch::IntegrationTest
   test 'requires an entity type and array values for list fields' do
     entity = AcademicEntity.new(
       name: 'Entidade', description: 'Descrição', general_info_markdown: 'Informações',
-      entity_type: nil, links: 'invalid', manager_user_ids: 'invalid'
+      entity_type: nil, links: 'invalid', administrator_user_ids: 'invalid'
     )
 
     assert_not entity.valid?
     assert_includes entity.errors.attribute_names, :entity_type
     assert_includes entity.errors.attribute_names, :links
-    assert_includes entity.errors.attribute_names, :manager_user_ids
+    assert_includes entity.errors.attribute_names, :administrator_user_ids
   end
 
   private
@@ -89,7 +96,7 @@ class AcademicEntitiesControllerTest < ActionDispatch::IntegrationTest
     AcademicEntity.create!(
       id: id, name: name, description: 'Descrição da entidade.', general_info_markdown: 'Informações gerais.',
       entity_type: 'Representação estudantil', department: department, links: ['https://example.edu.br'],
-      manager_user_ids: ['keycloak-manager-id']
+      administrator_user_ids: ['keycloak-manager-id']
     )
   end
 end

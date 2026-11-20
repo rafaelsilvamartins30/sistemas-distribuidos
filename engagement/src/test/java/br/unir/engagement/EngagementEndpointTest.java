@@ -401,6 +401,8 @@ class EngagementEndpointTest {
         org.junit.jupiter.api.Assertions.assertEquals("PARTICIPANT_SCANS_EVENT",
                 payload.get("attendanceMode").asText());
         org.junit.jupiter.api.Assertions.assertEquals(event.getTitle(), payload.get("eventTitle").asText());
+        org.junit.jupiter.api.Assertions.assertEquals(event.getCreatedByUserId(),
+                payload.get("eventCreatorUserId").asText());
     }
 
     @Test
@@ -564,6 +566,15 @@ class EngagementEndpointTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELLED_BY_USER"))
                 .andExpect(jsonPath("$.cancelledAt").isNotEmpty());
         org.junit.jupiter.api.Assertions.assertEquals(1, this.registrationRepository.count());
+        OutboxEvent accessCancellation = this.outboxRepository
+                .findByAggregateIdOrderByCreatedAtAsc(registration.getId()).stream()
+                .filter(message -> "RegistrationCancelled".equals(message.getEventType())).findFirst().orElseThrow();
+        JsonNode accessCancellationPayload = this.objectMapper.readTree(accessCancellation.getPayloadJson());
+        org.junit.jupiter.api.Assertions.assertEquals(registration.getId().toString(),
+                accessCancellationPayload.get("registrationId").asText());
+        org.junit.jupiter.api.Assertions.assertEquals(event.getId().toString(),
+                accessCancellationPayload.get("eventId").asText());
+        org.junit.jupiter.api.Assertions.assertEquals("kc-user-a", accessCancellationPayload.get("userId").asText());
 
         this.mockMvc
                 .perform(delete("/api/v1/registrations/{registrationId}", registration.getId())
@@ -653,6 +664,7 @@ class EngagementEndpointTest {
                 .perform(post("/api/v1/events").with(userJwtWithToken("organizer-user", "organizer-token"))
                         .contentType(MediaType.APPLICATION_JSON).content(departmentInternalPaidBody))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.organizerType").value("DEPARTMENT"))
+                .andExpect(jsonPath("$.createdByUserId").value("organizer-user"))
                 .andExpect(jsonPath("$.registrationMode").value("INTERNAL_PAID"))
                 .andExpect(jsonPath("$.price").value(2500)).andReturn().getResponse().getContentAsString();
         UUID departmentEventId = UUID.fromString(this.objectMapper.readTree(createdResponse).get("id").asText());
@@ -728,7 +740,7 @@ class EngagementEndpointTest {
         return new Event(UUID.randomUUID(), "Evento gratuito", "Descrição do evento persistido.", "UNIVERSITY",
                 UUID.randomUUID(), null, "Auditório Central", startsAt, startsAt.plusSeconds(3600), "ACADEMIC",
                 capacity, now.plus(startsIn).minusSeconds(60), RegistrationMode.INTERNAL_FREE, null, null, true,
-                AttendanceMode.PARTICIPANT_SCANS_EVENT, EventStatus.ACTIVE, now);
+                AttendanceMode.PARTICIPANT_SCANS_EVENT, EventStatus.ACTIVE, now, "keycloak-event-creator");
     }
 
     private Event futurePaidEvent(int capacity, Duration startsIn, long amountMinor) {

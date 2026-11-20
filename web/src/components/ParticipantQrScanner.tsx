@@ -16,10 +16,12 @@ declare global {
 
 interface ParticipantQrScannerProps {
   busy: boolean;
+  autoSubmitOnScan?: boolean;
+  submitLabel?: string;
   onToken: (token: string) => void;
 }
 
-export function ParticipantQrScanner({ busy, onToken }: ParticipantQrScannerProps) {
+export function ParticipantQrScanner({ busy, autoSubmitOnScan = false, submitLabel, onToken }: ParticipantQrScannerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | null>(null);
@@ -72,7 +74,12 @@ export function ParticipantQrScanner({ busy, onToken }: ParticipantQrScannerProp
             const token = code.rawValue.trim();
             stopCamera();
             setManualToken(token);
-            setMessage("QR lido. Confirme o registro da presença.");
+            if (autoSubmitOnScan) {
+              setMessage("QR lido. Registrando sua presença…");
+              onTokenRef.current(token);
+            } else {
+              setMessage("QR lido. Confira os dados antes de confirmar.");
+            }
             return;
           }
         } catch {
@@ -103,7 +110,7 @@ export function ParticipantQrScanner({ busy, onToken }: ParticipantQrScannerProp
         disabled={busy}
         onClick={() => (scanning ? stopCamera() : void startCamera())}
       >
-        {scanning ? "Parar câmera" : "Escanear QR do evento"}
+        {scanning ? "Parar câmera" : autoSubmitOnScan ? "Ler QR do evento" : "Ler QR do participante"}
       </button>
       <video
         ref={videoRef}
@@ -114,7 +121,7 @@ export function ParticipantQrScanner({ busy, onToken }: ParticipantQrScannerProp
         hidden={!scanning}
       />
       <form className="attendance-token-form" onSubmit={submitToken}>
-        <label htmlFor="attendance-qr-token">Token do QR</label>
+        <label htmlFor="attendance-qr-token">Código do QR</label>
         <input
           id="attendance-qr-token"
           autoComplete="off"
@@ -124,7 +131,7 @@ export function ParticipantQrScanner({ busy, onToken }: ParticipantQrScannerProp
           disabled={busy}
         />
         <button className="button button-primary" type="submit" disabled={busy || !manualToken.trim()}>
-          {busy ? "Registrando…" : "Registrar presença"}
+          {busy ? "Verificando…" : submitLabel ?? "Registrar presença"}
         </button>
       </form>
       {message && (

@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
-# Departments are scoped to the single University record; external user IDs are not foreign keys.
+# Departments are profiles under the singleton University; external admin IDs are not foreign keys.
 class Department < ApplicationRecord
+  has_many :courses, dependent: :restrict_with_error
   has_many :academic_entities, dependent: :restrict_with_error
   has_many :institutional_requests,
            foreign_key: :target_department_id,

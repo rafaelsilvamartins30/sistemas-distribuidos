@@ -17,7 +17,7 @@ export function LoginPage({ keycloak }: LoginPageProps) {
     <main className="page-shell">
       <BrandPanel />
       <section className="content-panel" aria-labelledby="login-title">
-        <div className="content-card login-card">
+        <div className="login-card">
           <p className="eyebrow">Bem-vindo</p>
           <h2 id="login-title">Acesse a UNIR</h2>
           <p>Use suas credenciais institucionais para continuar com segurança.</p>
@@ -27,7 +27,6 @@ export function LoginPage({ keycloak }: LoginPageProps) {
           <button className="button button-secondary" onClick={() => void keycloak.register({ redirectUri: homeUrl })}>
             Criar conta
           </button>
-          <p className="login-note">Sua conta é protegida pelo Keycloak.</p>
         </div>
       </section>
     </main>

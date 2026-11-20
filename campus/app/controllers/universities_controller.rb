@@ -1,8 +1,12 @@
 # frozen_string_literal: true
 
-# Reads the single university record.
+# Reads and edits the single university institutional profile.
 class UniversitiesController < ApplicationController
-  before_action :authenticate_keycloak!
+  include KeycloakAuthenticated
+  include InstitutionalProfileAuthorization
+  include InstitutionalProfileSerialization
+
+  wrap_parameters false
 
   def show
     university = University.current
@@ -11,28 +15,25 @@ class UniversitiesController < ApplicationController
     render json: university_response(university)
   end
 
-  private
+  def update
+    university = University.current
+    return render_problem(:not_found, 'University not found') unless university
 
-  def authenticate_keycloak!
-    match = request.authorization.to_s.match(/\ABearer\s+(\S+)\z/i)
-    return render_problem(:unauthorized, 'Bearer token is required') unless match
+    payload = profile_payload(%w[name acronym description generalInfoMarkdown logoUrl bannerUrl links administratorUserIds currentTerm])
+    return unless payload
+    return unless require_profile_update_permissions(university, payload)
 
-    @token_claims = KeycloakJwt.decode(match[1])
-    return if @token_claims['sub'].present?
+    assign_profile_fields(university, payload.except('acronym', 'currentTerm'))
+    university.acronym = payload['acronym'] if payload.key?('acronym')
+    university.current_term = payload['currentTerm'] if payload.key?('currentTerm')
+    return render(json: university_response(university)) if university.save
 
-    render_problem(:unauthorized, 'Bearer token subject is required')
-  rescue JWT::DecodeError, JWT::JWKError
-    render_problem(:unauthorized, 'Invalid bearer token')
-  rescue KeycloakJwt::Unavailable
-    render_problem(:service_unavailable, 'Keycloak is unavailable')
+    render_problem(:unprocessable_entity, "Invalid fields: #{university.errors.attribute_names.uniq.sort.join(', ')}")
   end
 
+  private
+
   def university_response(university)
-    {
-      id: university.id, name: university.name, acronym: university.acronym,
-      description: university.description, generalInfoMarkdown: university.general_info_markdown,
-      currentTerm: university.current_term, logoUrl: university.logo_url, bannerUrl: university.banner_url,
-      links: university.links
-    }
+    institutional_profile_fields(university).merge(acronym: university.acronym, currentTerm: university.current_term)
   end
 end

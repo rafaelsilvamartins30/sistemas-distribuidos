@@ -26,13 +26,15 @@ function readSettings(): AppearanceSettings {
     return {
       mode: parsed.mode === "dark" ? "dark" : "light",
       palette:
-        parsed.palette === "blue"
-          ? "blue"
-          : parsed.palette === "violet"
-            ? "violet"
-            : parsed.palette === "ember" || parsed.palette === "amber"
-              ? "ember"
-              : "blue",
+        parsed.palette === "green"
+          ? "green"
+          : parsed.palette === "blue"
+            ? "blue"
+            : parsed.palette === "violet"
+              ? "violet"
+              : parsed.palette === "ember" || parsed.palette === "amber"
+                ? "ember"
+                : "blue",
     };
   } catch {
     return defaults;

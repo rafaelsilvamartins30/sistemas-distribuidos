@@ -37,7 +37,7 @@ class OpportunityPublishersControllerTest < ActionDispatch::IntegrationTest
       entity_type: 'RESEARCH_LAB',
       department: department,
       links: [],
-      manager_user_ids: [KeycloakJwtTestHelpers::SUBJECT]
+      administrator_user_ids: [KeycloakJwtTestHelpers::SUBJECT]
     )
 
     with_jwks { get '/internal/v1/opportunity-publishers', headers: bearer_headers }

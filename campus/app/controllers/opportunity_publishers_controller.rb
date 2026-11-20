@@ -24,7 +24,7 @@ class OpportunityPublishersController < ApplicationController
 
   def entity_contexts(subject)
     AcademicEntity.order(:name).filter_map do |entity|
-      next unless entity.manager_user_ids.include?(subject)
+      next unless entity.administrator_user_ids.include?(subject)
 
       publisher_context('ACADEMIC_ENTITY', entity.id, entity.name)
     end

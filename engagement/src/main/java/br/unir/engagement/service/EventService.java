@@ -88,7 +88,7 @@ public class EventService {
     }
 
     @Transactional
-    public EventResponse createEvent(CreateEventRequest request, String bearerToken) {
+    public EventResponse createEvent(CreateEventRequest request, String bearerToken, String createdByUserId) {
         String organizerType = normalize(request.organizerType()).toUpperCase(Locale.ROOT);
         if (!ALLOWED_ORGANIZERS.contains(organizerType)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported organizerType");
@@ -117,7 +117,7 @@ public class EventService {
                 verifiedOrganizer.organizerId(), imageUrl, location, request.startsAt(), request.endsAt(), category,
                 request.capacity(), request.registrationDeadline(), registrationConfig.mode(),
                 registrationConfig.price(), registrationConfig.externalUrl(), registrationConfig.attendanceEnabled(),
-                registrationConfig.attendanceMode(), EventStatus.ACTIVE, now);
+                registrationConfig.attendanceMode(), EventStatus.ACTIVE, now, createdByUserId);
         return EventResponse.from(this.eventRepository.saveAndFlush(event));
     }
 

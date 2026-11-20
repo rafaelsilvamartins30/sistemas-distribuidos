@@ -1,8 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { BrandMark } from "../components/BrandMark";
 import { Icon, type IconName } from "../components/Icon";
+import { getUniversity } from "../services/campus";
+import { getNotifications } from "../services/campusSocial";
 
 interface MainLayoutProps {
   keycloak: Keycloak;
@@ -23,6 +25,8 @@ function isCurrentPage(pathname: string, destination: string) {
 export function MainLayout({ keycloak }: MainLayoutProps) {
   const location = useLocation();
   const navigationRef = useRef<HTMLElement>(null);
+  const [universityAcronym, setUniversityAcronym] = useState("UNIR");
+  const [unreadCount, setUnreadCount] = useState(0);
   const email = String(keycloak.tokenParsed?.email ?? "");
   const name = String(keycloak.tokenParsed?.name ?? (email || "Minha conta"));
   const initial = (name.trim()[0] || "U").toLocaleUpperCase("pt-BR");
@@ -31,11 +35,39 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
     const section = mainNavigation.find((item) => isCurrentPage(location.pathname, item.to));
     const label = location.pathname.startsWith("/perfil")
       ? "Minha conta"
-      : location.pathname.startsWith("/my-registrations")
-        ? "Minhas inscrições"
+      : location.pathname.startsWith("/tickets")
+        ? "Meus tickets"
         : (section?.label ?? "Campus");
     document.title = `UNIR — ${label}`;
   }, [location.pathname]);
+
+  useEffect(() => {
+    let active = true;
+    if (keycloak.token) {
+      void getUniversity(keycloak.token)
+        .then((university) => {
+          if (active) setUniversityAcronym(university.acronym);
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      active = false;
+    };
+  }, [keycloak]);
+
+  useEffect(() => {
+    let active = true;
+    if (keycloak.token) {
+      void getNotifications(keycloak.token)
+        .then((page) => {
+          if (active) setUnreadCount(page.unreadCount ?? 0);
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      active = false;
+    };
+  }, [keycloak, location.pathname]);
 
   useEffect(() => {
     const navigation = navigationRef.current;
@@ -55,7 +87,7 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
               <BrandMark />
               <span className="product-brand-copy">
                 <strong>UNIR</strong>
-                <small>UFRJ · CAMPUS CENTRAL</small>
+                <small>{universityAcronym} · REDE UNIVERSITÁRIA</small>
               </span>
             </Link>
             <nav ref={navigationRef} className="product-nav" aria-label="Navegação principal">
@@ -71,6 +103,14 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
                 </Link>
               ))}
             </nav>
+            <Link
+              className="notification-nav-link"
+              to="/notificacoes"
+              aria-label={`Notificações, ${unreadCount} não lidas`}
+            >
+              <Icon name="bell" width="19" height="19" />
+              {unreadCount > 0 && <span>{unreadCount > 99 ? "99+" : unreadCount}</span>}
+            </Link>
             <details className="account-menu">
               <summary aria-label="Abrir menu da conta">
                 <span className="avatar" aria-hidden="true">
@@ -89,8 +129,11 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
                 <Link to="/perfil">
                   <Icon name="profile" width="17" height="17" /> Meu perfil
                 </Link>
-                <Link to="/my-registrations">
-                  <Icon name="calendar" width="17" height="17" /> Minhas inscrições
+                <Link to="/tickets">
+                  <Icon name="calendar" width="17" height="17" /> Meus tickets
+                </Link>
+                <Link to="/solicitacoes">
+                  <Icon name="message" width="17" height="17" /> Solicitações
                 </Link>
                 <button onClick={() => void keycloak.logout({ redirectUri: `${window.location.origin}/login` })}>
                   <Icon name="logout" width="17" height="17" /> Sair

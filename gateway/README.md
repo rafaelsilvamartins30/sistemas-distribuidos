@@ -20,6 +20,7 @@ Endpoints expostos (exigem JWT válido do Keycloak e preservam o header `Authori
 - As rotas de pedido, consulta e revisão da verificação docente (`/api/v1/web/professor-verification-requests...`) encaminham para Campus; a permissão de revisão é decidida pelo vínculo de administrador do departamento registrado no Campus.
 - `POST /api/v1/web/events/{eventId}/registrations`, `GET /api/v1/web/me/activities` e `DELETE /api/v1/web/registrations/{registrationId}` (`USER` ou `PLATFORM_ADMIN`) → encaminham as operações de inscrição ao Engagement. DELETE cancela logicamente e mantém o histórico.
 - `GET /api/v1/web/university`, `GET /api/v1/web/departments` e `GET /api/v1/web/departments/{departmentId}` (`USER` ou `PLATFORM_ADMIN`) → encaminham para o Web BFF e daí para `/university` e `/departments` no Campus.
+- `GET /api/v1/web/academic-units`, `GET /api/v1/web/academic-units/{unitId}`, `GET /api/v1/web/courses` e `GET /api/v1/web/courses/{courseId}` (`USER` ou `PLATFORM_ADMIN`) → consultam o catálogo somente leitura do Campus pelo Web BFF. Cursos se relacionam à unidade; o catálogo não inventa associação com departamento.
 - `GET /api/v1/web/entities`, `GET /api/v1/web/entities/{entityId}`, `GET /api/v1/web/communities` e `GET /api/v1/web/communities/{communityId}` (`USER` ou `PLATFORM_ADMIN`) → encaminham para o Web BFF e daí para `/entities` e `/communities` no Campus. As listas preservam os parâmetros de paginação; IDs de gestores são removidos pelo Web BFF.
 - Demais rotas e métodos são negados por padrão (`denyAll`).
 - CORS habilitado para `WEB_ORIGIN` nas rotas de perfil (`GET`, `POST`, `PATCH`, `OPTIONS`), eventos e inscrições (`GET`, `POST`, `DELETE`, `OPTIONS`), e para `ADMIN_WEB_ORIGIN` na rota administrativa (`GET`, `OPTIONS`).
@@ -35,6 +36,8 @@ Variáveis de ambiente principais:
 - `KEYCLOAK_JWK_SET_URI` (padrão local: `http://localhost:18081/realms/unir/protocol/openid-connect/certs`, no Compose: `http://keycloak:8080/realms/unir/protocol/openid-connect/certs`)
 - `WEB_ORIGIN` (padrão: `http://localhost:15173`)
 - `ADMIN_WEB_ORIGIN` (padrão: `http://localhost:15175`)
+
+O `ADMIN_WEB_ORIGIN` também pode consultar, via navegador, somente os GETs de resumo do Campus (`/api/v1/web/university`, `/departments`, `/entities` e `/communities`) usados pelo painel. As demais rotas `/api/v1/web/**` permanecem liberadas no CORS apenas para `WEB_ORIGIN`; as regras JWT do Gateway continuam valendo para ambas as origens.
 
 ## Qualidade
 

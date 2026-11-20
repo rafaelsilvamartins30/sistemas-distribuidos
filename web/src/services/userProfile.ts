@@ -7,6 +7,8 @@ export interface UserProfile {
   institutionalId: string;
   affiliationStatus: AffiliationStatus | null;
   academicLevel: AcademicLevel | null;
+  courseId: string | null;
+  departmentId: string | null;
   course: string;
   department: string;
   interests: string[];
@@ -21,8 +23,8 @@ export interface CreateProfileInput {
   institutionalId: string;
   affiliationStatus: AffiliationStatus;
   academicLevel: AcademicLevel;
-  course: string;
-  department: string;
+  courseId: string;
+  departmentId: string;
   interests: string[];
 }
 
@@ -31,8 +33,8 @@ export interface UpdateProfileInput {
   institutionalId: string;
   affiliationStatus: AffiliationStatus;
   academicLevel: AcademicLevel;
-  course: string;
-  department: string;
+  courseId: string;
+  departmentId: string;
   interests: string[];
 }
 

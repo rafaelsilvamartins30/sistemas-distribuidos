@@ -15,6 +15,7 @@ import br.unir.engagement.dto.RegistrationPaymentRequestedPayload;
 import br.unir.engagement.dto.RegistrationConfirmedPayload;
 import br.unir.engagement.dto.EventCancelledPayload;
 import br.unir.engagement.dto.RegistrationCancelledByEventPayload;
+import br.unir.engagement.dto.RegistrationCancelledPayload;
 import br.unir.engagement.entity.OutboxEvent;
 import br.unir.engagement.repository.OutboxRepository;
 import br.unir.engagement.service.OutboxPublisher;
@@ -170,6 +171,30 @@ class OutboxPublisherTest {
 
         verify(this.rabbitTemplate).send(eq(RabbitMqConfiguration.EXCHANGE_NAME),
                 eq(RegistrationCancelledByEventPayload.ROUTING_KEY), any(Message.class), any(CorrelationData.class));
+        org.junit.jupiter.api.Assertions.assertNotNull(event.getPublishedAt());
+    }
+
+    @Test
+    void publishesRegistrationCancelledToTheAccessRoutingKey() {
+        UUID registrationId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        OutboxEvent event = new OutboxEvent(UUID.randomUUID(), "Registration", registrationId,
+                RegistrationCancelledPayload.EVENT_TYPE,
+                "{\"registrationId\":\"%s\",\"eventId\":\"%s\",\"userId\":\"kc-user\",".formatted(registrationId,
+                        eventId) + "\"cancelledAt\":\"2026-11-16T15:00:00Z\"}",
+                Instant.parse("2026-11-16T15:00:00Z"));
+        when(this.outboxRepository.findTop50ByPublishedAtIsNullOrderByCreatedAtAsc()).thenReturn(List.of(event));
+        doAnswer(invocation -> {
+            CorrelationData correlation = invocation.getArgument(3);
+            correlation.getFuture().complete(new CorrelationData.Confirm(true, null));
+            return null;
+        }).when(this.rabbitTemplate).send(eq(RabbitMqConfiguration.EXCHANGE_NAME),
+                eq(RegistrationCancelledPayload.ROUTING_KEY), any(Message.class), any(CorrelationData.class));
+
+        new OutboxPublisher(this.outboxRepository, this.rabbitTemplate, this.objectMapper).publishPendingEvents();
+
+        verify(this.rabbitTemplate).send(eq(RabbitMqConfiguration.EXCHANGE_NAME),
+                eq(RegistrationCancelledPayload.ROUTING_KEY), any(Message.class), any(CorrelationData.class));
         org.junit.jupiter.api.Assertions.assertNotNull(event.getPublishedAt());
     }
 

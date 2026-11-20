@@ -24,11 +24,14 @@ The shared envelope contains `messageId`, `eventType`, `aggregateType`, `aggrega
   "attendanceMode": "PARTICIPANT_SCANS_EVENT",
   "eventTitle": "Encontro de Boas-vindas",
   "startsAt": "2027-06-15T17:00:00Z",
-  "endsAt": "2027-06-15T19:00:00Z"
+  "endsAt": "2027-06-15T19:00:00Z",
+  "eventCreatorUserId": "keycloak-subject"
 }
 ```
 
 `registrationId`, `eventId`, and `userId` identify the confirmed participant. `userId` is the Keycloak JWT `sub`, not the Campus `UserProfile.id`. `attendanceEnabled` and `attendanceMode` carry the approved attendance configuration. `eventTitle`, `startsAt`, and `endsAt` provide the fields needed to create Access' `AttendanceSession` without a synchronous call to Engagement. No profile, payment, pricing, QR, or check-in-window data is included.
+
+`eventCreatorUserId` is the Keycloak `sub` of the user who created the event, when known; it may be omitted or null for older events. Access compares this value with the request's authenticated `sub` before allowing organizer QR operations. The institutional `organizerId` is a separate identifier and is never treated as proof of who created the event. Existing events may have no creator recorded, in which case Access denies organizer operations. The current Engagement API is read-only for events; a future event creation flow must persist the authenticated creator for these organizer actions to become available.
 
 Engagement only writes this event for attendance-enabled events. Access treats a valid payload with `attendanceEnabled = false` as a no-op and creates no attendance or idempotency rows. Check-in window values remain unset until their policy is approved.
 

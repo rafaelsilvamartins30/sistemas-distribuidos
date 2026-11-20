@@ -1,6 +1,6 @@
 # Access Service
 
-Serviço de credenciamento e controle de acesso da plataforma UNIR, implementado em Rust. Consome `RegistrationConfirmed` v1 para criar sessão e entrada de presença, e atende check-in de participante no PostgreSQL exclusivo do Access.
+Serviço de credenciamento e controle de acesso da plataforma UNIR, implementado em Rust. Consome `RegistrationConfirmed` v1 para criar tickets de presença, `RegistrationCancelled` v1 para refletir cancelamentos individuais e `EventCancelled` v1 para preservar o histórico de eventos cancelados.
 
 ## Execução local
 
@@ -18,10 +18,10 @@ make quality
 - `RABBITMQ_URL` (opcional; substitui as variáveis separadas abaixo)
 - `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD`
 
-Ao iniciar, o Access aplica suas migrations aditivas e conecta ao exchange `unir.events`, consumindo a fila durável `access.registration-confirmed` pela routing key `engagement.registration.confirmed.v1`. O ACK ocorre após o commit no banco. Mensagens inválidas são rejeitadas sem requeue; falhas de banco são reenfileiradas após uma pausa curta.
+Ao iniciar, o Access aplica suas migrations aditivas e conecta ao exchange `unir.events`. A fila durável `access.registration-confirmed` recebe confirmações de inscrição, cancelamentos de inscrição e cancelamentos de evento. O ACK ocorre após o commit no banco. Mensagens inválidas são rejeitadas sem requeue; falhas de banco são reenfileiradas após uma pausa curta.
 
-O Access expõe `GET /api/v1/attendance/me?eventId=...` e `POST /api/v1/attendance/check-ins`; na Web, as rotas externas são encaminhadas por Gateway e Web BFF. Access valida a assinatura RS256, issuer e expiração do JWT e usa o `sub` autenticado para encontrar a entrada elegível.
+O Access expõe a consulta do ticket do usuário, emissão de QR individual, leitura/confirmação de presença e consulta histórica; as rotas externas passam pelo Gateway e Web BFF. Access valida assinatura RS256, issuer e expiração do JWT e usa o `sub` autenticado para encontrar a entrada elegível. Para operações do organizador, o `sub` também precisa coincidir com `createdByUserId` registrado pelo Engagement.
 
-A política inicial aprovada usa `startsAt`–`endsAt` como janela inclusiva. O token QR é opaco, aleatório, armazenado somente como hash e não é renovado automaticamente. Para criar ou substituir o QR compartilhado de um evento, um operador executa `docker compose exec access /app/access issue-qr <event-id>`. O novo QR invalida o anterior. Não existe endpoint público de emissão enquanto Campus não fornecer autorização contextual de organizador.
+O prazo do evento encerra a janela de presença e tickets elegíveis passam para `NO_SHOW`; presenças confirmadas e cancelamentos permanecem no histórico. Tokens QR são aleatórios e somente seus hashes ficam persistidos. Emitir um QR novo substitui o anterior.
 
-O contrato está em [`docs/contracts/registration-confirmed-v1.md`](../docs/contracts/registration-confirmed-v1.md) e o contrato HTTP em [`docs/contracts/attendance-check-in-v1.md`](../docs/contracts/attendance-check-in-v1.md). O consumidor não cria registros de presença para payloads com `attendanceEnabled = false`.
+Os contratos estão em [`docs/contracts/registration-confirmed-v1.md`](../docs/contracts/registration-confirmed-v1.md), [`docs/contracts/registration-cancelled-v1.md`](../docs/contracts/registration-cancelled-v1.md) e [`docs/contracts/attendance-check-in-v1.md`](../docs/contracts/attendance-check-in-v1.md). O consumidor não cria tickets para eventos com `attendanceEnabled = false`.

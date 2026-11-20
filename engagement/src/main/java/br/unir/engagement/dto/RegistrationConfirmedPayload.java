@@ -9,7 +9,7 @@ import java.util.UUID;
  * is confirmed.
  */
 public record RegistrationConfirmedPayload(UUID registrationId, UUID eventId, String userId, boolean attendanceEnabled,
-        AttendanceMode attendanceMode, String eventTitle, Instant startsAt, Instant endsAt) {
+        AttendanceMode attendanceMode, String eventTitle, Instant startsAt, Instant endsAt, String eventCreatorUserId) {
 
     public static final String EVENT_TYPE = "RegistrationConfirmed";
     public static final String ROUTING_KEY = "engagement.registration.confirmed.v1";

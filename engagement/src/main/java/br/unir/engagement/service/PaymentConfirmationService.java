@@ -198,7 +198,7 @@ public class PaymentConfirmationService {
         }
         RegistrationConfirmedPayload payload = new RegistrationConfirmedPayload(registration.getId(), event.getId(),
                 registration.getUserId(), true, event.getAttendanceMode(), event.getTitle(), event.getStartsAt(),
-                event.getEndsAt());
+                event.getEndsAt(), event.getCreatedByUserId());
         try {
             this.jdbcTemplate.update("""
                     INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload_json, created_at)

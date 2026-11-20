@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { Icon } from "../components/Icon";
+import { FollowedFeed } from "../components/CampusSocial";
 import { useEventList } from "../hooks/useEventList";
 import {
   getAcademicEntities,
@@ -101,6 +102,9 @@ export function HomePage() {
               <span>Semestre {university.currentTerm}</span>
             </div>
           )}
+          <Link className="button button-secondary" to="/universidade">
+            Perfil da universidade
+          </Link>
         </div>
         <div className="university-hero-art" aria-hidden="true">
           <div className="hero-art-orbit hero-art-orbit-one" />
@@ -115,6 +119,8 @@ export function HomePage() {
         </div>
         {university && <span className="university-hero-caption">{university.name}</span>}
       </section>
+
+      <FollowedFeed token={keycloak.token ?? ""} currentTerm={university?.currentTerm ?? ""} />
 
       <div className="home-section-grid">
         <div className="home-main-column">

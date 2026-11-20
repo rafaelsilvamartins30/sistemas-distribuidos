@@ -1,18 +1,21 @@
 # frozen_string_literal: true
 
-# Lists and reads community profiles; social posts are handled by a separate contract.
+# Lists and edits community institutional profiles.
 class CommunitiesController < ApplicationController
-  before_action :authenticate_keycloak!
+  include KeycloakAuthenticated
+  include InstitutionalProfileAuthorization
+  include InstitutionalProfileSerialization
+
+  wrap_parameters false
 
   def index
-    page = integer_parameter(:page, 0)
-    size = integer_parameter(:size, 20)
-    sort = sort_parameter
-    unless page && page >= 0 && size&.positive? && sort
-      return render_problem(:bad_request, 'Invalid community list parameters')
-    end
+    page, size, sort = pagination_parameters
+    return render_problem(:bad_request, 'Invalid community list parameters') unless page
 
-    render json: community_page(page, size, sort)
+    communities = Community.order(sort)
+    total = communities.count
+    render json: { items: communities.offset(page * size).limit(size).map { |community| community_response(community) },
+                   page: page, size: size, totalElements: total, totalPages: (total.to_f / size).ceil }
   end
 
   def show
@@ -22,51 +25,37 @@ class CommunitiesController < ApplicationController
     render json: community_response(community)
   end
 
-  private
+  def update
+    community = Community.find_by(id: params[:id])
+    return render_problem(:not_found, 'Community not found') unless community
+    payload = profile_payload(%w[name description generalInfoMarkdown logoUrl bannerUrl links administratorUserIds category departmentId])
+    return unless payload
+    return unless require_profile_update_permissions(community, payload)
 
-  def authenticate_keycloak!
-    match = request.authorization.to_s.match(/\ABearer\s+(\S+)\z/i)
-    return render_problem(:unauthorized, 'Bearer token is required') unless match
+    assign_profile_fields(community, payload.except('category', 'departmentId'))
+    community.category = payload['category'] if payload.key?('category')
+    community.department_id = payload['departmentId'] if payload.key?('departmentId')
+    return render(json: community_response(community)) if community.save
 
-    claims = KeycloakJwt.decode(match[1])
-    return if claims['sub'].present?
-
-    render_problem(:unauthorized, 'Bearer token subject is required')
-  rescue JWT::DecodeError, JWT::JWKError
-    render_problem(:unauthorized, 'Invalid bearer token')
-  rescue KeycloakJwt::Unavailable
-    render_problem(:service_unavailable, 'Keycloak is unavailable')
+    render_problem(:unprocessable_entity, "Invalid fields: #{community.errors.attribute_names.uniq.sort.join(', ')}")
   end
 
-  def integer_parameter(name, default)
-    Integer(params.fetch(name, default.to_s), 10)
+  private
+
+  def pagination_parameters
+    page = Integer(params.fetch(:page, '0'), 10)
+    size = Integer(params.fetch(:size, '20'), 10)
+    sort = params.fetch(:sort, 'name')
+    direction = sort.start_with?('-') ? :desc : :asc
+    field = sort.delete_prefix('-')
+    return unless page >= 0 && size.between?(1, 100) && %w[name category].include?(field)
+
+    [page, size, { field => direction }]
   rescue ArgumentError, TypeError
     nil
   end
 
-  def sort_parameter
-    sort = params.fetch(:sort, 'name')
-    direction = sort.start_with?('-') ? :desc : :asc
-    field = sort.delete_prefix('-')
-    return { field => direction } if %w[name category].include?(field)
-
-    nil
-  end
-
   def community_response(community)
-    {
-      id: community.id, name: community.name, description: community.description,
-      generalInfoMarkdown: community.general_info_markdown, category: community.category,
-      logoUrl: community.logo_url, bannerUrl: community.banner_url, links: community.links,
-      managerUserIds: community.manager_user_ids
-    }
-  end
-
-  def community_page(page, size, sort)
-    communities = Community.order(sort)
-    total_elements = communities.count
-    items = communities.offset(page * size).limit(size).map { |community| community_response(community) }
-    { items: items, page: page, size: size, totalElements: total_elements,
-      totalPages: (total_elements.to_f / size).ceil }
+    institutional_profile_fields(community).merge(category: community.category, departmentId: community.department_id)
   end
 end

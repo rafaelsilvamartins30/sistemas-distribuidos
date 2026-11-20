@@ -3,9 +3,15 @@
 module UserProfiles
   # Keeps Campus responses compatible with the existing public profile contract.
   module ApiContract
-    CREATE_FIELDS = %w[name institutionalId affiliationStatus academicLevel course department interests].freeze
-    UPDATE_FIELDS = %w[name institutionalId affiliationStatus academicLevel course department interests].freeze
-    STRING_FIELDS = %w[name institutionalId affiliationStatus academicLevel course department].freeze
+    include CatalogSerialization
+
+    CREATE_FIELDS = %w[
+      name institutionalId affiliationStatus academicLevel courseId departmentId interests
+    ].freeze
+    UPDATE_FIELDS = CREATE_FIELDS.freeze
+    STRING_FIELDS = %w[
+      name institutionalId affiliationStatus academicLevel courseId departmentId
+    ].freeze
     LEGACY_AFFILIATION_STATUSES = %w[STUDENT PROFESSOR ALUMNI].freeze
     LEGACY_ACADEMIC_LEVELS = %w[UNDERGRADUATE MASTERS DOCTORATE].freeze
     LEGACY_TO_CAMPUS_ACADEMIC_LEVEL = {
@@ -17,17 +23,10 @@ module UserProfiles
     PROFILE_FIELD_NAMES = {
       'institutionalId' => 'registration_code',
       'affiliationStatus' => 'legacy_affiliation_status',
-      'academicLevel' => 'academic_level'
+      'academicLevel' => 'academic_level',
+      'courseId' => 'course_id',
+      'departmentId' => 'department_id'
     }.freeze
-    RESPONSE_FIELDS = {
-      'registration_code' => 'institutionalId',
-      'legacy_affiliation_status' => 'affiliationStatus',
-      'created_at' => 'createdAt',
-      'updated_at' => 'updatedAt'
-    }.freeze
-    PROFILE_RESPONSE_COLUMNS = %w[
-      name registration_code legacy_affiliation_status academic_level course department interests created_at updated_at
-    ].freeze
 
     private
 
@@ -74,8 +73,8 @@ module UserProfiles
         legacy_affiliation_status: payload['affiliationStatus'],
         user_type: user_type_for(payload['affiliationStatus']),
         academic_level: LEGACY_TO_CAMPUS_ACADEMIC_LEVEL.fetch(payload['academicLevel'], payload['academicLevel']),
-        course: payload['course'],
-        department: payload['department'],
+        course_id: payload['courseId'],
+        department_id: payload['departmentId'],
         interests: payload['interests'] || []
       }
     end
@@ -102,16 +101,12 @@ module UserProfiles
       response
     end
 
-    def profile_api_fields(profile)
-      fields = profile.attributes.slice(*PROFILE_RESPONSE_COLUMNS)
-      fields.transform_keys! { |field| RESPONSE_FIELDS.fetch(field, field) }
-      fields['academicLevel'] = CAMPUS_TO_LEGACY_ACADEMIC_LEVEL.fetch(fields['academic_level'])
-      fields.delete('academic_level')
-      fields.merge('id' => profile.keycloak_user_id)
-    end
-
     def user_type_for(affiliation_status)
       affiliation_status if %w[STUDENT PROFESSOR].include?(affiliation_status)
+    end
+
+    def legacy_academic_level(level)
+      CAMPUS_TO_LEGACY_ACADEMIC_LEVEL.fetch(level)
     end
 
     def token_api_fields

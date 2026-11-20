@@ -1,5 +1,9 @@
 use crate::{
-    attendance::{get_my_attendance, record_participant_check_in, CheckInError},
+    attendance::{
+        confirm_organizer_check_in, get_my_attendance, get_my_tickets, issue_event_qr_for_creator,
+        issue_participant_qr, preview_organizer_check_in, record_participant_check_in,
+        CheckInError,
+    },
     auth::{JwtError, JwtVerifier},
 };
 use serde::{Deserialize, Serialize};
@@ -297,11 +301,87 @@ async fn route_request(pool: &PgPool, verifier: &JwtVerifier, request: &HttpRequ
                 ),
             }
         }
-        _ if path == "/api/v1/attendance/me" || path == "/api/v1/attendance/check-ins" => {
+        ("GET", "/api/v1/attendance/tickets/me") => {
+            match get_my_tickets(pool, &authenticated_subject).await {
+                Ok(tickets) => Response::json(200, "OK", &tickets),
+                Err(_) => Response::problem(
+                    503,
+                    "Service Unavailable",
+                    "Service Unavailable",
+                    "Tickets are unavailable",
+                ),
+            }
+        }
+        ("POST", "/api/v1/attendance/organizer-check-ins/preview") => {
+            let body = match serde_json::from_slice::<CheckInRequest>(&request.body) {
+                Ok(body) if !body.token.trim().is_empty() && body.token.len() <= 512 => body,
+                _ => return invalid_qr_request(),
+            };
+            match preview_organizer_check_in(pool, &body.token, &authenticated_subject).await {
+                Ok(result) => Response::json(200, "OK", &result),
+                Err(error) => check_in_error(error),
+            }
+        }
+        ("POST", "/api/v1/attendance/organizer-check-ins/confirm") => {
+            let body = match serde_json::from_slice::<CheckInRequest>(&request.body) {
+                Ok(body) if !body.token.trim().is_empty() && body.token.len() <= 512 => body,
+                _ => return invalid_qr_request(),
+            };
+            match confirm_organizer_check_in(pool, &body.token, &authenticated_subject).await {
+                Ok(result) => Response::json(200, "OK", &result),
+                Err(error) => check_in_error(error),
+            }
+        }
+        ("POST", _) if path.starts_with("/api/v1/attendance/events/") && path.ends_with("/qr") => {
+            let Some(event_id) = path_uuid(path, "/api/v1/attendance/events/", "/qr") else {
+                return Response::problem(
+                    400,
+                    "Bad Request",
+                    "Bad Request",
+                    "eventId must be a UUID",
+                );
+            };
+            match issue_event_qr_for_creator(pool, event_id, &authenticated_subject).await {
+                Ok(qr) => Response::json(200, "OK", &qr),
+                Err(error) => check_in_error(error),
+            }
+        }
+        ("POST", _) if path.starts_with("/api/v1/attendance/tickets/") && path.ends_with("/qr") => {
+            let Some(event_id) = path_uuid(path, "/api/v1/attendance/tickets/", "/qr") else {
+                return Response::problem(
+                    400,
+                    "Bad Request",
+                    "Bad Request",
+                    "eventId must be a UUID",
+                );
+            };
+            match issue_participant_qr(pool, event_id, &authenticated_subject).await {
+                Ok(qr) => Response::json(200, "OK", &qr),
+                Err(error) => check_in_error(error),
+            }
+        }
+        _ if path == "/api/v1/attendance/me"
+            || path == "/api/v1/attendance/check-ins"
+            || path == "/api/v1/attendance/tickets/me"
+            || path.starts_with("/api/v1/attendance/events/")
+            || path.starts_with("/api/v1/attendance/tickets/")
+            || path.starts_with("/api/v1/attendance/organizer-check-ins/") =>
+        {
             method_not_allowed()
         }
         _ => Response::problem(404, "Not Found", "Not Found", "Route not found"),
     }
+}
+
+fn path_uuid(path: &str, prefix: &str, suffix: &str) -> Option<Uuid> {
+    path.strip_prefix(prefix)?
+        .strip_suffix(suffix)?
+        .parse()
+        .ok()
+}
+
+fn invalid_qr_request() -> Response {
+    Response::problem(400, "Bad Request", "Bad Request", "A QR token is required")
 }
 
 fn check_in_error(error: CheckInError) -> Response {
@@ -332,6 +412,12 @@ fn check_in_error(error: CheckInError) -> Response {
             "Conflict",
             "Conflict",
             "Attendance entry is not eligible",
+        ),
+        CheckInError::NotEventCreator => Response::problem(
+            403,
+            "Forbidden",
+            "Forbidden",
+            "Only the recorded event creator can manage attendance",
         ),
         CheckInError::Database(_) => Response::problem(
             503,

@@ -57,7 +57,7 @@ public class EventController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public EventResponse createEvent(@Valid @RequestBody CreateEventRequest request, @AuthenticationPrincipal Jwt jwt) {
-        return this.eventService.createEvent(request, jwt.getTokenValue());
+        return this.eventService.createEvent(request, jwt.getTokenValue(), jwt.getSubject());
     }
 
     @PatchMapping("/{eventId}")

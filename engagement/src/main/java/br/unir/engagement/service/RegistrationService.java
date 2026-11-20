@@ -2,6 +2,7 @@ package br.unir.engagement.service;
 
 import br.unir.engagement.dto.RegistrationListResponse;
 import br.unir.engagement.dto.RegistrationConfirmedPayload;
+import br.unir.engagement.dto.RegistrationCancelledPayload;
 import br.unir.engagement.dto.RegistrationPaymentRequestedPayload;
 import br.unir.engagement.dto.RegistrationResponse;
 import br.unir.engagement.entity.Event;
@@ -17,6 +18,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.List;
 import java.util.UUID;
@@ -54,7 +56,7 @@ public class RegistrationService {
     public RegistrationResponse register(UUID eventId, String userId) {
         Event event = this.eventRepository.findByIdForUpdate(eventId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Event not found"));
-        Instant now = Instant.now();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         validateEventForRegistration(event, now);
 
         var activeRegistration = this.registrationRepository
@@ -130,14 +132,16 @@ public class RegistrationService {
             throw conflict("ONLY_FREE_REGISTRATIONS_CAN_BE_CANCELLED");
         }
 
-        Instant now = Instant.now();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         Instant cancellationDeadline = event.getStartsAt().minus(Duration.ofHours(24));
         if (now.isAfter(cancellationDeadline)) {
             throw conflict("CANCELLATION_WINDOW_CLOSED");
         }
 
         registration.cancelByUser(now);
-        return RegistrationResponse.from(this.registrationRepository.saveAndFlush(registration), event);
+        Registration saved = this.registrationRepository.saveAndFlush(registration);
+        this.saveRegistrationCancelled(saved, now);
+        return RegistrationResponse.from(saved, event);
     }
 
     private static void validateEventForRegistration(Event event, Instant now) {
@@ -172,7 +176,7 @@ public class RegistrationService {
         }
         RegistrationConfirmedPayload payload = new RegistrationConfirmedPayload(registration.getId(), event.getId(),
                 registration.getUserId(), true, event.getAttendanceMode(), event.getTitle(), event.getStartsAt(),
-                event.getEndsAt());
+                event.getEndsAt(), event.getCreatedByUserId());
         try {
             String payloadJson = this.objectMapper.writeValueAsString(payload);
             OutboxEvent outboxEvent = new OutboxEvent(UUID.randomUUID(), "Registration", registration.getId(),
@@ -180,6 +184,18 @@ public class RegistrationService {
             this.outboxRepository.saveAndFlush(outboxEvent);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Could not serialize RegistrationConfirmed v1", exception);
+        }
+    }
+
+    private void saveRegistrationCancelled(Registration registration, Instant cancelledAt) {
+        RegistrationCancelledPayload payload = new RegistrationCancelledPayload(registration.getId(),
+                registration.getEventId(), registration.getUserId(), cancelledAt);
+        try {
+            String payloadJson = this.objectMapper.writeValueAsString(payload);
+            this.outboxRepository.saveAndFlush(new OutboxEvent(UUID.randomUUID(), "Registration", registration.getId(),
+                    RegistrationCancelledPayload.EVENT_TYPE, payloadJson, cancelledAt));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Could not serialize RegistrationCancelled v1", exception);
         }
     }
 

@@ -4,6 +4,8 @@
 class University < ApplicationRecord
   SINGLETON_ID = '00000000-0000-4000-8000-000000000001'
 
+  has_many :semesters, dependent: :restrict_with_error
+
   before_validation :assign_singleton_id
 
   validates :name, :acronym, :description, :general_info_markdown, :current_term, presence: true
@@ -17,6 +19,10 @@ class University < ApplicationRecord
     Department.order(:name)
   end
 
+  def administrator_user_ids
+    self[:administrator_user_ids]
+  end
+
   private
 
   def assign_singleton_id
@@ -25,5 +31,6 @@ class University < ApplicationRecord
 
   def links_must_be_a_list
     errors.add(:links, :invalid) unless links.is_a?(Array)
+    errors.add(:administrator_user_ids, :invalid) unless administrator_user_ids.is_a?(Array)
   end
 end

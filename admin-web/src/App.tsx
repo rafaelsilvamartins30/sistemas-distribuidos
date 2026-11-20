@@ -17,8 +17,12 @@ interface SessionState {
   errorMessage?: string;
 }
 
-export function App() {
-  const [keycloakClient, setKeycloakClient] = useState<Keycloak | null>(null);
+interface AppProps {
+  keycloak: Keycloak;
+  keycloakReady: Promise<boolean>;
+}
+
+export function App({ keycloak, keycloakReady }: AppProps) {
   const [session, setSession] = useState<SessionState>({
     status: "loading",
     profile: null,
@@ -29,29 +33,18 @@ export function App() {
 
   useEffect(() => {
     let active = true;
-    const client = new Keycloak({
-      url: env.keycloakUrl,
-      realm: env.keycloakRealm,
-      clientId: env.keycloakClientId,
-    });
-    setKeycloakClient(client);
-
-    client
-      .init({
-        onLoad: "check-sso",
-        pkceMethod: "S256",
-        checkLoginIframe: false,
-      })
+    keycloakReady
       .then(async (authenticated) => {
         if (!active) return;
-        if (!authenticated || !client.token) {
+        const token = keycloak.token;
+        if (!authenticated || !token) {
           setSession({ status: "unauthenticated", profile: null });
           return;
         }
 
-        const tokenParsed = client.tokenParsed as TokenPayload | undefined;
+        const tokenParsed = keycloak.tokenParsed as TokenPayload | undefined;
         try {
-          const profile = await fetchAdminProfile(env.gatewayUrl, client.token);
+          const profile = await fetchAdminProfile(env.gatewayUrl, token);
           if (!active) return;
           setSession({
             status: "authenticated",
@@ -65,7 +58,7 @@ export function App() {
 
           setOverviewLoading(true);
           try {
-            const campusData = await getCampusOverview(env.gatewayUrl, client.token);
+            const campusData = await getCampusOverview(env.gatewayUrl, token);
             if (active) setOverview(campusData);
           } catch (error) {
             if (active) setOverviewError(error instanceof Error ? error.message : "Falha ao consultar o Campus.");
@@ -94,7 +87,9 @@ export function App() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [keycloak, keycloakReady]);
+
+  const redirectUri = window.location.origin + window.location.pathname + window.location.search;
 
   const roles = extractRoles(session.tokenParsed);
   const isPlatformAdmin = hasPlatformAdminRole(session.tokenParsed);
@@ -120,11 +115,11 @@ export function App() {
         </div>
         <div className="admin-actions">
           {session.status === "authenticated" ? (
-            <button type="button" className="btn-secondary" onClick={() => void keycloakClient?.logout()}>
+            <button type="button" className="btn-secondary" onClick={() => void keycloak.logout({ redirectUri })}>
               Encerrar sessão
             </button>
           ) : (
-            <button type="button" className="btn-primary" onClick={() => void keycloakClient?.login()}>
+            <button type="button" className="btn-primary" onClick={() => void keycloak.login({ redirectUri })}>
               Entrar com Keycloak
             </button>
           )}

@@ -20,7 +20,8 @@ export type IconName =
   | "calendar"
   | "pin"
   | "arrowUpRight"
-  | "arrowLeft";
+  | "arrowLeft"
+  | "bell";
 
 const paths: Record<IconName, string> = {
   profile: "M20 21a8 8 0 0 0-16 0M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z",
@@ -47,6 +48,7 @@ const paths: Record<IconName, string> = {
   pin: "M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Zm-5 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
   arrowUpRight: "M7 17 17 7M7 7h10v10",
   arrowLeft: "M19 12H5m7 7-7-7 7-7",
+  bell: "M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0",
 };
 
 export function Icon({ name, ...props }: SVGProps<SVGSVGElement> & { name: IconName }) {

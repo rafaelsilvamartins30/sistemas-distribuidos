@@ -5,7 +5,13 @@ class ApplicationController < ActionController::API
   private
 
   def render_problem(status, detail)
-    status_code = status.is_a?(Integer) ? status : Rack::Utils::SYMBOL_TO_STATUS_CODE.fetch(status)
+    status_code = if status.is_a?(Integer)
+                    status
+                  elsif status == :unprocessable_entity
+                    422
+                  else
+                    Rack::Utils::SYMBOL_TO_STATUS_CODE.fetch(status)
+                  end
     render json: {
       type: 'about:blank',
       title: Rack::Utils::HTTP_STATUS_CODES.fetch(status_code),

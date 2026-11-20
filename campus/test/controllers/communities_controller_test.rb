@@ -39,7 +39,14 @@ class CommunitiesControllerTest < ActionDispatch::IntegrationTest
     assert_equal 'Clube de Jogos', response.parsed_body.fetch('name')
     assert_equal 'Jogos', response.parsed_body.fetch('category')
     assert_equal ['https://example.edu.br'], response.parsed_body.fetch('links')
-    assert_equal ['keycloak-manager-id'], response.parsed_body.fetch('managerUserIds')
+
+    assert_nil response.parsed_body.fetch('administratorUserIds')
+
+    with_jwks do
+      get "/communities/#{community.id}", headers: bearer_headers(subject: 'keycloak-manager-id')
+    end
+    assert_response :success
+    assert_equal ['keycloak-manager-id'], response.parsed_body.fetch('administratorUserIds')
 
     with_jwks { get '/communities/10000000-0000-4000-8000-000000000299', headers: bearer_headers }
     assert_response :not_found
@@ -53,7 +60,7 @@ class CommunitiesControllerTest < ActionDispatch::IntegrationTest
       get '/communities?size=0', headers: bearer_headers
       assert_response :bad_request
 
-      get '/communities?sort=manager_user_ids', headers: bearer_headers
+      get '/communities?sort=administrator_user_ids', headers: bearer_headers
     end
     assert_response :bad_request
   end
@@ -63,7 +70,7 @@ class CommunitiesControllerTest < ActionDispatch::IntegrationTest
   def create_community(id:, name:)
     Community.create!(
       id: id, name: name, description: 'Descrição da comunidade.', general_info_markdown: 'Informações gerais.',
-      category: 'Jogos', links: ['https://example.edu.br'], manager_user_ids: ['keycloak-manager-id']
+      category: 'Jogos', links: ['https://example.edu.br'], administrator_user_ids: ['keycloak-manager-id']
     )
   end
 end
