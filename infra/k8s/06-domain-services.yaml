@@ -1,0 +1,445 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: campus
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: campus
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: campus
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: campus
+        app.kubernetes.io/part-of: unir-platform
+    spec:
+      initContainers:
+        - name: db-migrate
+          image: unir-campus:local
+          imagePullPolicy: Never
+          command:
+            - bin/rails
+            - db:migrate
+          env:
+            - name: RAILS_ENV
+              value: development
+            - name: DB_HOST
+              value: campus-db
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: CAMPUS_DB_NAME
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: DB_PASSWORD
+      containers:
+        - name: campus
+          image: unir-campus:local
+          imagePullPolicy: Never
+          command:
+            - bin/rails
+            - server
+            - -b
+            - 0.0.0.0
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: RAILS_ENV
+              value: development
+            - name: PORT
+              value: "3000"
+            - name: DB_HOST
+              value: campus-db
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: CAMPUS_DB_NAME
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: DB_PASSWORD
+            - name: KEYCLOAK_ISSUER_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: KEYCLOAK_ISSUER_URI
+            - name: KEYCLOAK_JWK_SET_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: KEYCLOAK_JWK_SET_URI
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: campus
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: campus
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: campus
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: engagement
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: engagement
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: engagement
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: engagement
+        app.kubernetes.io/part-of: unir-platform
+    spec:
+      containers:
+        - name: engagement
+          image: unir-engagement:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: unir-cqrs-mongodb-config
+          env:
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: ENGAGEMENT_DB_URL
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: DB_PASSWORD
+            - name: KEYCLOAK_ISSUER_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: KEYCLOAK_ISSUER_URI
+            - name: KEYCLOAK_JWK_SET_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: KEYCLOAK_JWK_SET_URI
+            - name: CAMPUS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: CAMPUS_URL
+            - name: RABBITMQ_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: RABBITMQ_HOST
+            - name: RABBITMQ_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: RABBITMQ_PORT
+            - name: RABBITMQ_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: unir-rabbitmq-credentials
+                  key: RABBITMQ_USERNAME
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-rabbitmq-credentials
+                  key: RABBITMQ_PASSWORD
+            - name: MONGODB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: unir-mongodb-credentials
+                  key: MONGODB_USERNAME
+            - name: MONGODB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-mongodb-credentials
+                  key: MONGODB_PASSWORD
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: unir-mongodb-credentials
+                  key: MONGODB_URI
+            - name: SPRING_DATA_MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: unir-mongodb-credentials
+                  key: SPRING_DATA_MONGODB_URI
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: engagement
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: engagement
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: engagement
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payment
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: payment
+        app.kubernetes.io/part-of: unir-platform
+    spec:
+      containers:
+        - name: payment
+          image: unir-payment:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: PORT
+              value: "8080"
+            - name: PAYMENT_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: PAYMENT_ENV
+            - name: PAYMENT_SIMULATED_CONFIRMATION_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: PAYMENT_SIMULATED_CONFIRMATION_ENABLED
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: PAYMENT_DB_URL
+            - name: RABBITMQ_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: RABBITMQ_HOST
+            - name: RABBITMQ_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: RABBITMQ_PORT
+            - name: RABBITMQ_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: unir-rabbitmq-credentials
+                  key: RABBITMQ_USERNAME
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-rabbitmq-credentials
+                  key: RABBITMQ_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: payment
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: access
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: access
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: access
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: access
+        app.kubernetes.io/part-of: unir-platform
+    spec:
+      containers:
+        - name: access
+          image: unir-access:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: PORT
+              value: "8080"
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: unir-db-credentials
+                  key: ACCESS_DB_URL
+            - name: KEYCLOAK_ISSUER_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: KEYCLOAK_ISSUER_URI
+            - name: KEYCLOAK_JWK_SET_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: KEYCLOAK_JWK_SET_URI
+            - name: RABBITMQ_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: RABBITMQ_HOST
+            - name: RABBITMQ_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: RABBITMQ_PORT
+            - name: RABBITMQ_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: unir-rabbitmq-credentials
+                  key: RABBITMQ_USERNAME
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: unir-rabbitmq-credentials
+                  key: RABBITMQ_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: access
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: access
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: access
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
