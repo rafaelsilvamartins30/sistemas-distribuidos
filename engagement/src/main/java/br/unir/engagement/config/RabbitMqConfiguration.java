@@ -6,6 +6,7 @@ import br.unir.engagement.dto.RefundFailedPayload;
 import br.unir.engagement.dto.RefundRequestedPayload;
 import br.unir.engagement.dto.RefundSucceededPayload;
 import br.unir.engagement.dto.RegistrationCancelledByEventPayload;
+import br.unir.engagement.dto.EventProjectionEvents;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Queue;
@@ -23,6 +24,10 @@ public class RabbitMqConfiguration {
     public static final String PAYMENT_REGISTRATION_CANCELLED_QUEUE = "payment.registration-cancelled";
     public static final String ENGAGEMENT_PAYMENT_EVENTS_QUEUE = "engagement.payment-events";
     public static final String ENGAGEMENT_REFUND_RESULTS_QUEUE = "engagement.refund-results";
+    public static final String ENGAGEMENT_EVENT_PROJECTIONS_QUEUE = "engagement.event-projections";
+    public static final String ENGAGEMENT_EVENT_PROJECTIONS_DLQ = "engagement.event-projections.dlq";
+    public static final String EVENT_PROJECTIONS_DEAD_LETTER_EXCHANGE = "unir.events.dlx";
+    private static final String EVENT_PROJECTIONS_DEAD_LETTER_ROUTING_KEY = "engagement.event-projections.dead-letter";
 
     @Bean
     TopicExchange integrationEventsExchange() {
@@ -92,5 +97,50 @@ public class RabbitMqConfiguration {
     Binding engagementRefundFailedBinding(Queue engagementRefundResultsQueue, TopicExchange integrationEventsExchange) {
         return BindingBuilder.bind(engagementRefundResultsQueue).to(integrationEventsExchange)
                 .with(RefundFailedPayload.ROUTING_KEY);
+    }
+
+    @Bean
+    TopicExchange eventProjectionsDeadLetterExchange() {
+        return new TopicExchange(EVENT_PROJECTIONS_DEAD_LETTER_EXCHANGE, true, false);
+    }
+
+    @Bean
+    Queue engagementEventProjectionsQueue() {
+        return QueueBuilder.durable(ENGAGEMENT_EVENT_PROJECTIONS_QUEUE)
+                .deadLetterExchange(EVENT_PROJECTIONS_DEAD_LETTER_EXCHANGE)
+                .deadLetterRoutingKey(EVENT_PROJECTIONS_DEAD_LETTER_ROUTING_KEY).build();
+    }
+
+    @Bean
+    Queue engagementEventProjectionsDeadLetterQueue() {
+        return QueueBuilder.durable(ENGAGEMENT_EVENT_PROJECTIONS_DLQ).build();
+    }
+
+    @Bean
+    Binding engagementEventProjectionsDeadLetterBinding(Queue engagementEventProjectionsDeadLetterQueue,
+            TopicExchange eventProjectionsDeadLetterExchange) {
+        return BindingBuilder.bind(engagementEventProjectionsDeadLetterQueue).to(eventProjectionsDeadLetterExchange)
+                .with(EVENT_PROJECTIONS_DEAD_LETTER_ROUTING_KEY);
+    }
+
+    @Bean
+    Binding eventProjectionCreatedBinding(Queue engagementEventProjectionsQueue,
+            TopicExchange integrationEventsExchange) {
+        return BindingBuilder.bind(engagementEventProjectionsQueue).to(integrationEventsExchange)
+                .with(EventProjectionEvents.CREATED_ROUTING_KEY);
+    }
+
+    @Bean
+    Binding eventProjectionUpdatedBinding(Queue engagementEventProjectionsQueue,
+            TopicExchange integrationEventsExchange) {
+        return BindingBuilder.bind(engagementEventProjectionsQueue).to(integrationEventsExchange)
+                .with(EventProjectionEvents.UPDATED_ROUTING_KEY);
+    }
+
+    @Bean
+    Binding eventProjectionCancelledBinding(Queue engagementEventProjectionsQueue,
+            TopicExchange integrationEventsExchange) {
+        return BindingBuilder.bind(engagementEventProjectionsQueue).to(integrationEventsExchange)
+                .with(EventProjectionEvents.CANCELLED_ROUTING_KEY);
     }
 }

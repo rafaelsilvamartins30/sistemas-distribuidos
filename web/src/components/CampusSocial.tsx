@@ -273,13 +273,16 @@ export function FollowedFeed({ token, currentTerm }: { token: string; currentTer
           }}
         >
           <label htmlFor="feed-term">Semestre</label>
-          <select
-            id="feed-term"
-            value={draftTerm}
-            onChange={(event) => setDraftTerm(event.target.value)}
-          >
-            {semesterNames.length ? semesterNames.map((name) => <option key={name} value={name}>{name}</option>) :
-              <option value="">Semestre indisponível</option>}
+          <select id="feed-term" value={draftTerm} onChange={(event) => setDraftTerm(event.target.value)}>
+            {semesterNames.length ? (
+              semesterNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))
+            ) : (
+              <option value="">Semestre indisponível</option>
+            )}
           </select>
           <button className="button button-secondary" type="submit">
             Filtrar
@@ -415,8 +418,15 @@ export function InstitutionalPostsPanel({
             value={draftTerm}
             onChange={(event) => setDraftTerm(event.target.value)}
           >
-            {semesterNames.length ? semesterNames.map((name) => <option key={name} value={name}>{name}</option>) :
-              <option value="">Semestre indisponível</option>}
+            {semesterNames.length ? (
+              semesterNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))
+            ) : (
+              <option value="">Semestre indisponível</option>
+            )}
           </select>
           <button className="button button-secondary" type="submit">
             Filtrar

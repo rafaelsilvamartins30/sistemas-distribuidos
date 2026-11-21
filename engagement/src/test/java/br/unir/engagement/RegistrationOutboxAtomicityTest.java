@@ -13,6 +13,7 @@ import br.unir.engagement.entity.RegistrationMode;
 import br.unir.engagement.repository.EventRepository;
 import br.unir.engagement.repository.OutboxRepository;
 import br.unir.engagement.repository.RegistrationRepository;
+import br.unir.engagement.service.EventProjectionStore;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +44,9 @@ class RegistrationOutboxAtomicityTest {
 
     @MockitoBean
     private OutboxRepository outboxRepository;
+
+    @MockitoBean
+    private EventProjectionStore eventProjectionStore;
 
     @BeforeEach
     void clearDatabase() {

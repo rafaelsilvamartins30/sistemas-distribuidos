@@ -14,6 +14,7 @@ import br.unir.engagement.dto.OpportunityPublisherContext;
 import br.unir.engagement.dto.OpportunityPublisherContextsResponse;
 import br.unir.engagement.entity.Opportunity;
 import br.unir.engagement.repository.OpportunityRepository;
+import br.unir.engagement.service.EventProjectionStore;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -51,6 +52,9 @@ class OpportunityEndpointTest {
 
     @MockitoBean
     private CampusOpportunityPublisherClient campusPublisherClient;
+
+    @MockitoBean
+    private EventProjectionStore eventProjectionStore;
 
     @BeforeEach
     void clearOpportunities() {

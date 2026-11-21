@@ -3,6 +3,7 @@ package br.unir.engagement.service;
 import br.unir.engagement.client.CampusEventOrganizerClient;
 import br.unir.engagement.dto.CreateEventRequest;
 import br.unir.engagement.dto.EventListResponse;
+import br.unir.engagement.dto.EventProjectionEvents;
 import br.unir.engagement.dto.EventOrganizerContext;
 import br.unir.engagement.dto.EventOrganizerContextsResponse;
 import br.unir.engagement.dto.EventResponse;
@@ -23,6 +24,7 @@ import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,13 +43,18 @@ public class EventService {
     private final EventRepository eventRepository;
     private final CampusEventOrganizerClient campusOrganizerClient;
     private final EventCancellationService eventCancellationService;
+    private final EventProjectionStore eventProjectionStore;
+    private final EventProjectionOutboxWriter projectionOutboxWriter;
 
     @Autowired
     public EventService(EventRepository eventRepository, CampusEventOrganizerClient campusOrganizerClient,
-            EventCancellationService eventCancellationService) {
+            EventCancellationService eventCancellationService, EventProjectionStore eventProjectionStore,
+            EventProjectionOutboxWriter projectionOutboxWriter) {
         this.eventRepository = eventRepository;
         this.campusOrganizerClient = campusOrganizerClient;
         this.eventCancellationService = eventCancellationService;
+        this.eventProjectionStore = eventProjectionStore;
+        this.projectionOutboxWriter = projectionOutboxWriter;
     }
 
     public EventListResponse listEvents(int page, int size) {
@@ -56,14 +63,13 @@ public class EventService {
                     "page must be non-negative and size must be between 1 and 100");
         }
         var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "startsAt"));
-        var result = this.eventRepository
-                .findDiscoverableEvents(EventStatus.ACTIVE, RegistrationMode.EXTERNAL_PAID, Instant.now(), pageable)
+        var result = this.readModel(() -> this.eventProjectionStore.findDiscoverable(Instant.now(), pageable))
                 .map(EventResponse::from);
         return EventListResponse.from(result);
     }
 
     public EventResponse getEvent(UUID id) {
-        return this.eventRepository.findById(id).map(EventResponse::from)
+        return this.readModel(() -> this.eventProjectionStore.findById(id.toString())).map(EventResponse::from)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Event not found"));
     }
 
@@ -118,7 +124,9 @@ public class EventService {
                 request.capacity(), request.registrationDeadline(), registrationConfig.mode(),
                 registrationConfig.price(), registrationConfig.externalUrl(), registrationConfig.attendanceEnabled(),
                 registrationConfig.attendanceMode(), EventStatus.ACTIVE, now, createdByUserId);
-        return EventResponse.from(this.eventRepository.saveAndFlush(event));
+        Event savedEvent = this.eventRepository.saveAndFlush(event);
+        this.projectionOutboxWriter.append(savedEvent, EventProjectionEvents.CREATED, savedEvent.getCreatedAt());
+        return EventResponse.from(savedEvent);
     }
 
     @Transactional
@@ -184,7 +192,9 @@ public class EventService {
                 registrationDeadline, registrationConfig.mode(), registrationConfig.price(),
                 registrationConfig.externalUrl(), registrationConfig.attendanceEnabled(),
                 registrationConfig.attendanceMode());
-        return EventResponse.from(this.eventRepository.saveAndFlush(event));
+        Event savedEvent = this.eventRepository.saveAndFlush(event);
+        this.projectionOutboxWriter.append(savedEvent, EventProjectionEvents.UPDATED, Instant.now());
+        return EventResponse.from(savedEvent);
     }
 
     @Transactional
@@ -204,6 +214,15 @@ public class EventService {
         if (!authorized) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "The authenticated user is not authorized for this organizer");
+        }
+    }
+
+    private <T> T readModel(java.util.function.Supplier<T> query) {
+        try {
+            return query.get();
+        } catch (DataAccessException exception) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Event read model is unavailable",
+                    exception);
         }
     }
 

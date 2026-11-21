@@ -3,6 +3,7 @@ package br.unir.engagement;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -14,9 +15,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import br.unir.engagement.client.CampusEventOrganizerClient;
 import br.unir.engagement.dto.EventOrganizerContext;
 import br.unir.engagement.dto.EventOrganizerContextsResponse;
+import br.unir.engagement.dto.EventProjectionEvents;
+import br.unir.engagement.dto.EventProjectionPayload;
 import br.unir.engagement.entity.AttendanceMode;
 import br.unir.engagement.entity.Event;
 import br.unir.engagement.entity.EventStatus;
+import br.unir.engagement.entity.EventView;
 import br.unir.engagement.entity.OutboxEvent;
 import br.unir.engagement.entity.Registration;
 import br.unir.engagement.entity.RegistrationMode;
@@ -33,11 +37,13 @@ import br.unir.engagement.service.RegistrationExpirationService;
 import br.unir.engagement.service.EventCancellationService;
 import br.unir.engagement.service.PaymentConfirmationService;
 import br.unir.engagement.service.RefundResultService;
+import br.unir.engagement.service.EventProjectionStore;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Comparator;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -51,6 +57,8 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -94,6 +102,9 @@ class EngagementEndpointTest {
     @MockitoBean
     private CampusEventOrganizerClient campusOrganizerClient;
 
+    @MockitoBean
+    private EventProjectionStore eventProjectionStore;
+
     @BeforeEach
     void clearEvents() {
         this.jdbcTemplate.update("DELETE FROM event_cancellation_refunds");
@@ -103,6 +114,24 @@ class EngagementEndpointTest {
         this.outboxRepository.deleteAllInBatch();
         this.registrationRepository.deleteAllInBatch();
         this.eventRepository.deleteAllInBatch();
+        when(this.eventProjectionStore.findDiscoverable(any(Instant.class), any(Pageable.class)))
+                .thenAnswer(invocation -> {
+                    Instant now = invocation.getArgument(0);
+                    Pageable pageable = invocation.getArgument(1);
+                    List<EventView> events = this.eventRepository.findAll().stream()
+                            .filter(event -> event.getStatus() == EventStatus.ACTIVE)
+                            .filter(event -> event.getRegistrationMode() != RegistrationMode.EXTERNAL_PAID
+                                    || !event.getRegistrationDeadline().isBefore(now))
+                            .sorted(Comparator.comparing(Event::getStartsAt)).map(EventProjectionPayload::from)
+                            .map(EventView::from).toList();
+                    int start = Math.toIntExact(pageable.getOffset());
+                    int end = Math.min(start + pageable.getPageSize(), events.size());
+                    List<EventView> page = start >= events.size() ? List.of() : events.subList(start, end);
+                    return new PageImpl<>(page, pageable, events.size());
+                });
+        when(this.eventProjectionStore.findById(any(String.class)))
+                .thenAnswer(invocation -> this.eventRepository.findById(UUID.fromString(invocation.getArgument(0)))
+                        .map(EventProjectionPayload::from).map(EventView::from));
     }
 
     @Test
@@ -130,7 +159,12 @@ class EngagementEndpointTest {
         org.junit.jupiter.api.Assertions.assertEquals(RegistrationStatus.CANCELLED_BY_EVENT,
                 this.registrationRepository.findById(registrationId).orElseThrow().getStatus());
         List<OutboxEvent> messages = this.outboxRepository.findAll();
-        org.junit.jupiter.api.Assertions.assertEquals(2, messages.size());
+        org.junit.jupiter.api.Assertions.assertEquals(3, messages.size());
+        OutboxEvent projectionCancellation = messages.stream()
+                .filter(message -> "EventProjectionCancelled".equals(message.getEventType())).findFirst().orElseThrow();
+        JsonNode projectionPayload = this.objectMapper.readTree(projectionCancellation.getPayloadJson());
+        org.junit.jupiter.api.Assertions.assertEquals(1, projectionPayload.get("aggregateVersion").asLong());
+        org.junit.jupiter.api.Assertions.assertEquals("CANCELLED", projectionPayload.get("status").asText());
         OutboxEvent eventCancellation = messages.stream()
                 .filter(message -> "EventCancelled".equals(message.getEventType())).findFirst().orElseThrow();
         JsonNode eventCancellationPayload = this.objectMapper.readTree(eventCancellation.getPayloadJson());
@@ -152,7 +186,7 @@ class EngagementEndpointTest {
                         registrationId));
 
         this.eventCancellationService.cancel(event.getId());
-        org.junit.jupiter.api.Assertions.assertEquals(2, this.outboxRepository.count());
+        org.junit.jupiter.api.Assertions.assertEquals(3, this.outboxRepository.count());
     }
 
     @Test
@@ -668,6 +702,7 @@ class EngagementEndpointTest {
                 .andExpect(jsonPath("$.registrationMode").value("INTERNAL_PAID"))
                 .andExpect(jsonPath("$.price").value(2500)).andReturn().getResponse().getContentAsString();
         UUID departmentEventId = UUID.fromString(this.objectMapper.readTree(createdResponse).get("id").asText());
+        this.assertProjectionSnapshot(departmentEventId, EventProjectionEvents.CREATED, 0, "ACTIVE");
 
         String departmentInvalidExternalBody = departmentInternalPaidBody
                 .replace("\"INTERNAL_PAID\"", "\"EXTERNAL_PAID\"")
@@ -715,6 +750,7 @@ class EngagementEndpointTest {
                 .with(userJwtWithToken("organizer-user", "organizer-token")).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"title\":\"Workshop Atualizado\",\"price\":3000}")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Workshop Atualizado")).andExpect(jsonPath("$.price").value(3000));
+        this.assertProjectionSnapshot(departmentEventId, EventProjectionEvents.UPDATED, 1, "ACTIVE");
 
         this.mockMvc.perform(patch("/api/v1/events/{eventId}", departmentEventId)
                 .with(userJwtWithToken("regular-user", "regular-token")).contentType(MediaType.APPLICATION_JSON)
@@ -724,6 +760,7 @@ class EngagementEndpointTest {
                 .perform(delete("/api/v1/events/{eventId}", departmentEventId)
                         .with(userJwtWithToken("organizer-user", "organizer-token")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELLED"));
+        this.assertProjectionSnapshot(departmentEventId, EventProjectionEvents.CANCELLED, 2, "CANCELLED");
     }
 
     private static Event event(UUID id, String title, EventStatus status, RegistrationMode registrationMode,
@@ -732,6 +769,15 @@ class EngagementEndpointTest {
                 "Auditório Central", startsAt, endsAt, "ACADEMIC", 120, registrationDeadline, registrationMode, price,
                 externalUrl, true, AttendanceMode.PARTICIPANT_SCANS_EVENT, status,
                 Instant.parse("2027-01-01T12:00:00Z"));
+    }
+
+    private void assertProjectionSnapshot(UUID eventId, String eventType, long version, String status)
+            throws Exception {
+        OutboxEvent outboxEvent = this.outboxRepository.findByAggregateIdOrderByCreatedAtAsc(eventId).stream()
+                .filter(candidate -> eventType.equals(candidate.getEventType())).findFirst().orElseThrow();
+        JsonNode payload = this.objectMapper.readTree(outboxEvent.getPayloadJson());
+        org.junit.jupiter.api.Assertions.assertEquals(version, payload.get("aggregateVersion").asLong());
+        org.junit.jupiter.api.Assertions.assertEquals(status, payload.get("status").asText());
     }
 
     private Event futureFreeEvent(int capacity, Duration startsIn) {

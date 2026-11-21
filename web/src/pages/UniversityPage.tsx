@@ -262,7 +262,9 @@ export function UniversityPage() {
                           pattern="[0-9]{4}/[12]"
                           placeholder="2026/2"
                           value={semesterDraft.name}
-                          onChange={(event) => setSemesterDraft((current) => ({ ...current, name: event.target.value }))}
+                          onChange={(event) =>
+                            setSemesterDraft((current) => ({ ...current, name: event.target.value }))
+                          }
                         />
                       </label>
                       <label className="field">
@@ -271,7 +273,9 @@ export function UniversityPage() {
                           required
                           type="date"
                           value={semesterDraft.startOn}
-                          onChange={(event) => setSemesterDraft((current) => ({ ...current, startOn: event.target.value }))}
+                          onChange={(event) =>
+                            setSemesterDraft((current) => ({ ...current, startOn: event.target.value }))
+                          }
                         />
                       </label>
                       <label className="field">
@@ -280,12 +284,18 @@ export function UniversityPage() {
                           required
                           type="date"
                           value={semesterDraft.endOn}
-                          onChange={(event) => setSemesterDraft((current) => ({ ...current, endOn: event.target.value }))}
+                          onChange={(event) =>
+                            setSemesterDraft((current) => ({ ...current, endOn: event.target.value }))
+                          }
                         />
                       </label>
                       <div className="campus-semester-form-actions">
                         <button className="button button-primary" disabled={savingSemester} type="submit">
-                          {savingSemester ? "Salvando…" : editingSemesterId ? "Salvar alterações" : "Adicionar semestre"}
+                          {savingSemester
+                            ? "Salvando…"
+                            : editingSemesterId
+                              ? "Salvar alterações"
+                              : "Adicionar semestre"}
                         </button>
                         {editingSemesterId && (
                           <button
@@ -301,19 +311,33 @@ export function UniversityPage() {
                         )}
                       </div>
                     </form>
-                    {semesterError && <p className="notice notice-error" role="alert">{semesterError}</p>}
-                    {semesterMessage && <p className="notice" role="status">{semesterMessage}</p>}
+                    {semesterError && (
+                      <p className="notice notice-error" role="alert">
+                        {semesterError}
+                      </p>
+                    )}
+                    {semesterMessage && (
+                      <p className="notice" role="status">
+                        {semesterMessage}
+                      </p>
+                    )}
                     <div className="campus-semester-list">
                       {semesters.map((semester) => (
                         <div className="campus-semester-row" key={semester.id}>
                           <strong>{semester.name}</strong>
-                          <span>{semester.startOn} — {semester.endOn}</span>
+                          <span>
+                            {semester.startOn} — {semester.endOn}
+                          </span>
                           <button
                             className="text-link"
                             type="button"
                             onClick={() => {
                               setEditingSemesterId(semester.id);
-                              setSemesterDraft({ name: semester.name, startOn: semester.startOn, endOn: semester.endOn });
+                              setSemesterDraft({
+                                name: semester.name,
+                                startOn: semester.startOn,
+                                endOn: semester.endOn,
+                              });
                             }}
                           >
                             Editar

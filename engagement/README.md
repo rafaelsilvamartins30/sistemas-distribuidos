@@ -1,6 +1,6 @@
 # Engagement
 
-Serviço de domínio responsável por atividades/eventos, inscrições e processos seletivos de oportunidades da UNIR. Stack: Java 21, Spring Boot, Maven, PostgreSQL e Flyway.
+Serviço de domínio responsável por atividades/eventos, inscrições e processos seletivos de oportunidades da UNIR. Stack: Java 21, Spring Boot, Maven, PostgreSQL, MongoDB e Flyway.
 
 ## Endpoints
 
@@ -33,8 +33,12 @@ The Sports catalog is documented in [`docs/contracts/sports-v1.md`](../docs/cont
 
 ## Ambiente local
 
-No `compose.yaml`, `engagement` expõe a porta `18085` (`ENGAGEMENT_PORT`), conecta ao banco `engagement-db` (`unir_engagement`, porta `15434`) e publica pelo RabbitMQ interno `rabbitmq` (`unir.events`). O broker não expõe porta no host e usa o volume `rabbitmq_data`.
+No `compose.yaml`, `engagement` expõe a porta `18085` (`ENGAGEMENT_PORT`), conecta ao banco de escrita `engagement-db` (`unir_engagement`, porta `15434`), ao MongoDB (`mongodb`, banco `unir_engagement`) e publica/consome pelo RabbitMQ interno `rabbitmq` (`unir.events`). MongoDB persiste em `mongodb_data`; RabbitMQ persiste em `rabbitmq_data`.
 O Compose aponta `CAMPUS_URL` para `http://campus:3000`; fora do Compose, o padrão local é `http://localhost:3000`.
+
+As leituras públicas de eventos usam a projeção MongoDB e podem refletir mudanças após o processamento assíncrono do Outbox. Uma falha do read model retorna `503`, sem consulta de fallback ao PostgreSQL. Criação, edição, cancelamento, inscrições e eventos gerenciados continuam na fonte de escrita PostgreSQL. O BFF e o Gateway preservam as rotas e respostas HTTP. Contrato, filas, rebuild e integração futura com Kubernetes estão em [`docs/contracts/event-projection-v1.md`](../docs/contracts/event-projection-v1.md).
+
+Para reconstruir `event_views` a partir de todos os eventos PostgreSQL, incluindo os cancelados, execute o comando documentado no contrato. O rebuild é idempotente, não apaga dados do MongoDB e usa a mesma comparação de `aggregateVersion` do consumidor para proteger alterações concorrentes.
 
 O procedimento completo e repetível é `scripts/seed-local-demo.sh`, que aplica as migrations Campus, provisiona as contas locais e então carrega o catálogo e as demonstrações. Ele não remove volumes. Após o preparo, os arquivos SQL também podem ser reaplicados individualmente:
 

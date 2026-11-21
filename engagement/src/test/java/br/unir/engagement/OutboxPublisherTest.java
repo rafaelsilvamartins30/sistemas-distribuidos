@@ -14,6 +14,7 @@ import br.unir.engagement.config.RabbitMqConfiguration;
 import br.unir.engagement.dto.RegistrationPaymentRequestedPayload;
 import br.unir.engagement.dto.RegistrationConfirmedPayload;
 import br.unir.engagement.dto.EventCancelledPayload;
+import br.unir.engagement.dto.EventProjectionEvents;
 import br.unir.engagement.dto.RegistrationCancelledByEventPayload;
 import br.unir.engagement.dto.RegistrationCancelledPayload;
 import br.unir.engagement.entity.OutboxEvent;
@@ -147,6 +148,27 @@ class OutboxPublisherTest {
 
         verify(this.rabbitTemplate).send(eq(RabbitMqConfiguration.EXCHANGE_NAME), eq(EventCancelledPayload.ROUTING_KEY),
                 any(Message.class), any(CorrelationData.class));
+        org.junit.jupiter.api.Assertions.assertNotNull(event.getPublishedAt());
+    }
+
+    @Test
+    void publishesEventProjectionSnapshotToItsVersionedRoutingKey() {
+        UUID eventId = UUID.randomUUID();
+        OutboxEvent event = new OutboxEvent(UUID.randomUUID(), "Event", eventId, EventProjectionEvents.CREATED,
+                "{\"eventId\":\"%s\",\"aggregateVersion\":0,\"status\":\"ACTIVE\"}".formatted(eventId),
+                Instant.parse("2026-11-16T15:00:00Z"));
+        when(this.outboxRepository.findTop50ByPublishedAtIsNullOrderByCreatedAtAsc()).thenReturn(List.of(event));
+        doAnswer(invocation -> {
+            CorrelationData correlation = invocation.getArgument(3);
+            correlation.getFuture().complete(new CorrelationData.Confirm(true, null));
+            return null;
+        }).when(this.rabbitTemplate).send(eq(RabbitMqConfiguration.EXCHANGE_NAME),
+                eq(EventProjectionEvents.CREATED_ROUTING_KEY), any(Message.class), any(CorrelationData.class));
+
+        new OutboxPublisher(this.outboxRepository, this.rabbitTemplate, this.objectMapper).publishPendingEvents();
+
+        verify(this.rabbitTemplate).send(eq(RabbitMqConfiguration.EXCHANGE_NAME),
+                eq(EventProjectionEvents.CREATED_ROUTING_KEY), any(Message.class), any(CorrelationData.class));
         org.junit.jupiter.api.Assertions.assertNotNull(event.getPublishedAt());
     }
 

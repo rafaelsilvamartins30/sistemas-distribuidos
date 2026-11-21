@@ -7,6 +7,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -75,6 +76,10 @@ public class Event {
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
+
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     protected Event() {
     }
@@ -228,5 +233,9 @@ public class Event {
 
     public Instant getCreatedAt() {
         return this.createdAt;
+    }
+
+    public long getAggregateVersion() {
+        return this.version;
     }
 }

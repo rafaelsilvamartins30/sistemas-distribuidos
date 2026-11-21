@@ -21,7 +21,12 @@ interface ParticipantQrScannerProps {
   onToken: (token: string) => void;
 }
 
-export function ParticipantQrScanner({ busy, autoSubmitOnScan = false, submitLabel, onToken }: ParticipantQrScannerProps) {
+export function ParticipantQrScanner({
+  busy,
+  autoSubmitOnScan = false,
+  submitLabel,
+  onToken,
+}: ParticipantQrScannerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | null>(null);
@@ -131,7 +136,7 @@ export function ParticipantQrScanner({ busy, autoSubmitOnScan = false, submitLab
           disabled={busy}
         />
         <button className="button button-primary" type="submit" disabled={busy || !manualToken.trim()}>
-          {busy ? "Verificando…" : submitLabel ?? "Registrar presença"}
+          {busy ? "Verificando…" : (submitLabel ?? "Registrar presença")}
         </button>
       </form>
       {message && (

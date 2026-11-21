@@ -76,6 +76,16 @@ services:
       timeout: 5s
       retries: 12
 
+  mongodb:
+    image: mongo:8.0
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   keycloak-db:
     image: postgres:16-alpine
     environment:
@@ -180,6 +190,7 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-unir}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-unir-local-only}
+      MONGODB_URI: mongodb://mongodb:27017/unir_engagement
     ports:
       - "127.0.0.1:${ENGAGEMENT_PORT:-18085}:8080"
     depends_on:
@@ -189,6 +200,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_started
+      mongodb:
+        condition: service_healthy
       campus:
         condition: service_healthy
 
@@ -349,3 +362,4 @@ volumes:
   access_data:
   keycloak_db_data:
   rabbitmq_data:
+  mongodb_data:

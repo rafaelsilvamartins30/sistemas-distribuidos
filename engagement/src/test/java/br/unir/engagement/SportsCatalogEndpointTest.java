@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import br.unir.engagement.entity.Competition;
 import br.unir.engagement.entity.Season;
+import br.unir.engagement.service.EventProjectionStore;
 import br.unir.engagement.entity.Sport;
 import br.unir.engagement.repository.CompetitionRepository;
 import br.unir.engagement.repository.SeasonRepository;
@@ -24,12 +25,16 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 class SportsCatalogEndpointTest {
+
+    @MockitoBean
+    private EventProjectionStore eventProjectionStore;
 
     private static final UUID SPORT_ID = UUID.fromString("40000000-0000-4000-8000-000000000001");
     private static final UUID ORGANIZER_ID = UUID.fromString("40000000-0000-4000-8000-000000000002");
