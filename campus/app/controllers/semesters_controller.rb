@@ -112,6 +112,16 @@ class SemestersController < ApplicationController
     render_validation_error(semester)
   end
 
+  def destroy
+    return unless university_for_admin
+
+    semester = Semester.find_by(id: params[:id])
+    return render_problem(:not_found, 'Semester not found') unless semester
+
+    semester.destroy!
+    head :no_content
+  end
+
   def university_for_admin
     university = University.current
     unless university

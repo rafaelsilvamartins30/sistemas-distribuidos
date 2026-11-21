@@ -56,6 +56,16 @@ class CommunitiesController < ApplicationController
     render_problem(:unprocessable_entity, "Invalid fields: #{community.errors.attribute_names.uniq.sort.join(', ')}")
   end
 
+  def destroy
+    return unless require_university_admin
+
+    community = Community.find_by(id: params[:id])
+    return render_problem(:not_found, 'Community not found') unless community
+
+    community.destroy!
+    head :no_content
+  end
+
   def pagination_parameters
     page = Integer(params.fetch(:page, '0'), 10)
     size = Integer(params.fetch(:size, '20'), 10)

@@ -126,8 +126,20 @@ public class SecurityConfiguration {
                                 "/api/v1/web/attendance/organizer-check-ins/preview",
                                 "/api/v1/web/attendance/organizer-check-ins/confirm")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/me").hasRole(GlobalRoles.PLATFORM_ADMIN)
-                        .anyRequest().denyAll())
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/me", "/api/v1/admin/overview")
+                        .hasRole(GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/admin/academic-units", "/api/v1/admin/departments",
+                                "/api/v1/admin/courses", "/api/v1/admin/semesters", "/api/v1/admin/requests/*/approve",
+                                "/api/v1/admin/requests/*/reject")
+                        .hasRole(GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/admin/university", "/api/v1/admin/academic-units/*",
+                                "/api/v1/admin/departments/*", "/api/v1/admin/entities/*",
+                                "/api/v1/admin/communities/*")
+                        .hasRole(GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/admin/academic-units/*",
+                                "/api/v1/admin/departments/*", "/api/v1/admin/courses/*", "/api/v1/admin/semesters/*",
+                                "/api/v1/admin/entities/*", "/api/v1/admin/communities/*")
+                        .hasRole(GlobalRoles.PLATFORM_ADMIN).anyRequest().denyAll())
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(this.jwtAuthenticationConverter())))
                 .build();
@@ -142,7 +154,7 @@ public class SecurityConfiguration {
 
         CorsConfiguration adminConfiguration = new CorsConfiguration();
         adminConfiguration.setAllowedOrigins(List.of(this.adminWebOrigin));
-        adminConfiguration.setAllowedMethods(List.of("GET", "OPTIONS"));
+        adminConfiguration.setAllowedMethods(List.of("GET", "POST", "PATCH", "DELETE", "OPTIONS"));
         adminConfiguration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
 
         CorsConfiguration adminOverviewConfiguration = new CorsConfiguration();
@@ -161,6 +173,7 @@ public class SecurityConfiguration {
         source.registerCorsConfiguration("/api/v1/users", webConfiguration);
         source.registerCorsConfiguration("/api/v1/web/**", webConfiguration);
         source.registerCorsConfiguration("/api/v1/admin/me", adminConfiguration);
+        source.registerCorsConfiguration("/api/v1/admin/**", adminConfiguration);
         return source;
     }
 

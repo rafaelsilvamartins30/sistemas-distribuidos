@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
-import {
-  confirmSimulatedPayment,
-  getMyPayments,
-  PaymentApiError,
-  type PaymentCharge,
-} from "../services/payments.js";
+import { confirmSimulatedPayment, getMyPayments, PaymentApiError, type PaymentCharge } from "../services/payments.js";
 
 interface WebContext {
   keycloak: Keycloak;

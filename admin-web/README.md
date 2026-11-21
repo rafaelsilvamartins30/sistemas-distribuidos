@@ -1,10 +1,17 @@
-# UNIR Administration (admin-web)
+# Administration (`admin-web`)
 
-Cliente administrativo da plataforma UNIR, implementado em React, TypeScript e Vite, integrado ao Keycloak e ao Gateway (`VITE_GATEWAY_URL`).
+Cliente web administrativo da UNIR (React + TypeScript + Vite), acessível em `http://localhost:15175` (Compose) ou `http://admin.localhost:18080` (Kubernetes).
 
-## Execução local
+## Funcionalidades
 
-```bash
-make test
-make quality
+- Autenticação OIDC via Keycloak exigindo papel global `PLATFORM_ADMIN` validado no API Gateway.
+- Edição inline do perfil institucional da Universidade (nome, sigla, descrição e semestre atual).
+- Criação de Unidades Acadêmicas, Departamentos, Cursos e Semestres.
+- Gestão de listas de administradores (`administratorUserIds`) de entidades, departamentos, unidades e comunidades (habilitando os botões de gestão contextual no cliente Web).
+- Exclusão de estruturas acadêmicas e aprovação/recusa de solicitações pendentes.
+
+## Qualidade
+
+```sh
+pnpm run build && pnpm test
 ```

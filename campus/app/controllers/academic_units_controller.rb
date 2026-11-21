@@ -66,6 +66,18 @@ class AcademicUnitsController < ApplicationController
     render_validation_error(unit)
   end
 
+  def destroy
+    return unless require_university_admin
+
+    unit = AcademicUnit.find_by(id: params[:id])
+    return render_problem(:not_found, 'Academic unit not found') unless unit
+
+    unit.destroy!
+    head :no_content
+  rescue ActiveRecord::InvalidForeignKey
+    render_problem(:conflict, 'Academic unit has linked records and cannot be deleted')
+  end
+
   private
 
   def pagination_parameters

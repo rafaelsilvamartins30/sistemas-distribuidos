@@ -48,6 +48,7 @@ import br.unir.engagement.repository.SportsTeamRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -60,6 +61,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -79,6 +81,8 @@ public class SportsParticipationService {
     private static final String STATUS_QUEUED = "QUEUED";
     private static final String STATUS_ALLOCATED = "ALLOCATED";
     private static final String STATUS_SCHEDULED = "SCHEDULED";
+    private static final Duration SPORTS_PAYMENT_WINDOW = Duration.ofMinutes(15);
+    private static final Duration SPORTS_RESERVATION_WINDOW = Duration.ofMinutes(20);
     private static final String DEFAULT_LOCATION = "Ginásio Poliesportivo UFLA";
 
     private final SportRepository sportRepository;
@@ -92,13 +96,26 @@ public class SportsParticipationService {
     private final CampusEventOrganizerClient campusOrganizerClient;
     private final OutboxRepository outboxRepository;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
+    @Autowired
     public SportsParticipationService(SportRepository sportRepository, CompetitionRepository competitionRepository,
             SeasonRepository seasonRepository, SportsTeamRepository teamRepository,
             SportsTeamMemberRepository teamMemberRepository, SportsFreeAgentRepository freeAgentRepository,
             SportsMatchRepository matchRepository, SportsMatchCheckInRepository checkInRepository,
             CampusEventOrganizerClient campusOrganizerClient, OutboxRepository outboxRepository,
             ObjectMapper objectMapper) {
+        this(sportRepository, competitionRepository, seasonRepository, teamRepository, teamMemberRepository,
+                freeAgentRepository, matchRepository, checkInRepository, campusOrganizerClient, outboxRepository,
+                objectMapper, Clock.systemUTC());
+    }
+
+    SportsParticipationService(SportRepository sportRepository, CompetitionRepository competitionRepository,
+            SeasonRepository seasonRepository, SportsTeamRepository teamRepository,
+            SportsTeamMemberRepository teamMemberRepository, SportsFreeAgentRepository freeAgentRepository,
+            SportsMatchRepository matchRepository, SportsMatchCheckInRepository checkInRepository,
+            CampusEventOrganizerClient campusOrganizerClient, OutboxRepository outboxRepository,
+            ObjectMapper objectMapper, Clock clock) {
         this.sportRepository = sportRepository;
         this.competitionRepository = competitionRepository;
         this.seasonRepository = seasonRepository;
@@ -110,6 +127,7 @@ public class SportsParticipationService {
         this.campusOrganizerClient = campusOrganizerClient;
         this.outboxRepository = outboxRepository;
         this.objectMapper = objectMapper.copy();
+        this.clock = clock;
     }
 
     public EventOrganizerContextsResponse getOrganizerContexts(String bearerToken) {
@@ -206,10 +224,11 @@ public class SportsParticipationService {
         return SeasonResponse.from(this.seasonRepository.save(season));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public SportsEventOverviewResponse getOverview(String rawContextType, UUID contextId, String userId,
             String bearerToken) {
         EventMeta meta = resolveEventMeta(rawContextType, contextId);
+        expirePendingSportsPayments(meta.contextType(), contextId);
         List<SportsTeam> teams = this.teamRepository.findByContextTypeAndContextIdAndStatusOrderByCreatedAtAsc(
                 meta.contextType(), contextId, STATUS_CONFIRMED);
         List<UUID> teamIds = teams.stream().map(SportsTeam::getId).toList();
@@ -256,6 +275,7 @@ public class SportsParticipationService {
             throw badRequest("Request body is required");
         }
         EventMeta meta = resolveEventMeta(rawContextType, contextId);
+        expirePendingSportsPayments(meta.contextType(), contextId);
         String teamName = requireNonBlank(request.name(), "name", 120);
         String captainName = normalizeDisplayName(request.captainName(), defaultDisplayName, userId);
 
@@ -272,11 +292,14 @@ public class SportsParticipationService {
             throw badRequest("Team exceeds maximum roster size of " + meta.rosterMax());
         }
 
-        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant now = Instant.now(this.clock).truncatedTo(ChronoUnit.MICROS);
         boolean requiresPayment = meta.teamEntryPrice() > 0L;
         String initialStatus = requiresPayment ? STATUS_PENDING_PAYMENT : STATUS_CONFIRMED;
-        SportsTeam team = this.teamRepository.save(
-                new SportsTeam(UUID.randomUUID(), meta.contextType(), contextId, teamName, userId, initialStatus, now));
+        Instant paymentDeadlineAt = requiresPayment ? now.plus(SPORTS_PAYMENT_WINDOW) : null;
+        Instant reservationExpiresAt = requiresPayment ? now.plus(SPORTS_RESERVATION_WINDOW) : null;
+        SportsTeam team = this.teamRepository
+                .save(new SportsTeam(UUID.randomUUID(), meta.contextType(), contextId, teamName, userId, initialStatus,
+                        now, requiresPayment ? meta.teamEntryPrice() : null, paymentDeadlineAt, reservationExpiresAt));
         List<SportsTeamMember> savedMembers = new ArrayList<>();
         savedMembers.add(this.teamMemberRepository
                 .save(new SportsTeamMember(UUID.randomUUID(), team.getId(), userId, captainName, "CAPTAIN", now)));
@@ -286,7 +309,8 @@ public class SportsParticipationService {
         }
 
         if (requiresPayment) {
-            enqueueSportsPaymentRequest(team.getId(), contextId, userId, meta.teamEntryPrice(), now);
+            enqueueSportsPaymentRequest(team.getId(), contextId, userId, meta.teamEntryPrice(), paymentDeadlineAt,
+                    reservationExpiresAt, now);
         }
 
         return SportsTeamResponse.from(team, savedMembers.stream().map(SportsTeamMemberResponse::from).toList());
@@ -296,6 +320,7 @@ public class SportsParticipationService {
     public SportsFreeAgentRegistrationResponse registerFreeAgent(String rawContextType, UUID contextId,
             RegisterFreeAgentRequest request, String userId, String defaultDisplayName) {
         EventMeta meta = resolveEventMeta(rawContextType, contextId);
+        expirePendingSportsPayments(meta.contextType(), contextId);
         String displayName = normalizeDisplayName(request == null ? null : request.displayName(), defaultDisplayName,
                 userId);
 
@@ -303,11 +328,15 @@ public class SportsParticipationService {
                 meta.contextType(), contextId, List.of(STATUS_CONFIRMED, STATUS_PENDING_PAYMENT));
         ensureUserNotAlreadyEnrolled(meta.contextType(), contextId, activeTeams, userId);
 
-        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant now = Instant.now(this.clock).truncatedTo(ChronoUnit.MICROS);
         if (meta.freeAgentPrice() > 0L) {
+            Instant paymentDeadlineAt = now.plus(SPORTS_PAYMENT_WINDOW);
+            Instant reservationExpiresAt = now.plus(SPORTS_RESERVATION_WINDOW);
             SportsFreeAgent pending = this.freeAgentRepository.save(new SportsFreeAgent(UUID.randomUUID(),
-                    meta.contextType(), contextId, userId, displayName, null, STATUS_PENDING_PAYMENT, now));
-            enqueueSportsPaymentRequest(pending.getId(), contextId, userId, meta.freeAgentPrice(), now);
+                    meta.contextType(), contextId, userId, displayName, null, STATUS_PENDING_PAYMENT, now,
+                    meta.freeAgentPrice(), paymentDeadlineAt, reservationExpiresAt));
+            enqueueSportsPaymentRequest(pending.getId(), contextId, userId, meta.freeAgentPrice(), paymentDeadlineAt,
+                    reservationExpiresAt, now);
             return new SportsFreeAgentRegistrationResponse(STATUS_PENDING_PAYMENT, null, null);
         }
 
@@ -317,32 +346,48 @@ public class SportsParticipationService {
     }
 
     @Transactional
-    public boolean confirmSportsPayment(UUID referenceId, String userId) {
+    public String confirmSportsPayment(UUID referenceId, UUID eventId, String userId, long amountMinor,
+            Instant paidAt) {
         SportsTeam team = this.teamRepository.findById(referenceId).orElse(null);
         if (team != null) {
-            if (!userId.equals(team.getCaptainUserId())) {
-                return false;
+            String reason = sportsPaymentCompensationReason(eventId, team.getContextId(), userId,
+                    team.getCaptainUserId(), amountMinor, team.getPaymentAmountMinor(), paidAt, team.getCreatedAt(),
+                    team.getPaymentDeadlineAt(), team.getReservationExpiresAt(), team.getStatus());
+            if (reason != null) {
+                if (isExpiredPaymentReason(reason)) {
+                    team.cancelPayment();
+                    this.teamRepository.saveAndFlush(team);
+                }
+                return reason;
             }
             if (STATUS_PENDING_PAYMENT.equals(team.getStatus())) {
                 team.confirmPayment();
                 this.teamRepository.saveAndFlush(team);
             }
-            return true;
+            return null;
         }
         SportsFreeAgent freeAgent = this.freeAgentRepository.findById(referenceId).orElse(null);
         if (freeAgent != null) {
-            if (!userId.equals(freeAgent.getUserId())) {
-                return false;
+            String reason = sportsPaymentCompensationReason(eventId, freeAgent.getContextId(), userId,
+                    freeAgent.getUserId(), amountMinor, freeAgent.getPaymentAmountMinor(), paidAt,
+                    freeAgent.getRegisteredAt(), freeAgent.getPaymentDeadlineAt(), freeAgent.getReservationExpiresAt(),
+                    freeAgent.getStatus());
+            if (reason != null) {
+                if (isExpiredPaymentReason(reason)) {
+                    freeAgent.cancelPayment();
+                    this.freeAgentRepository.saveAndFlush(freeAgent);
+                }
+                return reason;
             }
             if (STATUS_PENDING_PAYMENT.equals(freeAgent.getStatus())) {
                 freeAgent.markQueued();
                 this.freeAgentRepository.saveAndFlush(freeAgent);
                 EventMeta meta = resolveEventMeta(freeAgent.getContextType(), freeAgent.getContextId());
-                allocateOrQueueFreeAgent(meta, freeAgent, Instant.now().truncatedTo(ChronoUnit.MICROS));
+                allocateOrQueueFreeAgent(meta, freeAgent, Instant.now(this.clock).truncatedTo(ChronoUnit.MICROS));
             }
-            return true;
+            return null;
         }
-        return false;
+        return "REGISTRATION_NOT_FOUND";
     }
 
     @Transactional(readOnly = true)
@@ -428,10 +473,10 @@ public class SportsParticipationService {
     }
 
     private void enqueueSportsPaymentRequest(UUID referenceId, UUID contextId, String userId, long amountMinor,
-            Instant now) {
+            Instant paymentDeadlineAt, Instant reservationExpiresAt, Instant now) {
         RegistrationPaymentRequestedPayload payload = new RegistrationPaymentRequestedPayload(referenceId, contextId,
-                userId, amountMinor, RegistrationPaymentRequestedPayload.CURRENCY, now.plus(Duration.ofMinutes(15)),
-                now.plus(Duration.ofMinutes(20)));
+                userId, amountMinor, RegistrationPaymentRequestedPayload.CURRENCY, paymentDeadlineAt,
+                reservationExpiresAt);
         try {
             String payloadJson = this.objectMapper.writeValueAsString(payload);
             this.outboxRepository.saveAndFlush(new OutboxEvent(UUID.randomUUID(), "Registration", referenceId,
@@ -440,6 +485,71 @@ public class SportsParticipationService {
             throw new IllegalStateException("Could not serialize RegistrationPaymentRequested v1 for sports",
                     exception);
         }
+    }
+
+    private void expirePendingSportsPayments(String contextType, UUID contextId) {
+        Instant now = Instant.now(this.clock);
+        List<SportsTeam> pendingTeams = this.teamRepository.findByContextTypeAndContextIdAndStatusOrderByCreatedAtAsc(
+                contextType, contextId, STATUS_PENDING_PAYMENT);
+        for (SportsTeam team : pendingTeams) {
+            Instant reservationExpiresAt = team.getReservationExpiresAt() == null
+                    ? team.getCreatedAt().plus(SPORTS_RESERVATION_WINDOW)
+                    : team.getReservationExpiresAt();
+            if (!now.isBefore(reservationExpiresAt)) {
+                team.cancelPayment();
+                this.teamRepository.save(team);
+            }
+        }
+
+        List<SportsFreeAgent> pendingFreeAgents = this.freeAgentRepository
+                .findByContextTypeAndContextIdAndStatusOrderByRegisteredAtAsc(contextType, contextId,
+                        STATUS_PENDING_PAYMENT);
+        for (SportsFreeAgent freeAgent : pendingFreeAgents) {
+            Instant reservationExpiresAt = freeAgent.getReservationExpiresAt() == null
+                    ? freeAgent.getRegisteredAt().plus(SPORTS_RESERVATION_WINDOW)
+                    : freeAgent.getReservationExpiresAt();
+            if (!now.isBefore(reservationExpiresAt)) {
+                freeAgent.cancelPayment();
+                this.freeAgentRepository.save(freeAgent);
+            }
+        }
+    }
+
+    private String sportsPaymentCompensationReason(UUID expectedEventId, UUID actualContextId, String expectedUserId,
+            String actualUserId, long paidAmountMinor, Long expectedAmountMinor, Instant paidAt, Instant createdAt,
+            Instant paymentDeadlineAt, Instant reservationExpiresAt, String status) {
+        if (!expectedUserId.equals(actualUserId)) {
+            return "USER_ID_MISMATCH";
+        }
+        if (!expectedEventId.equals(actualContextId)) {
+            return "EVENT_ID_MISMATCH";
+        }
+        if (expectedAmountMinor == null || paidAmountMinor != expectedAmountMinor) {
+            return "AMOUNT_MISMATCH";
+        }
+        if (STATUS_CONFIRMED.equals(status)) {
+            return null;
+        }
+        if (!STATUS_PENDING_PAYMENT.equals(status)) {
+            return "REGISTRATION_" + status;
+        }
+        if (paymentDeadlineAt == null || reservationExpiresAt == null) {
+            return "INVALID_PAYMENT_DEADLINES";
+        }
+        if (paidAt == null || paidAt.isBefore(createdAt)) {
+            return "PAYMENT_BEFORE_REGISTRATION";
+        }
+        if (paidAt.isAfter(paymentDeadlineAt)) {
+            return "PAYMENT_AFTER_DEADLINE";
+        }
+        if (!Instant.now(this.clock).isBefore(reservationExpiresAt)) {
+            return "RESERVATION_EXPIRED";
+        }
+        return null;
+    }
+
+    private static boolean isExpiredPaymentReason(String reason) {
+        return "PAYMENT_AFTER_DEADLINE".equals(reason) || "RESERVATION_EXPIRED".equals(reason);
     }
 
     @Transactional

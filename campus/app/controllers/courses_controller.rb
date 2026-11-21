@@ -49,6 +49,18 @@ class CoursesController < ApplicationController
     update_course(course, payload)
   end
 
+  def destroy
+    return unless require_university_admin
+
+    course = Course.find_by(id: params[:id])
+    return render_problem(:not_found, 'Course not found') unless course
+
+    course.destroy!
+    head :no_content
+  rescue ActiveRecord::InvalidForeignKey
+    render_problem(:conflict, 'Course has linked profiles and cannot be deleted')
+  end
+
   private
 
   def valid_course_department?(department_id)

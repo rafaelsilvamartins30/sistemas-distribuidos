@@ -16,9 +16,9 @@ NAMESPACE = uuid.UUID("6bc5849c-694a-4cef-8839-6b9ef7ad5cf4")
 
 PROFILES = {
     "unir.admin": {
-        "scenario": "Administrador global e administrador contextual do DCC",
+        "scenario": "Administrador principal da universidade e administrador contextual do DCC",
         "roles": ["USER", "PLATFORM_ADMIN"],
-        "name": "Administrador de Demonstração",
+        "name": "Administrador Principal UNIR",
         "registrationCode": "LOCAL-UFLA-0001",
         "affiliationStatus": "STUDENT",
         "academicLevel": "UNDERGRAD",
@@ -60,9 +60,9 @@ PROFILES = {
         "departmentCode": "DCC",
     },
     "unir.professor.novo": {
-        "scenario": "Professor autodeclarado sem solicitação ou afiliação",
+        "scenario": "Professor com solicitação pendente de verificação pelo DCC",
         "roles": ["USER"],
-        "name": "Professor sem Solicitação de Demonstração",
+        "name": "Professor Pendente de Demonstração",
         "registrationCode": "LOCAL-UFLA-0005",
         "affiliationStatus": "PROFESSOR",
         "academicLevel": "PHD",

@@ -268,11 +268,7 @@ export function SportsEventModal({
         </header>
 
         <nav className="sports-modal-tabs" aria-label="Seções do campeonato">
-          <button
-            type="button"
-            className={tab === "overview" ? "is-active" : ""}
-            onClick={() => setTab("overview")}
-          >
+          <button type="button" className={tab === "overview" ? "is-active" : ""} onClick={() => setTab("overview")}>
             Resumo &amp; Regras
           </button>
           <button type="button" className={tab === "teams" ? "is-active" : ""} onClick={() => setTab("teams")}>

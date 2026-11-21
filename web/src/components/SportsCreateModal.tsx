@@ -17,13 +17,7 @@ interface SportsCreateModalProps {
   onCreated: () => void;
 }
 
-export function SportsCreateModal({
-  keycloak,
-  sports,
-  organizerContexts,
-  onClose,
-  onCreated,
-}: SportsCreateModalProps) {
+export function SportsCreateModal({ keycloak, sports, organizerContexts, onClose, onCreated }: SportsCreateModalProps) {
   const [tab, setTab] = useState<"event" | "sport">(sports.length > 0 ? "event" : "sport");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -180,10 +174,7 @@ export function SportsCreateModal({
               <div className="sports-form-row">
                 <label className="sports-field">
                   <span>Tipo</span>
-                  <select
-                    value={eventKind}
-                    onChange={(e) => setEventKind(e.target.value as "COMPETITION" | "SEASON")}
-                  >
+                  <select value={eventKind} onChange={(e) => setEventKind(e.target.value as "COMPETITION" | "SEASON")}>
                     <option value="COMPETITION">Campeonato (Grupos + Mata-mata)</option>
                     <option value="SEASON">Temporada (Pontos corridos)</option>
                   </select>
@@ -266,12 +257,7 @@ export function SportsCreateModal({
 
                 <label className="sports-field">
                   <span>Prazo de inscrição</span>
-                  <input
-                    type="date"
-                    required
-                    value={deadlineDate}
-                    onChange={(e) => setDeadlineDate(e.target.value)}
-                  />
+                  <input type="date" required value={deadlineDate} onChange={(e) => setDeadlineDate(e.target.value)} />
                 </label>
               </div>
 

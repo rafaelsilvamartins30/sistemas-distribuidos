@@ -47,6 +47,8 @@ Contrato de integração publicado pelo Engagement para que Payment crie uma cob
 
 `Event.price` é um `Long` no modelo Java e `BIGINT` no PostgreSQL. Ambos armazenam unidades menores: R$ 25,00 é `2500`. O Engagement copia esse valor para `amountMinor` sem conversão decimal ou uso de ponto flutuante.
 
+Para inscrições de esportes, Engagement congela `amountMinor`, `paymentDeadlineAt` e `reservationExpiresAt` no registro pendente e no Outbox. O prazo de pagamento é de 15 minutos desde a inscrição e a reserva dura 20 minutos. Uma confirmação posterior ao prazo de pagamento ou processada após a expiração da reserva não reativa a inscrição: Engagement cancela a reserva e solicita o estorno. Os prazos de inscrições em eventos seguem os valores descritos no fluxo de eventos.
+
 Engagement grava Registration e Outbox na mesma transação PostgreSQL. Um publicador separado envia a mensagem persistente e só grava `publishedAt` após publisher-confirm ACK e ausência de retorno de mensagem não roteada. Falhas permanecem no Outbox para nova tentativa; uma falha após ACK e antes da marcação pode produzir duplicata, conforme a semântica at-least-once.
 
 Payment consome esta mensagem, valida o envelope e o payload, e usa `registrationId` como chave idempotente para criar uma cobrança `PENDING` pelo `SimulatedPixProvider`. O Event Store registra `ChargeCreated` e, na mesma transação PostgreSQL, Payment atualiza `ChargeProjection`, registra o `messageId` processado e grava a Outbox local.

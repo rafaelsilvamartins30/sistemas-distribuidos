@@ -14,6 +14,7 @@ class LocalDemoProfilesSeeder
     @accounts.each_value { |account| seed_profile(account) }
     seed_contextual_managers
     seed_approved_professor
+    seed_pending_requests
   end
 
   private
@@ -118,6 +119,51 @@ class LocalDemoProfilesSeeder
       affiliation.department = department
       affiliation.status = 'ACTIVE'
       affiliation.joined_at = Time.utc(2026, 11, 18, 12, 0, 0)
+    end
+  end
+
+  def seed_pending_requests
+    dcc = Department.find(stable_id('department/ICET/DCC'))
+    seed_pending_professor_request(dcc)
+    seed_pending_community_request
+  end
+
+  def seed_pending_professor_request(department)
+    account = @accounts.fetch('unir.professor.novo')
+    profile = UserProfile.find(account.fetch('profileId'))
+    InstitutionalRequest.find_or_create_by!(id: stable_id('request/professor-verification/unir.professor.novo')) do |request|
+      request.assign_attributes(
+        type: InstitutionalRequest::PROFESSOR_VERIFICATION,
+        title: "Verificação docente — #{profile.name}",
+        requested_by_user_id: account.fetch('sub'),
+        target_department: department,
+        payload_json: { identifier: profile.registration_code },
+        status: InstitutionalRequest::PENDING,
+        created_at: Time.utc(2026, 11, 20, 14, 0, 0),
+        updated_at: Time.utc(2026, 11, 20, 14, 0, 0)
+      )
+    end
+  end
+
+  def seed_pending_community_request
+    account = @accounts.fetch('unir.aluno1')
+    InstitutionalRequest.find_or_create_by!(id: stable_id('request/community/unir.aluno1/inovacao-aberta')) do |request|
+      request.assign_attributes(
+        type: 'COMMUNITY_CREATION',
+        title: 'Criação de comunidade — Inovação Aberta',
+        requested_by_user_id: account.fetch('sub'),
+        target_department: nil,
+        payload_json: {
+          name: 'Inovação Aberta',
+          description: 'Comunidade estudantil para encontros, projetos e troca de experiências em inovação.',
+          generalInfoMarkdown: 'Espaço de demonstração para colaboração interdisciplinar no campus.',
+          category: 'Tecnologia e inovação',
+          links: []
+        },
+        status: InstitutionalRequest::PENDING,
+        created_at: Time.utc(2026, 11, 20, 15, 0, 0),
+        updated_at: Time.utc(2026, 11, 20, 15, 0, 0)
+      )
     end
   end
 end

@@ -802,15 +802,13 @@ export function createServer(options: ServerOptions = {}) {
       ),
   );
 
-  server.post<{ Params: { matchId: string } }>(
-    "/api/v1/web/sports-matches/:matchId/checkins",
-    async (request, reply) =>
-      forwardToEngagementService(
-        request,
-        reply,
-        `/api/v1/sports-matches/${encodeURIComponent(request.params.matchId)}/checkins`,
-        "POST",
-      ),
+  server.post<{ Params: { matchId: string } }>("/api/v1/web/sports-matches/:matchId/checkins", async (request, reply) =>
+    forwardToEngagementService(
+      request,
+      reply,
+      `/api/v1/sports-matches/${encodeURIComponent(request.params.matchId)}/checkins`,
+      "POST",
+    ),
   );
 
   server.post<{ Params: { eventId: string } }>("/api/v1/web/events/:eventId/registrations", async (request, reply) => {

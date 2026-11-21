@@ -8,6 +8,17 @@ class UsersController < ApplicationController
 
   before_action :authenticate_keycloak!
 
+  def index
+    roles = Array(@token_claims.dig('realm_access', 'roles'))
+    return render_problem(:forbidden, 'Platform administrator role is required') unless roles.include?('PLATFORM_ADMIN')
+
+    profiles = UserProfile.order(:name).limit(200).map do |profile|
+      { id: profile.id, keycloakUserId: profile.keycloak_user_id, name: profile.name,
+        registrationCode: profile.registration_code, userType: profile.user_type }
+    end
+    render json: { items: profiles }
+  end
+
   def create
     payload = load_payload(CREATE_FIELDS)
     return unless payload

@@ -57,6 +57,32 @@ class PaymentConfirmationServiceTest {
     }
 
     @Test
+    void compensatesLateSportsPaymentWithDomainReason() throws Exception {
+        UUID registrationId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        UUID chargeId = UUID.randomUUID();
+        UUID messageId = UUID.randomUUID();
+        Instant paidAt = NOW.minusSeconds(30);
+        SportsParticipationService sportsParticipationService = org.mockito.Mockito
+                .mock(SportsParticipationService.class);
+        this.service = new PaymentConfirmationService(this.eventRepository, this.registrationRepository,
+                this.jdbcTemplate, this.objectMapper, Clock.fixed(NOW, ZoneOffset.UTC), sportsParticipationService);
+        when(this.registrationRepository.findEventIdById(registrationId)).thenReturn(Optional.empty());
+        when(sportsParticipationService.confirmSportsPayment(registrationId, eventId, "keycloak-sub", 2500, paidAt))
+                .thenReturn("PAYMENT_AFTER_DEADLINE");
+        when(this.jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+        byte[] body = message(messageId, chargeId, registrationId, eventId, "keycloak-sub", paidAt, NOW);
+
+        this.service.consume(body);
+
+        verify(sportsParticipationService).confirmSportsPayment(registrationId, eventId, "keycloak-sub", 2500, paidAt);
+        org.mockito.ArgumentCaptor<String> sql = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(this.jdbcTemplate, times(3)).update(sql.capture(), any(Object[].class));
+        org.junit.jupiter.api.Assertions.assertTrue(sql.getAllValues().get(1).contains("payment_compensation_cases"));
+        org.junit.jupiter.api.Assertions.assertTrue(sql.getAllValues().get(2).contains("outbox_events"));
+    }
+
+    @Test
     void acceptsPaymentAtDeadlineWhenProcessedImmediatelyBeforeReservationExpiry() throws Exception {
         UUID registrationId = UUID.randomUUID();
         UUID eventId = UUID.randomUUID();
@@ -173,11 +199,15 @@ class PaymentConfirmationServiceTest {
 
     private byte[] message(UUID chargeId, UUID registrationId, UUID eventId, String userId, Instant paidAt,
             Instant occurredAt) throws Exception {
+        return message(UUID.randomUUID(), chargeId, registrationId, eventId, userId, paidAt, occurredAt);
+    }
+
+    private byte[] message(UUID messageId, UUID chargeId, UUID registrationId, UUID eventId, String userId,
+            Instant paidAt, Instant occurredAt) throws Exception {
         PaymentConfirmedPayload payload = new PaymentConfirmedPayload(chargeId, registrationId, eventId, userId, 2500,
                 "BRL", paidAt);
-        IntegrationEventEnvelope envelope = new IntegrationEventEnvelope(UUID.randomUUID(),
-                PaymentConfirmedPayload.EVENT_TYPE, "Charge", chargeId, occurredAt, 1,
-                this.objectMapper.valueToTree(payload));
+        IntegrationEventEnvelope envelope = new IntegrationEventEnvelope(messageId, PaymentConfirmedPayload.EVENT_TYPE,
+                "Charge", chargeId, occurredAt, 1, this.objectMapper.valueToTree(payload));
         return this.objectMapper.writeValueAsBytes(envelope);
     }
 

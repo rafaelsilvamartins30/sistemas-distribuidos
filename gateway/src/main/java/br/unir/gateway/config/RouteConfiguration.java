@@ -143,6 +143,24 @@ public class RouteConfiguration {
     public RouterFunction<ServerResponse> adminBffRoute() {
         return GatewayRouterFunctions.route("admin-bff")
                 .route(RequestPredicates.GET("/api/v1/admin/me"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/admin/overview"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/academic-units"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/departments"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/courses"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/semesters"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/admin/university"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/admin/academic-units/{unitId}"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/admin/departments/{departmentId}"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/admin/entities/{entityId}"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/admin/communities/{communityId}"), HandlerFunctions.http())
+                .route(RequestPredicates.DELETE("/api/v1/admin/academic-units/{unitId}"), HandlerFunctions.http())
+                .route(RequestPredicates.DELETE("/api/v1/admin/departments/{departmentId}"), HandlerFunctions.http())
+                .route(RequestPredicates.DELETE("/api/v1/admin/courses/{courseId}"), HandlerFunctions.http())
+                .route(RequestPredicates.DELETE("/api/v1/admin/semesters/{semesterId}"), HandlerFunctions.http())
+                .route(RequestPredicates.DELETE("/api/v1/admin/entities/{entityId}"), HandlerFunctions.http())
+                .route(RequestPredicates.DELETE("/api/v1/admin/communities/{communityId}"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/requests/{requestId}/approve"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/requests/{requestId}/reject"), HandlerFunctions.http())
                 .before(BeforeFilterFunctions.uri(this.adminBffUrl)).build();
     }
 }

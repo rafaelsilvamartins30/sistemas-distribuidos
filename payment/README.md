@@ -5,7 +5,10 @@ Serviço de domínio responsável pelo ciclo de vida de pagamentos das atividade
 ## Endpoints
 
 - `GET /health` verifica a conectividade com o banco PostgreSQL próprio (`unir_payment`) e retorna `200` (`503` se indisponível).
-- Demais rotas exigem bearer token e permanecem fechadas (`404`) até a definição dos contratos de pagamento.
+- `GET /api/v1/payments/me` lista as cobranças associadas ao `sub` do JWT autenticado.
+- `POST /api/v1/payments/{registrationId}/confirm` confirma uma cobrança simulada do próprio usuário somente em `PAYMENT_ENV=local|test` com `PAYMENT_SIMULATED_CONFIRMATION_ENABLED=true`.
+
+As rotas de usuário validam assinatura RS256, issuer, expiração e `sub` do token com `KEYCLOAK_ISSUER_URI` e `KEYCLOAK_JWK_SET_URI`. A identidade não é obtida decodificando claims sem verificar a assinatura.
 
 O Payment consome a fila durável `payment.registration-requests`, ligada pelo Engagement à exchange `unir.events` e à routing key `engagement.registration.payment-requested.v1`. O contrato recebido é [`RegistrationPaymentRequested` v1](../docs/contracts/registration-payment-requested-v1.md).
 
@@ -13,7 +16,7 @@ Cada mensagem válida cria `ChargeCreated` no Event Store e, na mesma transaçã
 
 O `SimulatedPixProvider` gera dados claramente fictícios e não movimenta dinheiro. A chave de idempotência do provedor é o `registrationId`, e o identificador interno da cobrança é determinístico para essa mesma tentativa. Se `paymentDeadlineAt` já tiver vencido ao processar a solicitação, Payment persiste `PaymentExpired` e a projeção `EXPIRED` sem chamar o provedor. O registro terminal também é idempotente para redelivery.
 
-O pagamento simulado só pode ser confirmado explicitamente em `PAYMENT_ENV=local|test` com `PAYMENT_SIMULATED_CONFIRMATION_ENABLED=true`. Essa configuração está habilitada apenas no Compose local. A rota de controle é `POST /local/simulated-payments/{registrationId}/confirm`; o campo opcional `paidAt` serve para reproduzir horários efetivos em testes. Sem ambas as condições, a rota não é registrada. A confirmação persiste `PaymentConfirmed`, atualiza a projeção para `PAID` e grava a Outbox na mesma transação. O publicador encaminha a Outbox para `payment.charge.confirmed.v1` com publisher-confirm e retry. O contrato está em [`PaymentConfirmed` v1](../docs/contracts/payment-confirmed-v1.md).
+O pagamento simulado só pode ser confirmado explicitamente em `PAYMENT_ENV=local|test` com `PAYMENT_SIMULATED_CONFIRMATION_ENABLED=true`. A rota de usuário usa o relógio do Payment para gerar `paidAt`; o cliente não pode retroagir o horário para ultrapassar o prazo. A rota interna de controle `POST /local/simulated-payments/{registrationId}/confirm` pode receber `paidAt` para reproduzir cenários em testes e só é registrada com ambas as condições. A confirmação persiste `PaymentConfirmed`, atualiza a projeção para `PAID` e grava a Outbox na mesma transação. O publicador encaminha a Outbox para `payment.charge.confirmed.v1` com publisher-confirm e retry. O contrato está em [`PaymentConfirmed` v1](../docs/contracts/payment-confirmed-v1.md).
 
 Payment consome também `RefundRequested` v1 da fila durável `payment.refund-requests`. Só reembolsa cobranças capturadas; valor e moeda vêm da projeção persistida, e a chave estável `unir-full-refund:<chargeId>` protege chamadas repetidas ao provedor. O `SimulatedPixProvider` devolve um recibo fictício e não movimenta dinheiro. Cada tentativa, falha ou sucesso é registrada como evento append-only; a projeção passa por `REFUND_PENDING`, `REFUND_FAILED` e `REFUNDED`, e os resultados são publicados pela Outbox. Uma falha do provedor permanece visível e retorna erro para reentrega/retry. O contrato das duas direções está em [`Refund flow v1`](../docs/contracts/refund-flow-v1.md).
 
