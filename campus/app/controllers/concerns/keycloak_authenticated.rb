@@ -27,4 +27,9 @@ module KeycloakAuthenticated
   def current_subject
     @token_claims.fetch('sub')
   end
+
+  # Identity labels come from the verified Keycloak token, never from request payloads.
+  def current_display_name
+    @token_claims['name'].presence || @token_claims['preferred_username'].presence || @token_claims['email'].presence
+  end
 end

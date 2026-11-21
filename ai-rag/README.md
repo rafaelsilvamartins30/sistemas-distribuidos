@@ -44,10 +44,10 @@ ai-rag/
 
 - `GET /health` e `GET /health/live` — Liveness (`200 OK`).
 - `GET /health/ready` — Readiness verificando conectividade e contagem de pontos no Qdrant (`200 OK` ou `503`).
-- `POST /api/v1/rag/ingest` — Sincroniza eventos e oportunidades ativos do Engagement para o Qdrant (exige `Authorization: Bearer <jwt>`).
-- `POST /api/v1/rag/query` — Executa a chain RAG para uma pergunta (`question`, `top_k`, `source_type`, `use_live_tool`) e retorna resposta fundamentada, fontes citadas, latência (`retrieval_latency_ms`, `generation_latency_ms`, `total_latency_ms`), tokens e custo estimado em USD (exige `Authorization: Bearer <jwt>`).
-- `GET /api/v1/rag/tools/live-events?q=&category=&free_only=&max_results=` — Invoca a tool LangChain `search_live_events` diretamente contra o Engagement (exige `Authorization: Bearer <jwt>`).
-- `POST /api/v1/rag/evaluate` — Executa o benchmark acadêmico das 5 perguntas comparando `baseline` (sem recuperação) e `rag` (com recuperação no Qdrant).
+- `POST /api/v1/rag/ingest` — Sincroniza eventos e oportunidades ativos do Engagement para o Qdrant. Exige `X-RAG-Sync-Token` e obtém um token separado de client credentials para consultar Engagement. Um token de usuário ou JWT arbitrário não autoriza ingestão.
+- `POST /api/v1/rag/query` — Executa a chain RAG para uma pergunta (`question`, `top_k`, `source_type`, `use_live_tool`) e retorna resposta, fontes, latências e custo. Exige um JWT assinado pelo Keycloak, emissor e validade corretos, `azp` em `RAG_USER_CLIENT_IDS` (por padrão `unir-web`) e role `USER` ou `PLATFORM_ADMIN`.
+- `GET /api/v1/rag/tools/live-events?q=&category=&free_only=&max_results=` — Invoca a tool LangChain `search_live_events` diretamente contra o Engagement, com o JWT de usuário validado.
+- `POST /api/v1/rag/evaluate` — Executa o benchmark acadêmico das 5 perguntas comparando `baseline` e `rag`; exige JWT de usuário e não é exposto pelo Gateway/Ingress.
 
 ## 4. Execução Isolada e Qualidade
 
@@ -67,3 +67,10 @@ GEMINI_API_KEY="sua-chave-opcional" docker compose -f compose.rag.yaml up --buil
 
 - Qdrant: `http://localhost:16333`
 - AI/RAG Service: `http://localhost:18090`
+
+Para consultar no modo Compose, configure `KEYCLOAK_ISSUER_URI` com o emissor
+que aparece no token do navegador e `KEYCLOAK_JWK_SET_URI`/`KEYCLOAK_TOKEN_URL`
+com endereços alcançáveis pelo container. A sincronização exige um client
+confidencial de serviço no realm (`RAG_SYNC_CLIENT_ID` e
+`RAG_SYNC_CLIENT_SECRET`) com role `USER`; o bootstrap Kubernetes provisiona
+esse client e guarda as credenciais em um Secret local.

@@ -18,6 +18,7 @@ Todos os recursos pertencem ao namespace `unir`:
 | **Mensageria**            | `Deployment/rabbitmq`                                                                   | `rabbitmq:5672`                                                      | `PVC/rabbitmq-data`                    |
 | **Bancos PostgreSQL**     | `Deployment/campus-db`, `engagement-db`, `payment-db`, `access-db`, `keycloak-db`       | `*:5432` (isolados, sem acesso público)                              | `PVC/*-db-data` (5 PVCs independentes) |
 | **Read Model CQRS**       | `Deployment/engagement-read-db` (`mongo:7.0`)                                           | `engagement-read-db:27017` (interno)                                 | `PVC/engagement-read-db-data`          |
+| **RAG**                   | `Deployment/ai-rag`, `Deployment/qdrant`                                                | `ai-rag:8090`, `qdrant:6333` (`ClusterIP`, sem rota direta no Ingress) | `PVC/qdrant-rag-data`                  |
 
 Nenhum banco de dados ou broker RabbitMQ é exposto fora do cluster. O ambiente Kubernetes usa a porta `18080` no host (`127.0.0.1:18080`), permitindo que o ambiente Docker Compose (`15173`, `15175`, `18081`, `18084`) continue funcionando separadamente sem conflito de portas ou volumes.
 
@@ -33,6 +34,7 @@ Nenhum banco de dados ou broker RabbitMQ é exposto fora do cluster. O ambiente 
 - `07-bffs-gateway.yaml` — `web-bff`, `admin-bff` e `gateway`.
 - `08-frontends.yaml` — `web` e `admin-web`.
 - `09-ingress.yaml` — RBAC, `IngressClass`, `Deployment` do controlador Traefik (`networking.k8s.io/v1`) e `Ingress/unir-ingress`.
+- `10-ai-rag.yaml` — Qdrant com PVC persistente e AI/RAG somente em `ClusterIP`.
 
 ## 3. Comandos de Execução
 
@@ -40,6 +42,13 @@ Nenhum banco de dados ou broker RabbitMQ é exposto fora do cluster. O ambiente 
 
 ```bash
 ./scripts/k8s-up.sh
+```
+
+Quando o código local mudar, reconstrua e recarregue as imagens dos serviços antes
+da validação integrada:
+
+```bash
+UNIR_K8S_REBUILD=true ./scripts/k8s-up.sh
 ```
 
 ### Acessar as aplicações via Ingress
@@ -51,7 +60,9 @@ Nenhum banco de dados ou broker RabbitMQ é exposto fora do cluster. O ambiente 
 
 As 8 contas locais de demonstração ficam em `config/local-demo-accounts.json` (geradas por `scripts/prepare-local-demo-accounts.py` e sincronizadas no Keycloak do cluster).
 
-### Executar validação ponta a ponta (saúde, OIDC, Gateway → BFF → serviços, inscrição, RabbitMQ → Access e persistência após reinício de banco)
+O bootstrap aplica seeds de demonstração de forma idempotente, reconstrói o read model do MongoDB a partir do PostgreSQL e sincroniza eventos/oportunidades ativos no Qdrant. O rebuild e a sincronização não removem volumes. O client interno de sincronização RAG recebe credencial local no Keycloak; tokens de usuário são validados separadamente para consultas.
+
+### Executar validação ponta a ponta (OIDC, RAG com fontes reais, ciclo CQRS criar/editar/cancelar, inscrição, Access e persistência)
 
 ```bash
 ./scripts/k8s-verify.sh
@@ -69,7 +80,7 @@ As 8 contas locais de demonstração ficam em `config/local-demo-accounts.json` 
 ./scripts/k8s-down.sh
 ```
 
-## 4. Compatibilidade e Conciliação com a Branch `feat/cqrs`
+## 4. CQRS, RAG e limites de exposição
 
 A infraestrutura do MongoDB (`engagement-read-db`) já está provisionada e saudável no cluster com:
 
@@ -91,4 +102,6 @@ A infraestrutura do MongoDB (`engagement-read-db`) já está provisionada e saud
   - `MONGODB_URI=mongodb://<user>:<password>@engagement-read-db:27017/unir_engagement_read?authSource=admin`
   - `SPRING_DATA_MONGODB_URI=mongodb://<user>:<password>@engagement-read-db:27017/unir_engagement_read?authSource=admin`
 
-No merge com `feat/cqrs`, basta confirmar se o `application.properties` do `engagement` utiliza `SPRING_DATA_MONGODB_URI` / `MONGODB_URI` (ou um dos aliases acima) e reconstruir a imagem `unir-engagement:local` (`UNIR_K8S_REBUILD=true ./scripts/k8s-up.sh`).
+O `Deployment/engagement` usa as URIs e credenciais do Secret listado acima. Após os seeds SQL, `scripts/k8s-up.sh` executa o runner `engagement.event-projection.rebuild-and-exit=true`, que reidrata a coleção `event_views` incluindo registros cancelados. Escritas novas seguem PostgreSQL → Outbox → RabbitMQ → consumer → MongoDB. A listagem ativa usa o read model; os detalhes mantêm o histórico.
+
+AI/RAG usa `ENGAGEMENT_URL=http://engagement:8080` e `QDRANT_URL=http://qdrant:6333`. A ingestão é acionada pelo bootstrap via `X-RAG-Sync-Token`, mas usa um token separado de client credentials (`unir-rag-sync`) para ler APIs autenticadas do Engagement. Consultas aceitam somente JWT de usuário assinado pelo Keycloak, com emissor configurado, validade, client `unir-web` e role `USER`/`PLATFORM_ADMIN`. O Web BFF preserva o JWT até AI/RAG. O Gateway publica somente `POST /api/v1/web/rag/query`; ingestão, tool ao vivo e avaliação não são rotas de Ingress. Sem `GEMINI_API_KEY`, a consulta retorna documentos e IDs reais em `FALLBACK_RETRIEVAL_ONLY`, sem simular texto do modelo.

@@ -7,6 +7,7 @@ import {
   markNotificationRead,
   type CampusNotification,
 } from "../services/campusSocial.js";
+import { campusProfilePath } from "../utils/profileRoutes.js";
 
 interface WebContext {
   keycloak: Keycloak;
@@ -17,9 +18,16 @@ export function notificationPath(notification: CampusNotification): string {
   const id = encodeURIComponent(notification.resourceId);
   if (notification.resourceType === "UNIVERSITY") return "/universidade?tab=posts";
   if (notification.resourceType === "ACADEMIC_UNIT") return `/unidades/${id}?tab=posts`;
-  if (notification.resourceType === "DEPARTMENT") return `/departamentos/${id}?tab=posts`;
-  if (notification.resourceType === "ACADEMIC_ENTITY") return `/entidades/${id}?tab=posts`;
-  if (notification.resourceType === "COMMUNITY") return `/comunidades/${id}?tab=community`;
+  if (notification.resourceType === "DEPARTMENT")
+    return `${campusProfilePath("DEPARTMENT", notification.resourceId)}?tab=posts`;
+  if (notification.resourceType === "ACADEMIC_ENTITY")
+    return `${campusProfilePath("ACADEMIC_ENTITY", notification.resourceId)}?tab=posts`;
+  if (notification.resourceType === "COMMUNITY") {
+    if (notification.eventType === "COMMUNITY_SPACE_POST" || notification.eventType === "COMMUNITY_SPACE_COMMENT") {
+      return `/comunidades/${id}/central`;
+    }
+    return `${campusProfilePath("COMMUNITY", notification.resourceId)}?tab=posts`;
+  }
   return "/";
 }
 

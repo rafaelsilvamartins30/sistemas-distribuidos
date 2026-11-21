@@ -2,11 +2,13 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 
 const EVENT_WRITE_TIMEOUT_MS = 15_000;
 const EVENT_QUERY_TIMEOUT_MS = 15_000;
+const RAG_QUERY_TIMEOUT_MS = 30_000;
 
 interface ServerOptions {
   campusUrl?: string;
   engagementServiceUrl?: string;
   accessServiceUrl?: string;
+  ragServiceUrl?: string;
   fetch?: typeof globalThis.fetch;
 }
 
@@ -14,9 +16,11 @@ export function createServer(options: ServerOptions = {}) {
   const campusUrl = (options.campusUrl ?? "http://localhost:3000").replace(/\/+$/, "");
   const engagementServiceUrl = (options.engagementServiceUrl ?? "http://localhost:8080").replace(/\/+$/, "");
   const accessServiceUrl = (options.accessServiceUrl ?? "http://localhost:18087").replace(/\/+$/, "");
+  const ragServiceUrl = (options.ragServiceUrl ?? "http://localhost:8090").replace(/\/+$/, "");
   const fetchCampus = options.fetch ?? globalThis.fetch;
   const fetchEngagementService = options.fetch ?? globalThis.fetch;
   const fetchAccessService = options.fetch ?? globalThis.fetch;
+  const fetchRagService = options.fetch ?? globalThis.fetch;
   const server = Fastify({ logger: true });
 
   server.get("/health", async () => ({ status: "ok" }));
@@ -505,6 +509,31 @@ export function createServer(options: ServerOptions = {}) {
     if (contentType) reply.header("content-type", contentType);
     return reply.code(response.status).send(body);
   }
+
+  server.post("/api/v1/web/rag/query", async (request, reply) => {
+    const authorization = request.headers.authorization;
+    if (typeof authorization !== "string" || !/^Bearer\s+\S+$/i.test(authorization)) {
+      return reply.code(401).send({ error: "A bearer token is required" });
+    }
+
+    const headers: Record<string, string> = { authorization, "content-type": "application/json" };
+    const requestBody = typeof request.body === "string" ? request.body : JSON.stringify(request.body ?? {});
+    try {
+      const response = await fetchRagService(`${ragServiceUrl}/api/v1/rag/query`, {
+        method: "POST",
+        headers,
+        body: requestBody,
+        signal: AbortSignal.timeout(RAG_QUERY_TIMEOUT_MS),
+      });
+      const body = Buffer.from(await response.arrayBuffer());
+      const contentType = response.headers.get("content-type");
+      if (contentType) reply.header("content-type", contentType);
+      return reply.code(response.status).send(body);
+    } catch (error) {
+      request.log.error({ err: error }, "AI/RAG Service request failed");
+      return reply.code(503).send({ error: "AI/RAG Service unavailable" });
+    }
+  });
 
   server.get("/api/v1/web/events", async (request, reply) => {
     const query = new URL(request.url, "http://localhost").search;

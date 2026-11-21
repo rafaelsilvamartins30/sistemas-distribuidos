@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { EventCard } from "../components/EventCard";
@@ -6,6 +6,7 @@ import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
 import { Section } from "../components/Section";
 import { ParticipantQrScanner } from "../components/ParticipantQrScanner";
+import { SearchField } from "../components/SearchField";
 import {
   AttendanceApiError,
   checkInWithEventQr,
@@ -39,6 +40,14 @@ import {
   RegistrationApiError,
   type Registration,
 } from "../services/registrations";
+import { getFollowedProfiles } from "../services/campusSocial";
+import {
+  attendanceInstructions,
+  eventCategoryLabel,
+  eventStatusLabel,
+  filterEvents,
+  organizerTypeLabel,
+} from "../utils/eventPresentation";
 
 interface WebContext {
   keycloak: Keycloak;
@@ -54,25 +63,6 @@ function toDateTimeLocalValue(iso?: string | null): string {
   if (Number.isNaN(date.getTime())) return "";
   const offsetMs = date.getTimezoneOffset() * 60_000;
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
-}
-
-function organizerLabel(organizerType: string): string {
-  switch (organizerType) {
-    case "PROFESSOR":
-      return "Professor(a)";
-    case "DEPARTMENT":
-      return "Departamento";
-    case "ACADEMIC_UNIT":
-      return "Unidade acadêmica";
-    case "UNIVERSITY":
-      return "Universidade";
-    case "ACADEMIC_ENTITY":
-      return "Entidade acadêmica";
-    case "COMMUNITY":
-      return "Comunidade";
-    default:
-      return organizerType;
-  }
 }
 
 function registrationModeLabel(event: Event): string {
@@ -122,6 +112,11 @@ export function EventsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [reloadCount, setReloadCount] = useState(0);
+  const [eventQuery, setEventQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [followedOnly, setFollowedOnly] = useState(false);
+  const [followedOrganizerKeys, setFollowedOrganizerKeys] = useState<Set<string>>(new Set());
+  const [followedProfilesReady, setFollowedProfilesReady] = useState(false);
 
   const [organizerContexts, setOrganizerContexts] = useState<EventOrganizerContext[]>([]);
   const [managedEvents, setManagedEvents] = useState<Event[]>([]);
@@ -181,6 +176,40 @@ export function EventsPage() {
       active = false;
     };
   }, [keycloak, reloadCount]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadFollowedProfiles() {
+      try {
+        await keycloak.updateToken(30);
+        if (!keycloak.token) throw new Error("Token indisponível.");
+        const follows = await getFollowedProfiles(keycloak.token);
+        if (active) {
+          setFollowedOrganizerKeys(new Set(follows.items.map((follow) => `${follow.targetType}:${follow.targetId}`)));
+        }
+      } catch {
+        if (active) setFollowedOrganizerKeys(new Set());
+      } finally {
+        if (active) setFollowedProfilesReady(true);
+      }
+    }
+    void loadFollowedProfiles();
+    return () => {
+      active = false;
+    };
+  }, [keycloak]);
+
+  const visibleEvents = useMemo(
+    () => filterEvents(events, { query: eventQuery, category: categoryFilter, followedOrganizerKeys, followedOnly }),
+    [categoryFilter, eventQuery, events, followedOnly, followedOrganizerKeys],
+  );
+  const eventCategories = useMemo(
+    () =>
+      [...new Set(events.map((event) => event.category))].sort((left, right) =>
+        eventCategoryLabel(left).localeCompare(eventCategoryLabel(right), "pt-BR"),
+      ),
+    [events],
+  );
 
   useEffect(() => {
     let active = true;
@@ -355,9 +384,9 @@ export function EventsPage() {
     <div className="browse-page events-page">
       <div className="events-page-heading">
         <PageHeader
-          eyebrow="Agenda oficial e comunidades"
+          eyebrow="Programação do Campus"
           title="Eventos & encontros universitários"
-          description="Atividades gratuitas, eventos pagos internamente via Pix (departamentos, unidades e professores) e eventos pagos externos (comunidades e entidades acadêmicas)."
+          description="Encontros, atividades e inscrições da comunidade universitária."
         />
         <Link className="button button-secondary" to="/tickets">
           <Icon name="calendar" width="16" height="16" /> Meus tickets
@@ -396,7 +425,7 @@ export function EventsPage() {
                     const key = `${context.organizerType}:${context.organizerId}`;
                     return (
                       <option key={key} value={key}>
-                        {organizerLabel(context.organizerType)} · {context.name}
+                        {organizerTypeLabel(context.organizerType)} · {context.name}
                       </option>
                     );
                   })}
@@ -653,7 +682,7 @@ export function EventsPage() {
                   <div>
                     <strong>{item.title}</strong>
                     <span>
-                      {organizerLabel(item.organizerType)} · {registrationModeLabel(item)} · {priceLabel(item)} ·
+                      {organizerTypeLabel(item.organizerType)} · {registrationModeLabel(item)} · {priceLabel(item)} ·
                       Inscrições até {dateTime(item.registrationDeadline)} · Status:{" "}
                       {item.status === "ACTIVE" ? "Ativo" : "Cancelado"}
                     </span>
@@ -679,7 +708,39 @@ export function EventsPage() {
         </section>
       )}
 
-      <Section title="Programação" description={loading ? "Carregando eventos…" : `${events.length} eventos`}>
+      <div className="events-filter-toolbar" aria-label="Buscar e filtrar eventos">
+        <SearchField
+          label="Buscar eventos"
+          placeholder="Buscar por nome, descrição ou local…"
+          value={eventQuery}
+          onChange={setEventQuery}
+        />
+        <label className="events-category-filter">
+          <span>Categoria</span>
+          <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+            <option value="">Todas</option>
+            {eventCategories.map((categoryName) => (
+              <option key={categoryName} value={categoryName}>
+                {eventCategoryLabel(categoryName)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className={`events-follow-filter${followedOnly ? " is-selected" : ""}`}
+          type="button"
+          aria-pressed={followedOnly}
+          disabled={!followedProfilesReady}
+          onClick={() => setFollowedOnly((value) => !value)}
+        >
+          {followedProfilesReady ? "Perfis que sigo" : "Carregando perfis…"}
+        </button>
+      </div>
+
+      <Section
+        title="Programação"
+        description={loading ? "Carregando eventos…" : `${visibleEvents.length} de ${events.length} eventos`}
+      >
         {loading ? (
           <p className="notice" role="status">
             Carregando eventos…
@@ -688,17 +749,23 @@ export function EventsPage() {
           <p className="notice notice-error" role="alert">
             Não foi possível carregar os eventos. Verifique a conexão com a plataforma e tente novamente.
           </p>
-        ) : events.length ? (
+        ) : visibleEvents.length ? (
           <div className="content-grid">
-            {events.map((event) => (
+            {visibleEvents.map((event) => (
               <EventCard key={event.id} event={event} />
             ))}
           </div>
         ) : (
           <div className="empty-state">
             <Icon name="calendar" />
-            <strong>Nenhum evento disponível</strong>
-            <span>Os próximos eventos aparecerão aqui.</span>
+            <strong>{events.length ? "Nenhum evento encontrado" : "Nenhum evento disponível"}</strong>
+            <span>
+              {events.length
+                ? followedOnly && followedOrganizerKeys.size === 0
+                  ? "Você ainda não segue perfis que organizam eventos."
+                  : "Ajuste a busca ou os filtros para ver outros eventos."
+                : "Os próximos eventos aparecerão aqui."}
+            </span>
           </div>
         )}
       </Section>
@@ -986,7 +1053,7 @@ export function EventDetailPage() {
         <article className="detail-main-card">
           {event.imageUrl && <img className="event-detail-image" src={event.imageUrl} alt="" />}
           <span className="eyebrow">
-            {event.category} · {event.status === "ACTIVE" ? "Ativo" : "Cancelado"}
+            {eventCategoryLabel(event.category)} · {eventStatusLabel(event.status)}
           </span>
           <h1>{event.title}</h1>
           <p className="detail-lead">{event.description}</p>
@@ -1016,7 +1083,7 @@ export function EventDetailPage() {
               <Icon name="communities" />
               <span>
                 <small>Organizador</small>
-                <strong>{organizerLabel(event.organizerType)}</strong>
+                <strong>{organizerTypeLabel(event.organizerType)}</strong>
               </span>
             </div>
             <div>
@@ -1047,8 +1114,8 @@ export function EventDetailPage() {
             <h2>Presença</h2>
             <p>
               {event.attendanceEnabled
-                ? `Validação habilitada${event.attendanceMode ? ` · ${event.attendanceMode}` : ""}.`
-                : "Validação de presença não habilitada."}
+                ? attendanceInstructions(event.attendanceMode)
+                : "Este evento não terá registro de presença."}
             </p>
           </section>
           {canManage && event.status === "ACTIVE" && (
@@ -1093,22 +1160,28 @@ export function EventDetailPage() {
                 ) : null}
               </>
             ) : registration?.status === "PENDING_PAYMENT" ? (
-              <>
-                <p className="registration-pending" role="status">
-                  Aguardando confirmação do pagamento Pix (Saga).
-                </p>
-                {registration.paymentDeadlineAt && (
-                  <p>Prazo para pagamento: {dateTime(registration.paymentDeadlineAt)}.</p>
-                )}
-                <button
-                  className="button button-secondary"
-                  type="button"
-                  disabled={registrationBusy}
-                  onClick={() => void handleRefreshRegistration()}
-                >
-                  {registrationBusy ? "Atualizando…" : "Atualizar status"}
-                </button>
-              </>
+              <div className="payment-status-panel" role="status">
+                <span className="payment-status-icon" aria-hidden="true">
+                  <Icon name="clock" width="20" height="20" />
+                </span>
+                <div className="payment-status-copy">
+                  <strong>Pagamento em processamento</strong>
+                  <p>Seu lugar está reservado enquanto aguardamos a confirmação do Pix.</p>
+                  {registration.paymentDeadlineAt && (
+                    <p className="payment-status-deadline">
+                      Pague até <strong>{dateTime(registration.paymentDeadlineAt)}</strong>.
+                    </p>
+                  )}
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    disabled={registrationBusy}
+                    onClick={() => void handleRefreshRegistration()}
+                  >
+                    {registrationBusy ? "Atualizando…" : "Atualizar status"}
+                  </button>
+                </div>
+              </div>
             ) : (
               <>
                 {registration?.status === "CANCELLED_BY_USER" && (
@@ -1262,7 +1335,7 @@ export function EventDetailPage() {
           <span className="eyebrow">Evento</span>
           <p>Identificador do evento</p>
           <code>{event.id}</code>
-          <p>Organizador: {organizerLabel(event.organizerType)}</p>
+          <p>Organizador: {organizerTypeLabel(event.organizerType)}</p>
         </aside>
       </div>
     </div>

@@ -75,7 +75,7 @@ export function AcademicUnitsPage() {
             <h2 id="academic-units-title">Unidades acadêmicas</h2>
             {!loading && !error && <p>{totalElements} unidades</p>}
           </div>
-          <Link className="section-anchor-link" to="/departamentos">
+          <Link className="section-anchor-link" to="/perfis?tipo=departamentos">
             Ver departamentos
           </Link>
         </div>

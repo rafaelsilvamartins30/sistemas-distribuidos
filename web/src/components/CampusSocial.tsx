@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { getSemesters } from "../services/campus";
+import { campusProfilePath } from "../utils/profileRoutes";
 import {
   CampusSocialApiError,
   createCommunityComment,
@@ -22,15 +23,21 @@ import {
 } from "../services/campusSocial";
 
 function profilePath(type: InstitutionalProfileType, id: string): string {
-  if (type === "UNIVERSITY") return "/universidade";
-  if (type === "ACADEMIC_UNIT") return `/unidades/${encodeURIComponent(id)}`;
-  if (type === "DEPARTMENT") return `/departamentos/${encodeURIComponent(id)}`;
-  if (type === "ACADEMIC_ENTITY") return `/entidades/${encodeURIComponent(id)}`;
-  return `/comunidades/${encodeURIComponent(id)}`;
+  return campusProfilePath(type, id);
 }
 
 function displayDate(value: string): string {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function initials(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toLocaleUpperCase("pt-BR");
 }
 
 function errorText(error: unknown): string {
@@ -40,6 +47,92 @@ function errorText(error: unknown): string {
   if (error instanceof CampusSocialApiError && error.status === 409)
     return "Esta ação já foi realizada ou não está mais disponível.";
   return "Não foi possível concluir a ação. Tente novamente.";
+}
+
+type SocialPostKind = "POST" | "POLL";
+
+function SocialDialog({
+  id,
+  open,
+  title,
+  description,
+  onClose,
+  children,
+}: {
+  id: string;
+  open: boolean;
+  title: string;
+  description: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (open && !dialog.open) dialog.showModal();
+    if (!open && dialog.open) dialog.close();
+  }, [open]);
+
+  return (
+    <dialog
+      aria-labelledby={`${id}-title`}
+      className="social-composer-dialog"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      onClose={onClose}
+      ref={dialogRef}
+    >
+      <header>
+        <div>
+          <p className="eyebrow">Campus</p>
+          <h2 id={`${id}-title`}>{title}</h2>
+          <p>{description}</p>
+        </div>
+        <button className="dialog-close" type="button" aria-label="Fechar" onClick={onClose}>
+          ×
+        </button>
+      </header>
+      {children}
+    </dialog>
+  );
+}
+
+function SocialPostKindPicker({
+  value,
+  onChange,
+}: {
+  value: SocialPostKind;
+  onChange: (next: SocialPostKind) => void;
+}) {
+  return (
+    <div className="social-post-kind-picker" role="group" aria-label="Tipo da publicação">
+      <button
+        type="button"
+        aria-pressed={value === "POST"}
+        className={value === "POST" ? "is-selected" : ""}
+        onClick={() => onChange("POST")}
+      >
+        <strong>Publicação</strong>
+        <span>Compartilhe um aviso ou novidade.</span>
+      </button>
+      <button
+        type="button"
+        aria-pressed={value === "POLL"}
+        className={value === "POLL" ? "is-selected" : ""}
+        onClick={() => onChange("POLL")}
+      >
+        <strong>Enquete</strong>
+        <span>Faça uma pergunta para a comunidade.</span>
+      </button>
+    </div>
+  );
 }
 
 function useSemesterNames(token: string, currentTerm: string): string[] {
@@ -193,15 +286,29 @@ function PostCard({
   const source = post.postType === "OFFICIAL" ? post.owner : post.community;
   const sourceType = post.postType === "OFFICIAL" ? post.owner.type : "COMMUNITY";
   const sourceId = post.postType === "OFFICIAL" ? post.owner.id : post.community.id;
+  const isCommunityPost = post.postType === "COMMUNITY_SPACE";
   return (
     <article className="campus-post-card">
-      <header>
-        <div>
-          <Link to={profilePath(sourceType, sourceId)}>{source.name}</Link>
-          <small>
-            {post.authorName} · {displayDate(post.createdAt)}
-          </small>
-        </div>
+      <header className="social-post-header">
+        <span className="social-post-avatar" aria-hidden="true">
+          {initials(isCommunityPost ? post.authorName : source.name)}
+        </span>
+        {isCommunityPost ? (
+          <div>
+            <strong className="social-post-author">{post.authorName}</strong>
+            <small className="social-post-community-context">
+              Na comunidade <Link to={profilePath(sourceType, sourceId)}>{source.name}</Link> ·{" "}
+              {displayDate(post.createdAt)}
+            </small>
+          </div>
+        ) : (
+          <div>
+            <Link to={profilePath(sourceType, sourceId)}>{source.name}</Link>
+            <small>
+              {post.authorName} · {displayDate(post.createdAt)}
+            </small>
+          </div>
+        )}
         {post.postType === "OFFICIAL" && <span>{post.term}</span>}
       </header>
       {post.body && <p className="campus-post-body">{post.body}</p>}
@@ -214,36 +321,26 @@ function PostCard({
       {post.availableUntil && (
         <small className="campus-post-expiry">Disponível até {displayDate(post.availableUntil)}</small>
       )}
-      {post.postType === "COMMUNITY_SPACE" && <small>{post.commentsCount} comentários</small>}
     </article>
   );
 }
 
-export function FollowedFeed({ token, currentTerm }: { token: string; currentTerm: string }) {
-  const semesterNames = useSemesterNames(token, currentTerm);
-  const [term, setTerm] = useState(currentTerm);
-  const [draftTerm, setDraftTerm] = useState(currentTerm);
-  const [result, setResult] = useState<CampusPage<FeedPost> | null>(null);
+export function FollowedFeed({ token }: { token: string }) {
+  const [result, setResult] = useState<CampusPage<FeedPost | CommunitySpacePost> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (term || semesterNames.length === 0) return;
-    setTerm(semesterNames[0]);
-    setDraftTerm(semesterNames[0]);
-  }, [semesterNames, term]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      setResult(await getCampusFeed(token, term));
+      setResult(await getCampusFeed(token));
     } catch {
       setError("Não foi possível carregar o mural de quem você segue.");
     } finally {
       setLoading(false);
     }
-  }, [term, token]);
+  }, [token]);
 
   useEffect(() => void load(), [load]);
 
@@ -261,33 +358,10 @@ export function FollowedFeed({ token, currentTerm }: { token: string; currentTer
     <section className="campus-social-panel" aria-labelledby="followed-feed-title">
       <header className="campus-social-heading">
         <div>
-          <p className="eyebrow">Mural da sua rede</p>
-          <h2 id="followed-feed-title">Publicações</h2>
-          <p>Informações publicadas pelos perfis que você segue.</p>
+          <p className="eyebrow">Seu feed</p>
+          <h2 id="followed-feed-title">Publicações e conversas</h2>
+          <p>Publicações institucionais e posts das comunidades que você segue, em ordem cronológica.</p>
         </div>
-        <form
-          className="campus-term-filter"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setTerm(draftTerm.trim());
-          }}
-        >
-          <label htmlFor="feed-term">Semestre</label>
-          <select id="feed-term" value={draftTerm} onChange={(event) => setDraftTerm(event.target.value)}>
-            {semesterNames.length ? (
-              semesterNames.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))
-            ) : (
-              <option value="">Semestre indisponível</option>
-            )}
-          </select>
-          <button className="button button-secondary" type="submit">
-            Filtrar
-          </button>
-        </form>
       </header>
       {loading ? (
         <p className="notice" role="status">
@@ -299,15 +373,17 @@ export function FollowedFeed({ token, currentTerm }: { token: string; currentTer
         </p>
       ) : result?.items.length ? (
         <div className="campus-social-list">
-          {result.items.map((post) => (
-            <PostCard key={post.id} post={post} token={token} onPollUpdate={(poll) => updatePoll(post.id, poll)} />
-          ))}
+          {[...result.items]
+            .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+            .map((post) => (
+              <PostCard key={post.id} post={post} token={token} onPollUpdate={(poll) => updatePoll(post.id, poll)} />
+            ))}
         </div>
       ) : (
         <div className="empty-state">
-          <strong>Nenhuma publicação neste semestre</strong>
-          <span>Siga a universidade, departamentos, unidades, entidades e comunidades para montar seu mural.</span>
-          <Link className="text-link" to="/comunidades">
+          <strong>Nada novo por enquanto</strong>
+          <span>Publicações institucionais e novas conversas das comunidades que você segue aparecerão aqui.</span>
+          <Link className="text-link" to="/perfis?tipo=comunidades">
             Explorar perfis institucionais
           </Link>
         </div>
@@ -320,12 +396,14 @@ export function InstitutionalPostsPanel({
   token,
   type,
   profileId,
+  profileName = "UNIR",
   currentTerm,
   canManage,
 }: {
   token: string;
   type: InstitutionalProfileType;
   profileId: string;
+  profileName?: string;
   currentTerm: string;
   canManage: boolean;
 }) {
@@ -341,6 +419,8 @@ export function InstitutionalPostsPanel({
   const [pollQuestion, setPollQuestion] = useState("");
   const [pollOptions, setPollOptions] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [postKind, setPostKind] = useState<SocialPostKind>("POST");
 
   useEffect(() => {
     if (term || semesterNames.length === 0) return;
@@ -368,23 +448,26 @@ export function InstitutionalPostsPanel({
       .split("\n")
       .map((option) => option.trim())
       .filter(Boolean);
-    if (pollQuestion.trim() && options.length < 2) {
+    if (postKind === "POLL" && (!pollQuestion.trim() || options.length < 2)) {
       setError("Inclua pelo menos duas opções para publicar uma enquete.");
       return;
     }
+    if (postKind === "POST" && !body.trim()) return;
     setPublishing(true);
     setError("");
     try {
       await createInstitutionalPost(token, type, profileId, {
-        body,
+        body: body.trim(),
         term,
         ...(availableUntil ? { availableUntil: new Date(availableUntil).toISOString() } : {}),
-        ...(pollQuestion.trim() ? { poll: { question: pollQuestion.trim(), options } } : {}),
+        ...(postKind === "POLL" ? { poll: { question: pollQuestion.trim(), options } } : {}),
       });
       setBody("");
       setPollQuestion("");
       setPollOptions("");
       setAvailableUntil("");
+      setPostKind("POST");
+      setComposerOpen(false);
       await load();
     } catch (requestError) {
       setError(errorText(requestError));
@@ -405,83 +488,141 @@ export function InstitutionalPostsPanel({
           <h2 id="profile-posts-title">Publicações</h2>
           <p>Os avisos ficam no histórico do semestre, mesmo após o prazo de exibição.</p>
         </div>
-        <form
-          className="campus-term-filter"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setTerm(draftTerm.trim());
-          }}
-        >
-          <label htmlFor={`profile-term-${profileId}`}>Semestre</label>
-          <select
-            id={`profile-term-${profileId}`}
-            value={draftTerm}
-            onChange={(event) => setDraftTerm(event.target.value)}
-          >
-            {semesterNames.length ? (
-              semesterNames.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))
-            ) : (
-              <option value="">Semestre indisponível</option>
-            )}
-          </select>
-          <button className="button button-secondary" type="submit">
-            Filtrar
-          </button>
-        </form>
+        <div className="campus-term-filter">
+          <label className="campus-term-field" htmlFor={`profile-term-${profileId}`}>
+            <span>Semestre</span>
+            <select
+              id={`profile-term-${profileId}`}
+              value={draftTerm}
+              onChange={(event) => {
+                setDraftTerm(event.target.value);
+                setTerm(event.target.value.trim());
+              }}
+            >
+              {semesterNames.length ? (
+                semesterNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))
+              ) : (
+                <option value="">Semestre indisponível</option>
+              )}
+            </select>
+          </label>
+        </div>
       </header>
       <label className="campus-history-toggle">
         <input type="checkbox" checked={includeExpired} onChange={(event) => setIncludeExpired(event.target.checked)} />
         Incluir publicações com prazo encerrado
       </label>
       {canManage && (
-        <form className="campus-post-composer" onSubmit={(event) => void publish(event)}>
-          <label className="field">
-            <span>Nova publicação oficial</span>
-            <textarea
-              rows={3}
-              maxLength={10000}
-              value={body}
-              onChange={(event) => setBody(event.target.value)}
-              placeholder="Escreva um aviso ou informação"
-            />
-          </label>
-          <label className="field">
-            <span>Enquete (opcional)</span>
-            <input
-              value={pollQuestion}
-              maxLength={500}
-              onChange={(event) => setPollQuestion(event.target.value)}
-              placeholder="Pergunta da enquete"
-            />
-          </label>
-          {pollQuestion && (
-            <label className="field">
-              <span>Opções, uma por linha</span>
-              <textarea rows={3} value={pollOptions} onChange={(event) => setPollOptions(event.target.value)} />
-            </label>
-          )}
-          <label className="field">
-            <span>Disponível até (opcional)</span>
-            <input
-              type="datetime-local"
-              value={availableUntil}
-              onChange={(event) => setAvailableUntil(event.target.value)}
-            />
-          </label>
+        <>
           <button
-            className="button button-primary"
-            disabled={publishing || (!body.trim() && !pollQuestion.trim())}
-            type="submit"
+            className="social-composer-trigger"
+            type="button"
+            onClick={() => {
+              setError("");
+              setComposerOpen(true);
+            }}
           >
-            {publishing ? "Publicando…" : "Publicar"}
+            <span className="social-compose-avatar" aria-hidden="true">
+              {initials(profileName)}
+            </span>
+            <span>Compartilhe uma novidade com {profileName}</span>
+            <span className="social-compose-action">Criar publicação</span>
           </button>
-        </form>
+          <SocialDialog
+            id={`institutional-composer-${profileId}`}
+            open={composerOpen}
+            title="Criar publicação"
+            description={`Publique um aviso ou uma enquete como ${profileName}.`}
+            onClose={() => setComposerOpen(false)}
+          >
+            <form className="social-composer-form" onSubmit={(event) => void publish(event)}>
+              <SocialPostKindPicker
+                value={postKind}
+                onChange={(next) => {
+                  setPostKind(next);
+                  setError("");
+                }}
+              />
+              {postKind === "POST" ? (
+                <label className="field">
+                  <span>Texto da publicação</span>
+                  <textarea
+                    required
+                    rows={5}
+                    maxLength={10000}
+                    value={body}
+                    onChange={(event) => setBody(event.target.value)}
+                    placeholder="Escreva um aviso ou informação"
+                  />
+                </label>
+              ) : (
+                <>
+                  <label className="field">
+                    <span>Contexto (opcional)</span>
+                    <textarea
+                      rows={3}
+                      maxLength={10000}
+                      value={body}
+                      onChange={(event) => setBody(event.target.value)}
+                      placeholder="Explique o assunto da enquete"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Pergunta</span>
+                    <input
+                      required
+                      maxLength={500}
+                      value={pollQuestion}
+                      onChange={(event) => setPollQuestion(event.target.value)}
+                      placeholder="O que você quer perguntar?"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Opções, uma por linha</span>
+                    <textarea
+                      required
+                      rows={3}
+                      value={pollOptions}
+                      onChange={(event) => setPollOptions(event.target.value)}
+                      placeholder={"Primeira opção\nSegunda opção"}
+                    />
+                  </label>
+                </>
+              )}
+              <label className="field">
+                <span>Disponível até (opcional)</span>
+                <input
+                  type="datetime-local"
+                  value={availableUntil}
+                  onChange={(event) => setAvailableUntil(event.target.value)}
+                />
+              </label>
+              {error && (
+                <p className="notice notice-error" role="alert">
+                  {error}
+                </p>
+              )}
+              <div className="social-composer-actions">
+                <button className="button button-secondary" type="button" onClick={() => setComposerOpen(false)}>
+                  Cancelar
+                </button>
+                <button
+                  className="button button-primary"
+                  disabled={publishing || (postKind === "POST" && !body.trim())}
+                  type="submit"
+                >
+                  {publishing ? "Publicando…" : "Publicar"}
+                </button>
+              </div>
+            </form>
+          </SocialDialog>
+        </>
       )}
-      {error && (
+      {error && !composerOpen && (
         <p className="notice notice-error" role="alert">
           {error}
         </p>
@@ -508,10 +649,12 @@ export function InstitutionalPostsPanel({
 function CommunityPostThread({
   token,
   post,
+  viewerName,
   onChanged,
 }: {
   token: string;
   post: CommunitySpacePost;
+  viewerName: string;
   onChanged: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -520,13 +663,17 @@ function CommunityPostThread({
   const [replyTo, setReplyTo] = useState<CampusComment | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [commentsLoading, setCommentsLoading] = useState(false);
 
   async function loadComments() {
+    setCommentsLoading(true);
     try {
       setComments((await getCommunityComments(token, post.id)).items);
       setError("");
     } catch (requestError) {
       setError(errorText(requestError));
+    } finally {
+      setCommentsLoading(false);
     }
   }
 
@@ -551,48 +698,70 @@ function CommunityPostThread({
   return (
     <div className="campus-comment-thread">
       <button
-        className="text-link"
+        aria-expanded={open}
+        className="social-comment-toggle"
         type="button"
         onClick={() => {
           setOpen((value) => !value);
           if (!open) void loadComments();
         }}
       >
-        {open ? "Fechar comentários" : `Abrir comentários (${post.commentsCount})`}
+        <span>{open ? "Ocultar comentários" : "Comentar"}</span>
+        <span className="social-comment-count">{post.commentsCount}</span>
       </button>
       {open && (
-        <div className="campus-comment-list">
-          {comments.map((comment) => (
-            <article
-              className={comment.parentCommentId ? "campus-comment is-reply" : "campus-comment"}
-              key={comment.id}
-            >
-              <strong>{comment.authorName}</strong>
-              <p>{comment.body}</p>
-              <button className="text-link" type="button" onClick={() => setReplyTo(comment)}>
-                Responder
-              </button>
-            </article>
-          ))}
+        <div className="campus-comment-panel">
+          {commentsLoading ? (
+            <p className="social-comment-loading" role="status">
+              Carregando comentários…
+            </p>
+          ) : null}
+          <div className="campus-comment-list">
+            {comments.map((comment) => (
+              <article
+                className={comment.parentCommentId ? "campus-comment is-reply" : "campus-comment"}
+                key={comment.id}
+              >
+                <span className="social-comment-avatar" aria-hidden="true">
+                  {initials(comment.authorName || "U")}
+                </span>
+                <div className="campus-comment-content">
+                  <strong>{comment.authorName}</strong>
+                  <p>{comment.body}</p>
+                  <button className="social-comment-reply" type="button" onClick={() => setReplyTo(comment)}>
+                    Responder
+                  </button>
+                </div>
+              </article>
+            ))}
+            {!commentsLoading && comments.length === 0 && !error && (
+              <p className="social-comment-loading">Seja a primeira pessoa a comentar.</p>
+            )}
+          </div>
           <form className="campus-comment-composer" onSubmit={(event) => void submit(event)}>
             {replyTo && (
-              <small>
-                Respondendo a {replyTo.authorName}{" "}
-                <button type="button" onClick={() => setReplyTo(null)}>
+              <div className="social-reply-context">
+                Respondendo a <strong>{replyTo.authorName}</strong>
+                <button className="social-comment-reply" type="button" onClick={() => setReplyTo(null)}>
                   Cancelar
                 </button>
-              </small>
+              </div>
             )}
-            <textarea
-              rows={2}
-              maxLength={5000}
-              value={body}
-              onChange={(event) => setBody(event.target.value)}
-              placeholder="Escreva um comentário"
-            />
-            <button className="button button-secondary" disabled={busy || !body.trim()} type="submit">
-              {busy ? "Enviando…" : "Comentar"}
-            </button>
+            <div className="social-comment-input-row">
+              <span className="social-comment-avatar" aria-hidden="true">
+                {initials(viewerName)}
+              </span>
+              <textarea
+                rows={2}
+                maxLength={5000}
+                value={body}
+                onChange={(event) => setBody(event.target.value)}
+                placeholder={replyTo ? `Responder a ${replyTo.authorName}` : "Escreva um comentário"}
+              />
+              <button className="button button-primary" disabled={busy || !body.trim()} type="submit">
+                {busy ? "Enviando…" : "Enviar"}
+              </button>
+            </div>
           </form>
           {error && (
             <p className="notice notice-error" role="alert">
@@ -608,10 +777,14 @@ function CommunityPostThread({
 export function CommunitySpacePanel({
   token,
   communityId,
+  communityName = "comunidade",
+  viewerName = "Você",
   following,
 }: {
   token: string;
   communityId: string;
+  communityName?: string;
+  viewerName?: string;
   following: boolean;
 }) {
   const [posts, setPosts] = useState<CommunitySpacePost[]>([]);
@@ -623,6 +796,8 @@ export function CommunitySpacePanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [postKind, setPostKind] = useState<SocialPostKind>("POST");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -643,23 +818,25 @@ export function CommunitySpacePanel({
       .split("\n")
       .map((option) => option.trim())
       .filter(Boolean);
-    if (pollQuestion.trim() && options.length < 2) {
+    if (postKind === "POLL" && (!pollQuestion.trim() || options.length < 2)) {
       setError("Inclua pelo menos duas opções para publicar uma enquete.");
       return;
     }
-    if (!body.trim() && !pollQuestion.trim()) return;
+    if (postKind === "POST" && !body.trim()) return;
     setBusy(true);
     setError("");
     try {
       await createCommunityPost(token, communityId, {
         body: body.trim(),
         ...(availableUntil ? { availableUntil: new Date(availableUntil).toISOString() } : {}),
-        ...(pollQuestion.trim() ? { poll: { question: pollQuestion.trim(), options } } : {}),
+        ...(postKind === "POLL" ? { poll: { question: pollQuestion.trim(), options } } : {}),
       });
       setBody("");
       setAvailableUntil("");
       setPollQuestion("");
       setPollOptions("");
+      setPostKind("POST");
+      setComposerOpen(false);
       setReload((value) => value + 1);
     } catch (requestError) {
       setError(errorText(requestError));
@@ -682,52 +859,114 @@ export function CommunitySpacePanel({
         </div>
       </header>
       {following ? (
-        <form className="campus-post-composer" onSubmit={(event) => void submit(event)}>
-          <label className="field">
-            <span>Nova publicação</span>
-            <textarea
-              rows={3}
-              maxLength={10000}
-              value={body}
-              onChange={(event) => setBody(event.target.value)}
-              placeholder="Compartilhe algo com a comunidade"
-            />
-          </label>
-          <label className="field">
-            <span>Enquete (opcional)</span>
-            <input
-              value={pollQuestion}
-              maxLength={500}
-              onChange={(event) => setPollQuestion(event.target.value)}
-              placeholder="Pergunta da enquete"
-            />
-          </label>
-          {pollQuestion && (
-            <label className="field">
-              <span>Opções, uma por linha</span>
-              <textarea rows={3} value={pollOptions} onChange={(event) => setPollOptions(event.target.value)} />
-            </label>
-          )}
-          <label className="field">
-            <span>Disponível até (opcional)</span>
-            <input
-              type="datetime-local"
-              value={availableUntil}
-              onChange={(event) => setAvailableUntil(event.target.value)}
-            />
-          </label>
+        <>
           <button
-            className="button button-primary"
-            disabled={busy || (!body.trim() && !pollQuestion.trim())}
-            type="submit"
+            className="social-composer-trigger"
+            type="button"
+            onClick={() => {
+              setError("");
+              setComposerOpen(true);
+            }}
           >
-            {busy ? "Publicando…" : "Publicar"}
+            <span className="social-compose-avatar" aria-hidden="true">
+              {initials(viewerName)}
+            </span>
+            <span>Compartilhe algo com a comunidade</span>
+            <span className="social-compose-action">Criar publicação</span>
           </button>
-        </form>
+          <SocialDialog
+            id={`community-composer-${communityId}`}
+            open={composerOpen}
+            title="Criar publicação"
+            description={`Compartilhe uma novidade ou faça uma pergunta para as pessoas de ${communityName}.`}
+            onClose={() => setComposerOpen(false)}
+          >
+            <form className="social-composer-form" onSubmit={(event) => void submit(event)}>
+              <SocialPostKindPicker
+                value={postKind}
+                onChange={(next) => {
+                  setPostKind(next);
+                  setError("");
+                }}
+              />
+              {postKind === "POST" ? (
+                <label className="field">
+                  <span>Texto da publicação</span>
+                  <textarea
+                    required
+                    rows={5}
+                    maxLength={10000}
+                    value={body}
+                    onChange={(event) => setBody(event.target.value)}
+                    placeholder="O que você quer compartilhar?"
+                  />
+                </label>
+              ) : (
+                <>
+                  <label className="field">
+                    <span>Contexto (opcional)</span>
+                    <textarea
+                      rows={3}
+                      maxLength={10000}
+                      value={body}
+                      onChange={(event) => setBody(event.target.value)}
+                      placeholder="Explique o assunto da enquete"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Pergunta</span>
+                    <input
+                      required
+                      maxLength={500}
+                      value={pollQuestion}
+                      onChange={(event) => setPollQuestion(event.target.value)}
+                      placeholder="O que você quer perguntar?"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Opções, uma por linha</span>
+                    <textarea
+                      required
+                      rows={3}
+                      value={pollOptions}
+                      onChange={(event) => setPollOptions(event.target.value)}
+                      placeholder={"Primeira opção\nSegunda opção"}
+                    />
+                  </label>
+                </>
+              )}
+              <label className="field">
+                <span>Disponível até (opcional)</span>
+                <input
+                  type="datetime-local"
+                  value={availableUntil}
+                  onChange={(event) => setAvailableUntil(event.target.value)}
+                />
+              </label>
+              {error && (
+                <p className="notice notice-error" role="alert">
+                  {error}
+                </p>
+              )}
+              <div className="social-composer-actions">
+                <button className="button button-secondary" type="button" onClick={() => setComposerOpen(false)}>
+                  Cancelar
+                </button>
+                <button
+                  className="button button-primary"
+                  disabled={busy || (postKind === "POST" && !body.trim())}
+                  type="submit"
+                >
+                  {busy ? "Publicando…" : "Publicar"}
+                </button>
+              </div>
+            </form>
+          </SocialDialog>
+        </>
       ) : (
         <p className="notice">Siga esta comunidade para publicar, comentar e responder.</p>
       )}
-      {error && (
+      {error && !composerOpen && (
         <p className="notice notice-error" role="alert">
           {error}
         </p>
@@ -742,7 +981,12 @@ export function CommunitySpacePanel({
             <div className="campus-community-post" key={post.id}>
               <PostCard post={post} token={token} onPollUpdate={(poll) => updatePoll(post.id, poll)} />
               {following && (
-                <CommunityPostThread token={token} post={post} onChanged={() => setReload((value) => value + 1)} />
+                <CommunityPostThread
+                  token={token}
+                  post={post}
+                  viewerName={viewerName}
+                  onChanged={() => setReload((value) => value + 1)}
+                />
               )}
             </div>
           ))}

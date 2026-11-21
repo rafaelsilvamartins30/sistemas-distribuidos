@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import {
@@ -191,12 +191,15 @@ export function RequestProfileForm({
   token,
   type,
   onCreated,
+  presentation = "inline",
 }: {
   token: string;
   type: "COMMUNITY_CREATION" | "ENTITY_CREATION";
   onCreated?: () => void;
+  presentation?: "inline" | "modal";
 }) {
   const [open, setOpen] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const [departments, setDepartments] = useState<Array<{ id: string; name: string; acronym: string }>>([]);
   const [targetDepartmentId, setTargetDepartmentId] = useState("");
   const [name, setName] = useState("");
@@ -206,6 +209,15 @@ export function RequestProfileForm({
   const [error, setError] = useState("");
   const [sent, setSent] = useState("");
   const [busy, setBusy] = useState(false);
+  const title = type === "COMMUNITY_CREATION" ? "Solicitar uma comunidade" : "Solicitar uma entidade";
+
+  useEffect(() => {
+    if (presentation !== "modal") return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (open && !dialog.open) dialog.showModal();
+    if (!open && dialog.open) dialog.close();
+  }, [open, presentation]);
 
   useEffect(() => {
     if (!open) return;
@@ -240,6 +252,7 @@ export function RequestProfileForm({
       setGeneralInfoMarkdown("");
       setTypeOrCategory("");
       onCreated?.();
+      if (presentation === "modal") setOpen(false);
     } catch {
       setError("Não foi possível enviar o pedido. Revise as informações e tente novamente.");
     } finally {
@@ -247,74 +260,100 @@ export function RequestProfileForm({
     }
   }
 
+  const requestForm = (
+    <form className="campus-post-composer" onSubmit={(event) => void submit(event)}>
+      <p className="campus-request-explanation">
+        O administrador do departamento ou da universidade escolhida analisará o pedido.
+      </p>
+      <label className="field">
+        <span>Enviar para</span>
+        <select value={targetDepartmentId} onChange={(event) => setTargetDepartmentId(event.target.value)}>
+          <option value="">Universidade</option>
+          {departments.map((department) => (
+            <option key={department.id} value={department.id}>
+              {department.name} ({department.acronym})
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        <span>Nome</span>
+        <input required maxLength={255} value={name} onChange={(event) => setName(event.target.value)} />
+      </label>
+      {type === "ENTITY_CREATION" ? (
+        <label className="field">
+          <span>Tipo de entidade</span>
+          <input required value={typeOrCategory} onChange={(event) => setTypeOrCategory(event.target.value)} />
+        </label>
+      ) : (
+        <label className="field">
+          <span>Categoria (opcional)</span>
+          <input value={typeOrCategory} onChange={(event) => setTypeOrCategory(event.target.value)} />
+        </label>
+      )}
+      <label className="field">
+        <span>Descrição</span>
+        <textarea required rows={2} value={description} onChange={(event) => setDescription(event.target.value)} />
+      </label>
+      <label className="field">
+        <span>Informações em Markdown</span>
+        <textarea
+          required
+          rows={4}
+          value={generalInfoMarkdown}
+          onChange={(event) => setGeneralInfoMarkdown(event.target.value)}
+        />
+      </label>
+      {error && (
+        <p className="notice notice-error" role="alert">
+          {error}
+        </p>
+      )}
+      <button className="button button-primary" disabled={busy} type="submit">
+        {busy ? "Enviando…" : "Enviar para aprovação"}
+      </button>
+    </form>
+  );
+
   return (
-    <div className="campus-request-form-wrap">
+    <div className={`campus-request-form-wrap${presentation === "modal" ? " is-modal-trigger" : ""}`}>
       <button className="button button-secondary" type="button" onClick={() => setOpen((value) => !value)}>
-        {open
-          ? "Fechar solicitação"
-          : type === "COMMUNITY_CREATION"
-            ? "Solicitar uma comunidade"
-            : "Solicitar uma entidade"}
+        {presentation === "inline" && open ? "Fechar solicitação" : title}
       </button>
       {sent && (
         <p className="notice notice-success" role="status">
           {sent}
         </p>
       )}
-      {open && (
-        <form className="campus-post-composer" onSubmit={(event) => void submit(event)}>
-          <p className="campus-request-explanation">
-            O administrador do departamento ou da universidade escolhida analisará o pedido.
-          </p>
-          <label className="field">
-            <span>Enviar para</span>
-            <select value={targetDepartmentId} onChange={(event) => setTargetDepartmentId(event.target.value)}>
-              <option value="">Universidade</option>
-              {departments.map((department) => (
-                <option key={department.id} value={department.id}>
-                  {department.name} ({department.acronym})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Nome</span>
-            <input required maxLength={255} value={name} onChange={(event) => setName(event.target.value)} />
-          </label>
-          {type === "ENTITY_CREATION" ? (
-            <label className="field">
-              <span>Tipo de entidade</span>
-              <input required value={typeOrCategory} onChange={(event) => setTypeOrCategory(event.target.value)} />
-            </label>
-          ) : (
-            <label className="field">
-              <span>Categoria (opcional)</span>
-              <input value={typeOrCategory} onChange={(event) => setTypeOrCategory(event.target.value)} />
-            </label>
-          )}
-          <label className="field">
-            <span>Descrição</span>
-            <textarea required rows={2} value={description} onChange={(event) => setDescription(event.target.value)} />
-          </label>
-          <label className="field">
-            <span>Informações em Markdown</span>
-            <textarea
-              required
-              rows={4}
-              value={generalInfoMarkdown}
-              onChange={(event) => setGeneralInfoMarkdown(event.target.value)}
-            />
-          </label>
-          {error && (
-            <p className="notice notice-error" role="alert">
-              {error}
-            </p>
-          )}
-          <button className="button button-primary" disabled={busy} type="submit">
-            {busy ? "Enviando…" : "Enviar para aprovação"}
-          </button>
-        </form>
-      )}
+      {presentation === "modal" ? (
+        <dialog
+          aria-labelledby={`profile-request-title-${type.toLowerCase()}`}
+          className="profile-request-dialog"
+          onCancel={(event) => {
+            event.preventDefault();
+            setOpen(false);
+          }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setOpen(false);
+          }}
+          onClose={() => setOpen(false)}
+          ref={dialogRef}
+        >
+          <header>
+            <div>
+              <p className="eyebrow">Solicitação de perfil</p>
+              <h2 id={`profile-request-title-${type.toLowerCase()}`}>{title}</h2>
+              <p>Preencha os dados básicos. A equipe responsável analisará o pedido.</p>
+            </div>
+            <button className="dialog-close" type="button" aria-label="Fechar" onClick={() => setOpen(false)}>
+              ×
+            </button>
+          </header>
+          {open && requestForm}
+        </dialog>
+      ) : open ? (
+        requestForm
+      ) : null}
     </div>
   );
 }

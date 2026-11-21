@@ -76,6 +76,8 @@ public class SecurityConfiguration {
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/web/events/*")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/web/rag/query")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/v1/web/opportunities", "/api/v1/web/opportunities/*")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/web/opportunities")

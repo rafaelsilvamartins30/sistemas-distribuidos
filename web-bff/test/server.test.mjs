@@ -899,6 +899,60 @@ test("opportunity list and detail forward filters and the bearer token to Engage
   ]);
 });
 
+test("POST /api/v1/web/rag/query forwards the user token and body to AI/RAG", async (t) => {
+  const expected = {
+    question: "Quais eventos de prototipação estão disponíveis?",
+    top_k: 4,
+    use_live_tool: false,
+  };
+  const server = createServer({
+    ragServiceUrl: "http://ai-rag:8090/",
+    fetch: async (url, options) => {
+      assert.equal(url, "http://ai-rag:8090/api/v1/rag/query");
+      assert.equal(options.method, "POST");
+      assert.equal(options.headers.authorization, "Bearer user-access-token");
+      assert.equal(options.headers["content-type"], "application/json");
+      assert.deepEqual(JSON.parse(options.body), expected);
+      return new Response(JSON.stringify({ generation_status: "FALLBACK_RETRIEVAL_ONLY", sources: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  t.after(() => server.close());
+
+  const unauthorized = await server.inject({ method: "POST", url: "/api/v1/web/rag/query", payload: expected });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const response = await server.inject({
+    method: "POST",
+    url: "/api/v1/web/rag/query",
+    headers: { authorization: "Bearer user-access-token" },
+    payload: expected,
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().generation_status, "FALLBACK_RETRIEVAL_ONLY");
+});
+
+test("RAG query reports the downstream service outage", async (t) => {
+  const server = createServer({
+    fetch: async () => {
+      throw new Error("RAG unavailable");
+    },
+  });
+  t.after(() => server.close());
+
+  const response = await server.inject({
+    method: "POST",
+    url: "/api/v1/web/rag/query",
+    headers: { authorization: "Bearer user-access-token" },
+    payload: { question: "Quais eventos?" },
+  });
+
+  assert.equal(response.statusCode, 503);
+  assert.deepEqual(response.json(), { error: "AI/RAG Service unavailable" });
+});
+
 test("sports catalogue list and detail forward approved filters and the bearer token", async (t) => {
   const requested = [];
   const server = createServer({

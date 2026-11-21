@@ -19,6 +19,10 @@ them and persists profiles.
   bearer token and list query to the Engagement Service (`/api/v1/events` and
   `/api/v1/events/{eventId}`), preserving its status, content type, and body.
   Connection failures return `503`.
+- `POST /api/v1/web/rag/query` forwards the original user bearer token and JSON
+  question to AI/RAG (`/api/v1/rag/query`) with a 30-second request deadline.
+  AI/RAG validates the Keycloak signature, issuer, expiry, user client and
+  `USER`/`PLATFORM_ADMIN` role; BFF connection failures return `503`.
 - `GET /api/v1/web/opportunities` and
   `GET /api/v1/web/opportunities/{opportunityId}` forward the bearer token and
   list filters to Engagement, preserving its status, content type, and body.
@@ -62,5 +66,6 @@ pnpm start
 ```
 
 `CAMPUS_URL` defaults to `http://localhost:3000`; `ENGAGEMENT_SERVICE_URL`
-defaults to `http://localhost:8080`. `PORT` defaults to `3000`. Compose sets
-the service URLs to `http://campus:3000` and `http://engagement:8080`.
+defaults to `http://localhost:8080`; `RAG_SERVICE_URL` defaults to
+`http://localhost:8090`. `PORT` defaults to `3000`. Compose sets the service
+URLs to `http://campus:3000` and `http://engagement:8080`.

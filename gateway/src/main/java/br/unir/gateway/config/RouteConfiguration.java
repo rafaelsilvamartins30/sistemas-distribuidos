@@ -56,6 +56,7 @@ public class RouteConfiguration {
                 .route(RequestPredicates.GET("/api/v1/web/events/{eventId}"), HandlerFunctions.http())
                 .route(RequestPredicates.PATCH("/api/v1/web/events/{eventId}"), HandlerFunctions.http())
                 .route(RequestPredicates.DELETE("/api/v1/web/events/{eventId}"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/rag/query"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/opportunities"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/opportunities/publisher-contexts"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/opportunities/managed"), HandlerFunctions.http())

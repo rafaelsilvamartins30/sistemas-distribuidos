@@ -31,12 +31,24 @@ class RagConfig:
     top_k: int = 5
     max_chars_per_doc: int = 1200
     sync_token: str | None = None
+    keycloak_issuer: str = "http://localhost:18080/realms/unir"
+    keycloak_jwks_url: str = "http://localhost:18080/realms/unir/protocol/openid-connect/certs"
+    keycloak_token_url: str = "http://localhost:18080/realms/unir/protocol/openid-connect/token"
+    user_client_ids: frozenset[str] = frozenset({"unir-web"})
+    sync_client_id: str = "unir-rag-sync"
+    sync_client_secret: str | None = None
     http_timeout_seconds: float = 5.0
 
     @classmethod
     def from_env(cls) -> RagConfig:
         gemini_key = os.getenv("GEMINI_API_KEY", "").strip() or None
         sync_token = os.getenv("RAG_SYNC_TOKEN", "").strip() or None
+        sync_client_secret = os.getenv("RAG_SYNC_CLIENT_SECRET", "").strip() or None
+        user_client_ids = frozenset(
+            client_id.strip()
+            for client_id in os.getenv("RAG_USER_CLIENT_IDS", "unir-web").split(",")
+            if client_id.strip()
+        )
         return cls(
             engagement_url=os.getenv("ENGAGEMENT_URL", "http://localhost:18085").rstrip("/"),
             qdrant_url=os.getenv("QDRANT_URL", "http://localhost:16333").strip(),
@@ -55,6 +67,20 @@ class RagConfig:
             top_k=max(1, min(8, int(os.getenv("RAG_TOP_K", "5")))),
             max_chars_per_doc=max(200, int(os.getenv("RAG_MAX_CHARS_PER_DOC", "1200"))),
             sync_token=sync_token,
+            keycloak_issuer=os.getenv(
+                "KEYCLOAK_ISSUER_URI", "http://localhost:18080/realms/unir"
+            ).rstrip("/"),
+            keycloak_jwks_url=os.getenv(
+                "KEYCLOAK_JWK_SET_URI",
+                "http://localhost:18080/realms/unir/protocol/openid-connect/certs",
+            ).strip(),
+            keycloak_token_url=os.getenv(
+                "KEYCLOAK_TOKEN_URL",
+                "http://localhost:18080/realms/unir/protocol/openid-connect/token",
+            ).strip(),
+            user_client_ids=user_client_ids,
+            sync_client_id=os.getenv("RAG_SYNC_CLIENT_ID", "unir-rag-sync").strip(),
+            sync_client_secret=sync_client_secret,
             http_timeout_seconds=float(os.getenv("ENGAGEMENT_HTTP_TIMEOUT_SECONDS", "5.0")),
         )
 

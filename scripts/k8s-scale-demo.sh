@@ -8,6 +8,14 @@ export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 NAMESPACE="unir"
 INGRESS_URL="http://localhost:${UNIR_K8S_PORT:-18080}"
 
+restore_single_web_bff_replica() {
+  if kubectl -n "$NAMESPACE" get deployment/web-bff >/dev/null 2>&1; then
+    kubectl -n "$NAMESPACE" scale deployment/web-bff --replicas=1 >/dev/null || true
+    kubectl -n "$NAMESPACE" rollout status deployment/web-bff --timeout=120s >/dev/null || true
+  fi
+}
+trap restore_single_web_bff_replica EXIT
+
 obtain_token() {
   python3 - "$ROOT" "$INGRESS_URL" <<'PY'
 import json

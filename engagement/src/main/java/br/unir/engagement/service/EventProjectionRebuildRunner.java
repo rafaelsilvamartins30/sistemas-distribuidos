@@ -1,5 +1,6 @@
 package br.unir.engagement.service;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -17,6 +18,7 @@ public class EventProjectionRebuildRunner implements ApplicationRunner {
     private final EventProjectionRebuildService rebuildService;
     private final ConfigurableApplicationContext applicationContext;
 
+    @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Spring injects the container-managed application context")
     public EventProjectionRebuildRunner(EventProjectionRebuildService rebuildService,
             ConfigurableApplicationContext applicationContext) {
         this.rebuildService = rebuildService;

@@ -1,303 +1,210 @@
 import { useEffect, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
-import { Icon } from "../components/Icon";
 import { FollowedFeed } from "../components/CampusSocial";
-import { useEventList } from "../hooks/useEventList";
+import { Icon } from "../components/Icon";
 import {
   getAcademicEntities,
+  getAcademicUnits,
   getCommunities,
   getDepartments,
   getUniversity,
+  type AcademicUnit,
   type AcademicEntity,
   type Community,
   type Department,
   type University,
 } from "../services/campus";
+import { campusProfilePath, type CampusProfileType } from "../utils/profileRoutes";
 
 interface WebContext {
   keycloak: Keycloak;
 }
 
-interface HomeCampusData {
-  university: University;
-  departments: Department[];
-  entities: AcademicEntity[];
-  communities: Community[];
+interface HomeProfile {
+  type: CampusProfileType;
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  marker: string;
 }
 
-function eventDay(value: string): string {
-  return new Intl.DateTimeFormat("pt-BR", { day: "2-digit" }).format(new Date(value));
+function typeLabel(value: string): string {
+  const labels: Record<string, string> = {
+    NUCLEO_DE_ESTUDOS: "Núcleo de estudos",
+    EMPRESA_JUNIOR: "Empresa júnior",
+    LIGA_ACADEMICA: "Liga acadêmica",
+  };
+  if (labels[value]) return labels[value];
+  const normalized = value.replaceAll("_", " ").toLocaleLowerCase("pt-BR");
+  return normalized.charAt(0).toLocaleUpperCase("pt-BR") + normalized.slice(1);
 }
 
-function eventMonth(value: string): string {
-  return new Intl.DateTimeFormat("pt-BR", { month: "short" })
-    .format(new Date(value))
-    .replace(".", "")
+function initials(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
     .toLocaleUpperCase("pt-BR");
 }
 
-function eventTime(value: string): string {
-  return new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+function mapHomeProfiles(
+  university: University | null,
+  units: AcademicUnit[],
+  departments: Department[],
+  entities: AcademicEntity[],
+  communities: Community[],
+): HomeProfile[] {
+  return [
+    ...(university
+      ? [
+          {
+            type: "UNIVERSITY" as const,
+            id: university.id,
+            name: university.name,
+            description: university.description,
+            category: university.acronym ? `Universidade · ${university.acronym}` : "Universidade",
+            marker: university.acronym || initials(university.name),
+          },
+        ]
+      : []),
+    ...units.map((unit) => ({
+      type: "ACADEMIC_UNIT" as const,
+      id: unit.id,
+      name: unit.name,
+      description: unit.description,
+      category: `Unidade acadêmica · ${unit.code}`,
+      marker: unit.code || initials(unit.name),
+    })),
+    ...departments.map((department) => ({
+      type: "DEPARTMENT" as const,
+      id: department.id,
+      name: department.name,
+      description: department.description,
+      category: department.acronym ? `Departamento · ${department.acronym}` : "Departamento",
+      marker: department.acronym || initials(department.name),
+    })),
+    ...entities.map((entity) => ({
+      type: "ACADEMIC_ENTITY" as const,
+      id: entity.id,
+      name: entity.name,
+      description: entity.description,
+      category: typeLabel(entity.entityType),
+      marker: initials(entity.name),
+    })),
+    ...communities.map((community) => ({
+      type: "COMMUNITY" as const,
+      id: community.id,
+      name: community.name,
+      description: community.description,
+      category: community.category ? `Comunidade · ${typeLabel(community.category)}` : "Comunidade",
+      marker: initials(community.name),
+    })),
+  ].sort((left, right) => {
+    if (left.type === "UNIVERSITY") return right.type === "UNIVERSITY" ? 0 : -1;
+    if (right.type === "UNIVERSITY") return 1;
+    return left.name.localeCompare(right.name, "pt-BR");
+  });
 }
 
 export function HomePage() {
   const { keycloak } = useOutletContext<WebContext>();
-  const { events, loading: eventsLoading, error: eventsError } = useEventList(keycloak);
-  const [campusData, setCampusData] = useState<HomeCampusData | null>(null);
+  const [profiles, setProfiles] = useState<HomeProfile[]>([]);
   const [campusLoading, setCampusLoading] = useState(true);
   const [campusError, setCampusError] = useState(false);
 
   useEffect(() => {
-    document.title = "UNIR — Início";
+    document.title = "UNIR — Publicações";
     let active = true;
 
-    Promise.all([
+    Promise.allSettled([
       getUniversity(keycloak.token ?? ""),
+      getAcademicUnits(keycloak.token ?? "", 0, 20),
       getDepartments(keycloak.token ?? ""),
       getAcademicEntities(keycloak.token ?? ""),
       getCommunities(keycloak.token ?? ""),
-    ])
-      .then(([university, departments, entities, communities]) => {
-        if (!active) return;
-        setCampusData({
-          university,
-          departments: departments.items,
-          entities: entities.items,
-          communities: communities.items,
-        });
-        setCampusLoading(false);
-      })
-      .catch(() => {
-        if (!active) return;
-        setCampusError(true);
-        setCampusLoading(false);
-      });
+    ]).then(([university, units, departments, entities, communities]) => {
+      if (!active) return;
+      const failed = [university, units, departments, entities, communities].filter(
+        (result) => result.status === "rejected",
+      ).length;
+      setCampusError(failed === 5);
+      setProfiles(
+        mapHomeProfiles(
+          university.status === "fulfilled" ? university.value : null,
+          units.status === "fulfilled" ? units.value.items : [],
+          departments.status === "fulfilled" ? departments.value.items : [],
+          entities.status === "fulfilled" ? entities.value.items : [],
+          communities.status === "fulfilled" ? communities.value.items : [],
+        ),
+      );
+      setCampusLoading(false);
+    });
 
     return () => {
       active = false;
     };
   }, [keycloak]);
 
-  const university = campusData?.university;
-
   return (
     <div className="home-page">
-      <section className="university-hero" id="inicio" aria-labelledby="home-title">
-        <div className="university-hero-copy">
-          <span className="university-label">
-            <span className="university-label-dot" />{" "}
-            {university ? `${university.acronym} · Rede universitária` : "REDE UNIVERSITÁRIA"}
-          </span>
-          <h1 id="home-title">
-            Conheça a <span>{university?.name ?? "UNIR"}</span>
-          </h1>
-          <p className="university-hero-description">
-            {university?.description ?? "Consulte as informações e os espaços cadastrados no Campus."}
-          </p>
-          {university && (
-            <div className="home-user-context">
-              <span>{university.acronym}</span>
-              <span className="context-divider" aria-hidden="true" />
-              <span>Semestre {university.currentTerm}</span>
-            </div>
-          )}
-          <Link className="button button-secondary" to="/universidade">
-            Perfil da universidade
-          </Link>
-        </div>
-        <div className="university-hero-art" aria-hidden="true">
-          <div className="hero-art-orbit hero-art-orbit-one" />
-          <div className="hero-art-orbit hero-art-orbit-two" />
-          <div className="hero-art-card">
-            <span className="hero-art-overline">REDE UNIVERSITÁRIA</span>
-            <strong>{university?.acronym ?? "UNIR"}</strong>
-            <span>{university?.currentTerm ? `Semestre ${university.currentTerm}` : "Campus"}</span>
-          </div>
-          <span className="hero-art-spark hero-art-spark-one">✳</span>
-          <span className="hero-art-spark hero-art-spark-two">✳</span>
-        </div>
-        {university && <span className="university-hero-caption">{university.name}</span>}
-      </section>
+      <div className="home-feed-layout">
+        <section className="home-feed-main" aria-label="Publicações institucionais e conversas das comunidades">
+          <FollowedFeed token={keycloak.token ?? ""} />
+        </section>
 
-      <FollowedFeed token={keycloak.token ?? ""} currentTerm={university?.currentTerm ?? ""} />
-
-      <div className="home-section-grid">
-        <div className="home-main-column">
-          <section className="home-section" aria-labelledby="departments-title">
+        <aside className="home-side-column" aria-label="Explorar o Campus">
+          <section
+            className="home-section home-section-compact home-profiles-section"
+            aria-labelledby="campus-profiles-title"
+          >
             <div className="home-section-heading">
               <div>
-                <p className="home-section-eyebrow">Estrutura universitária</p>
-                <h2 id="departments-title">Departamentos</h2>
+                <p className="eyebrow">Descubra quem seguir</p>
+                <h2 id="campus-profiles-title">Perfis do campus</h2>
               </div>
-              <Link className="section-anchor-link" to="/departamentos">
-                Ver todos <Icon name="arrowUpRight" width="15" height="15" />
-              </Link>
-            </div>
-            {campusLoading ? (
-              <p className="notice" role="status">
-                Carregando dados do Campus…
-              </p>
-            ) : campusError ? (
-              <p className="notice notice-error" role="alert">
-                Não foi possível carregar os dados do Campus.
-              </p>
-            ) : campusData?.departments.length ? (
-              <div className="home-record-list">
-                {campusData.departments.slice(0, 3).map((department) => (
-                  <Link className="home-record-link" key={department.id} to={`/departamentos/${department.id}`}>
-                    <span className="home-record-mark">{department.acronym}</span>
-                    <span>
-                      <strong>{department.name}</strong>
-                      <small>{department.description}</small>
-                    </span>
-                    <Icon name="arrowUpRight" width="15" height="15" />
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <p className="notice">Ainda não há departamentos cadastrados.</p>
-            )}
-          </section>
-
-          <section className="home-section" aria-labelledby="entities-title">
-            <div className="home-section-heading">
-              <div>
-                <p className="home-section-eyebrow">Espaços acadêmicos</p>
-                <h2 id="entities-title">Entidades acadêmicas</h2>
-              </div>
-              <Link className="section-anchor-link" to="/entidades">
+              <Link className="section-anchor-link" to="/perfis" aria-label="Explorar todos os perfis do campus">
                 Explorar <Icon name="arrowUpRight" width="15" height="15" />
               </Link>
             </div>
+            <p className="home-profiles-intro">
+              Universidade, unidades, departamentos, entidades e comunidades em um só lugar.
+            </p>
             {campusLoading ? (
               <p className="notice" role="status">
-                Carregando entidades…
+                Carregando perfis…
               </p>
             ) : campusError ? (
               <p className="notice notice-error" role="alert">
-                Não foi possível carregar as entidades.
+                Não foi possível carregar os perfis.
               </p>
-            ) : campusData?.entities.length ? (
+            ) : profiles.length ? (
               <div className="home-record-list">
-                {campusData.entities.slice(0, 3).map((entity) => (
-                  <Link className="home-record-link" key={entity.id} to={`/entidades/${entity.id}`}>
-                    <span className="home-record-mark">
-                      <Icon name="profile" width="17" height="17" />
-                    </span>
+                {profiles.slice(0, 4).map((profile) => (
+                  <Link
+                    className="home-record-link home-profile-link"
+                    key={`${profile.type}:${profile.id}`}
+                    to={campusProfilePath(profile.type, profile.id)}
+                  >
+                    <span className="home-record-mark">{profile.marker}</span>
                     <span>
-                      <strong>{entity.name}</strong>
-                      <small>
-                        {entity.entityType} · {entity.description}
-                      </small>
+                      <small>{profile.category}</small>
+                      <strong>{profile.name}</strong>
+                      <small className="home-profile-description">{profile.description}</small>
                     </span>
                     <Icon name="arrowUpRight" width="15" height="15" />
                   </Link>
                 ))}
               </div>
             ) : (
-              <p className="notice">Ainda não há entidades acadêmicas cadastradas.</p>
-            )}
-          </section>
-        </div>
-
-        <aside className="home-side-column">
-          <section className="home-section" aria-labelledby="communities-title">
-            <div className="home-section-heading">
-              <div>
-                <p className="home-section-eyebrow">Espaços universitários</p>
-                <h2 id="communities-title">Comunidades</h2>
-              </div>
-              <Link className="section-anchor-link" to="/comunidades">
-                Explorar <Icon name="arrowUpRight" width="15" height="15" />
-              </Link>
-            </div>
-            {campusLoading ? (
-              <p className="notice" role="status">
-                Carregando comunidades…
-              </p>
-            ) : campusError ? (
-              <p className="notice notice-error" role="alert">
-                Não foi possível carregar as comunidades.
-              </p>
-            ) : campusData?.communities.length ? (
-              <div className="home-record-list">
-                {campusData.communities.slice(0, 3).map((community) => (
-                  <Link className="home-record-link" key={community.id} to={`/comunidades/${community.id}`}>
-                    <span className="home-record-mark">
-                      <Icon name="communities" width="17" height="17" />
-                    </span>
-                    <span>
-                      <strong>{community.name}</strong>
-                      <small>
-                        {community.category || "Comunidade"} · {community.description}
-                      </small>
-                    </span>
-                    <Icon name="arrowUpRight" width="15" height="15" />
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <p className="notice">Ainda não há comunidades cadastradas.</p>
-            )}
-          </section>
-
-          <section className="home-section" id="eventos" aria-labelledby="events-title">
-            <div className="home-section-heading">
-              <div>
-                <p className="home-section-eyebrow">Agenda</p>
-                <h2 id="events-title">Próximos eventos</h2>
-              </div>
-              <Link className="section-anchor-link" to="/eventos">
-                Ver eventos <Icon name="arrowUpRight" width="15" height="15" />
-              </Link>
-            </div>
-            {eventsLoading ? (
-              <p className="notice" role="status">
-                Carregando eventos…
-              </p>
-            ) : eventsError ? (
-              <p className="notice notice-error" role="alert">
-                Não foi possível carregar os eventos.
-              </p>
-            ) : events.length ? (
-              <div className="event-list">
-                {events.slice(0, 3).map((event) => (
-                  <article className="event-row" key={event.id}>
-                    <div className="event-date">
-                      <strong>{eventDay(event.startsAt)}</strong>
-                      <span>{eventMonth(event.startsAt)}</span>
-                    </div>
-                    <div className="event-details">
-                      <div className="event-title-line">
-                        <h3>
-                          <Link to={`/eventos/${event.id}`}>{event.title}</Link>
-                        </h3>
-                      </div>
-                      <p>{event.category}</p>
-                      <div className="event-meta">
-                        <span>
-                          <Icon name="calendar" width="14" height="14" /> {eventTime(event.startsAt)}
-                        </span>
-                        <span>
-                          <Icon name="pin" width="14" height="14" /> {event.location}
-                        </span>
-                      </div>
-                    </div>
-                    <Icon className="event-arrow" name="arrowUpRight" width="17" height="17" />
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <p className="notice">Ainda não há eventos publicados.</p>
+              <p className="notice">Nenhum perfil cadastrado no campus.</p>
             )}
           </section>
         </aside>
       </div>
-      <footer className="home-footer">
-        <span>{university ? `${university.acronym} · ${university.name}` : "UNIR · Rede universitária"}</span>
-        <Link to="/perfil">Meu perfil</Link>
-      </footer>
     </div>
   );
 }

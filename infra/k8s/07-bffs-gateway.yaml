@@ -42,6 +42,11 @@ spec:
                 configMapKeyRef:
                   name: unir-common-config
                   key: ACCESS_SERVICE_URL
+            - name: RAG_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: RAG_SERVICE_URL
           readinessProbe:
             httpGet:
               path: /health

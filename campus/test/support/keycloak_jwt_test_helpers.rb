@@ -70,10 +70,14 @@ module KeycloakJwtTestHelpers
     end
   end
 
-  def bearer_headers(subject: SUBJECT, email: 'ana@unir.br', issuer: ISSUER, expires_at: 5.minutes.from_now,
-                     roles: [])
-    claims = { iss: issuer, sub: subject, exp: expires_at.to_i, email: email, email_verified: true,
-               realm_access: { roles: roles } }.compact
+  def bearer_headers(subject: SUBJECT, **options)
+    claims = {
+      iss: options.fetch(:issuer, ISSUER), sub: subject,
+      exp: options.fetch(:expires_at, 5.minutes.from_now).to_i,
+      email: options.fetch(:email, 'ana@unir.br'), email_verified: true,
+      name: options[:name], preferred_username: options[:preferred_username],
+      realm_access: { roles: options.fetch(:roles, []) }
+    }.compact
     token = JWT.encode(claims, PRIVATE_KEY, 'RS256', kid: KEY_ID)
     { 'Authorization' => "Bearer #{token}" }
   end

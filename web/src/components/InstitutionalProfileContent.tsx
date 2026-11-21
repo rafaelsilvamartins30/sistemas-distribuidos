@@ -145,15 +145,12 @@ export function InstitutionalLinks({ links }: { links: unknown[] }) {
   );
 }
 
-export type InstitutionalProfileTab = "profile" | "posts" | "community";
+export type InstitutionalProfileTab = "profile" | "posts";
 
-export function useInstitutionalProfileTab(
-  community = false,
-): [InstitutionalProfileTab, (tab: InstitutionalProfileTab) => void] {
+export function useInstitutionalProfileTab(): [InstitutionalProfileTab, (tab: InstitutionalProfileTab) => void] {
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get("tab");
-  const selected: InstitutionalProfileTab =
-    requested === "posts" || (community && requested === "community") ? requested : "profile";
+  const selected: InstitutionalProfileTab = requested === "posts" ? "posts" : "profile";
   function select(tab: InstitutionalProfileTab) {
     setSearchParams(
       (current) => {
@@ -171,16 +168,13 @@ export function useInstitutionalProfileTab(
 export function InstitutionalProfileTabs({
   selected,
   onSelect,
-  community = false,
 }: {
   selected: InstitutionalProfileTab;
   onSelect: (tab: InstitutionalProfileTab) => void;
-  community?: boolean;
 }) {
   const tabs: Array<{ id: InstitutionalProfileTab; label: string }> = [
     { id: "profile", label: "Perfil" },
     { id: "posts", label: "Publicações" },
-    ...(community ? [{ id: "community" as const, label: "Central da comunidade" }] : []),
   ];
   return (
     <div className="institutional-profile-tabs" role="tablist" aria-label="Conteúdo do perfil institucional">

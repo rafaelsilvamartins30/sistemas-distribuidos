@@ -136,6 +136,8 @@ class GatewayRoutingAndSecurityTest {
         this.mockMvc.perform(get("/api/v1/web/courses")).andExpect(status().isUnauthorized());
         this.mockMvc.perform(get("/api/v1/web/departments")).andExpect(status().isUnauthorized());
         this.mockMvc.perform(get("/api/v1/web/departments/department-1")).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(post("/api/v1/web/rag/query").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"question\":\"Quais eventos?\"}")).andExpect(status().isUnauthorized());
         this.mockMvc.perform(get("/api/v1/web/me/activities")).andExpect(status().isUnauthorized());
         this.mockMvc.perform(get("/api/v1/web/attendance/me")).andExpect(status().isUnauthorized());
         this.mockMvc.perform(post("/api/v1/web/attendance/check-ins")).andExpect(status().isUnauthorized());
@@ -368,6 +370,30 @@ class GatewayRoutingAndSecurityTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(eventId));
         assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/events/" + eventId);
         assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+    }
+
+    @Test
+    void forwardsAuthenticatedRagQueryToWebBffAndDoesNotExposeInternalRagRoutes() throws Exception {
+        String token = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300), List.of("USER"));
+        String authorizationHeader = "Bearer " + token;
+        String requestBody = "{\"question\":\"Quais eventos de software?\",\"top_k\":3}";
+        BFF_BODY.set("{\"mode\":\"fallback\",\"sources\":[{\"record_id\":\"event-1\"}]}");
+
+        this.mockMvc
+                .perform(post("/api/v1/web/rag/query").header(HttpHeaders.AUTHORIZATION, authorizationHeader)
+                        .contentType(MediaType.APPLICATION_JSON).content(requestBody))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.sources[0].record_id").value("event-1"));
+
+        assertThat(LAST_METHOD.get()).isEqualTo("POST");
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/rag/query");
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
+        assertThat(LAST_REQUEST_BODY.get()).isEqualTo(requestBody);
+
+        this.mockMvc.perform(post("/api/v1/rag/ingest").header(HttpHeaders.AUTHORIZATION, authorizationHeader))
+                .andExpect(status().isForbidden());
+        this.mockMvc.perform(post("/api/v1/web/rag/ingest").header(HttpHeaders.AUTHORIZATION, authorizationHeader))
+                .andExpect(status().isForbidden());
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/rag/query");
     }
 
     @Test

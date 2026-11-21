@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from qdrant_client import QdrantClient
 
 from unir_rag.api import create_app
+from unir_rag.auth import IdentityProviderUnavailable, InvalidAccessToken
 from unir_rag.chain import (
     LlmGenerationResult,
     NonRetryableLlmError,
@@ -135,6 +136,37 @@ SAMPLE_OPPORTUNITIES: list[dict[str, Any]] = [
 ]
 
 
+class FakeTokenValidator:
+    """Accept only the opaque user token selected for these endpoint tests."""
+
+    def verify(self, token: str) -> dict[str, Any]:
+        if token != "valid.jwt.token":
+            raise InvalidAccessToken("invalid test token")
+        return {"sub": "user-1", "azp": "unir-web", "realm_access": {"roles": ["USER"]}}
+
+
+class FakeServiceTokenProvider:
+    """Provide a distinct client-credentials token to Engagement during sync tests."""
+
+    def get_token(self) -> str:
+        return "service-account.jwt.token"
+
+
+class UnavailableTokenValidator:
+    """Model Keycloak signing-key lookup being unavailable."""
+
+    def verify(self, token: str) -> dict[str, Any]:
+        _ = token
+        raise IdentityProviderUnavailable("Keycloak is unavailable")
+
+
+class UnavailableServiceTokenProvider:
+    """Model Keycloak client-credentials token issuance being unavailable."""
+
+    def get_token(self) -> str:
+        raise IdentityProviderUnavailable("Keycloak is unavailable")
+
+
 class DeterministicFakeGeminiGenerator:
     """Fake LLM generator that synthesizes grounded answers from the provided context."""
 
@@ -233,6 +265,8 @@ def build_test_client(
     llm: DeterministicFakeGeminiGenerator | None = None,
     events: list[dict[str, Any]] | None = None,
     opportunities: list[dict[str, Any]] | None = None,
+    token_validator: Any | None = None,
+    service_token_provider: Any | None = None,
 ) -> tuple[TestClient, DeterministicFakeGeminiGenerator]:
     fake_llm = llm or DeterministicFakeGeminiGenerator()
     cfg = RagConfig(
@@ -243,6 +277,7 @@ def build_test_client(
         gemini_timeout_seconds=2.0,
         gemini_max_retries=2,
         gemini_retry_base_delay_seconds=0.01,
+        sync_token="test-sync-token",
     )
     app = create_app(
         config=cfg,
@@ -250,6 +285,8 @@ def build_test_client(
         embeddings=DeterministicMultilingualEmbeddings(),
         llm_generator=fake_llm,
         engagement_client=build_mock_engagement_client(events, opportunities),
+        token_validator=token_validator or FakeTokenValidator(),
+        service_token_provider=service_token_provider or FakeServiceTokenProvider(),
     )
     return TestClient(app), fake_llm
 
@@ -269,6 +306,50 @@ def test_health_and_authentication_protection() -> None:
     assert client.post("/api/v1/rag/query", json={"question": "Quais eventos?"}).status_code == 401
     assert client.get("/api/v1/rag/tools/live-events").status_code == 401
     assert client.post("/api/v1/rag/evaluate").status_code == 401
+    assert (
+        client.post(
+            "/api/v1/rag/query",
+            headers={"Authorization": "Bearer arbitrary.token.value"},
+            json={"question": "Quais eventos?"},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/v1/rag/query",
+            headers={"X-RAG-Sync-Token": "test-sync-token"},
+            json={"question": "Quais eventos?"},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/v1/rag/ingest", headers={"Authorization": "Bearer valid.jwt.token"}
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/v1/rag/ingest", headers={"X-RAG-Sync-Token": "wrong-sync-token"}
+        ).status_code
+        == 401
+    )
+
+
+def test_identity_provider_unavailability_fails_closed() -> None:
+    query_client, _ = build_test_client(token_validator=UnavailableTokenValidator())
+    unavailable_query = query_client.post(
+        "/api/v1/rag/query",
+        headers={"Authorization": "Bearer valid.jwt.token"},
+        json={"question": "Quais eventos acadêmicos estão disponíveis?"},
+    )
+    assert unavailable_query.status_code == 503
+
+    ingest_client, _ = build_test_client(service_token_provider=UnavailableServiceTokenProvider())
+    unavailable_ingest = ingest_client.post(
+        "/api/v1/rag/ingest", headers={"X-RAG-Sync-Token": "test-sync-token"}
+    )
+    assert unavailable_ingest.status_code == 503
 
 
 def test_idempotent_ingestion_and_stale_cancelled_removal() -> None:
@@ -279,6 +360,7 @@ def test_idempotent_ingestion_and_stale_cancelled_removal() -> None:
         qdrant_collection="unir_idempotency_test",
         gemini_api_key="test-key",
         gemini_retry_base_delay_seconds=0.01,
+        sync_token="test-sync-token",
     )
     qdrant = QdrantClient(location=":memory:")
     embeddings = DeterministicMultilingualEmbeddings()
@@ -289,9 +371,10 @@ def test_idempotent_ingestion_and_stale_cancelled_removal() -> None:
         embeddings=embeddings,
         llm_generator=DeterministicFakeGeminiGenerator(),
         engagement_client=build_mock_engagement_client(events, SAMPLE_OPPORTUNITIES),
+        service_token_provider=FakeServiceTokenProvider(),
     )
     client1 = TestClient(app1)
-    headers = {"Authorization": "Bearer valid.jwt.token"}
+    headers = {"X-RAG-Sync-Token": "test-sync-token"}
 
     first = client1.post("/api/v1/rag/ingest", headers=headers)
     assert first.status_code == 200
@@ -311,6 +394,7 @@ def test_idempotent_ingestion_and_stale_cancelled_removal() -> None:
         embeddings=embeddings,
         llm_generator=DeterministicFakeGeminiGenerator(),
         engagement_client=build_mock_engagement_client(updated_events, SAMPLE_OPPORTUNITIES),
+        service_token_provider=FakeServiceTokenProvider(),
     )
     client2 = TestClient(app2)
     third = client2.post("/api/v1/rag/ingest", headers=headers)
@@ -322,9 +406,10 @@ def test_idempotent_ingestion_and_stale_cancelled_removal() -> None:
 
 def test_rag_query_and_langchain_live_events_tool() -> None:
     client, fake_llm = build_test_client()
+    sync_headers = {"X-RAG-Sync-Token": "test-sync-token"}
     headers = {"Authorization": "Bearer valid.jwt.token"}
 
-    client.post("/api/v1/rag/ingest", headers=headers)
+    client.post("/api/v1/rag/ingest", headers=sync_headers)
 
     query_resp = client.post(
         "/api/v1/rag/query",
@@ -359,9 +444,10 @@ def test_rag_query_and_langchain_live_events_tool() -> None:
 def test_gemini_retry_with_backoff_recovers_from_transient_failures() -> None:
     flaky_llm = DeterministicFakeGeminiGenerator(fail_transient_times=2)
     client, _ = build_test_client(llm=flaky_llm)
+    sync_headers = {"X-RAG-Sync-Token": "test-sync-token"}
     headers = {"Authorization": "Bearer valid.jwt.token"}
 
-    client.post("/api/v1/rag/ingest", headers=headers)
+    client.post("/api/v1/rag/ingest", headers=sync_headers)
     resp = client.post(
         "/api/v1/rag/query",
         headers=headers,
@@ -378,9 +464,10 @@ def test_gemini_retry_with_backoff_recovers_from_transient_failures() -> None:
 def test_gemini_unavailability_triggers_explicit_fallback_with_retrieved_sources() -> None:
     down_llm = DeterministicFakeGeminiGenerator(always_fail_transient=True)
     client, _ = build_test_client(llm=down_llm)
+    sync_headers = {"X-RAG-Sync-Token": "test-sync-token"}
     headers = {"Authorization": "Bearer valid.jwt.token"}
 
-    client.post("/api/v1/rag/ingest", headers=headers)
+    client.post("/api/v1/rag/ingest", headers=sync_headers)
     resp = client.post(
         "/api/v1/rag/query",
         headers=headers,
@@ -398,9 +485,10 @@ def test_gemini_unavailability_triggers_explicit_fallback_with_retrieved_sources
 
 def test_academic_evaluation_compares_five_questions_baseline_vs_rag() -> None:
     client, _ = build_test_client()
+    sync_headers = {"X-RAG-Sync-Token": "test-sync-token"}
     headers = {"Authorization": "Bearer valid.jwt.token"}
 
-    client.post("/api/v1/rag/ingest", headers=headers)
+    client.post("/api/v1/rag/ingest", headers=sync_headers)
     eval_resp = client.post("/api/v1/rag/evaluate", headers=headers)
     assert eval_resp.status_code == 200
     report = eval_resp.json()
