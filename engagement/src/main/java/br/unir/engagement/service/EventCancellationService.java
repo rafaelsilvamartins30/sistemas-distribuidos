@@ -1,6 +1,7 @@
 package br.unir.engagement.service;
 
 import br.unir.engagement.dto.EventCancelledPayload;
+import br.unir.engagement.dto.EventProjectionEvents;
 import br.unir.engagement.dto.RegistrationCancelledByEventPayload;
 import br.unir.engagement.entity.Event;
 import br.unir.engagement.entity.EventStatus;
@@ -43,21 +44,26 @@ public class EventCancellationService {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final EventProjectionOutboxWriter projectionOutboxWriter;
 
     @Autowired
     public EventCancellationService(EventRepository eventRepository, RegistrationRepository registrationRepository,
-            OutboxRepository outboxRepository, JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
-        this(eventRepository, registrationRepository, outboxRepository, jdbcTemplate, objectMapper, Clock.systemUTC());
+            OutboxRepository outboxRepository, JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
+            EventProjectionOutboxWriter projectionOutboxWriter) {
+        this(eventRepository, registrationRepository, outboxRepository, jdbcTemplate, objectMapper,
+                projectionOutboxWriter, Clock.systemUTC());
     }
 
     EventCancellationService(EventRepository eventRepository, RegistrationRepository registrationRepository,
-            OutboxRepository outboxRepository, JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, Clock clock) {
+            OutboxRepository outboxRepository, JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
+            EventProjectionOutboxWriter projectionOutboxWriter, Clock clock) {
         this.eventRepository = eventRepository;
         this.registrationRepository = registrationRepository;
         this.outboxRepository = outboxRepository;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper.copy();
         this.clock = clock;
+        this.projectionOutboxWriter = projectionOutboxWriter;
     }
 
     @Transactional
@@ -75,6 +81,7 @@ public class EventCancellationService {
         Instant cancelledAt = Instant.now(this.clock).truncatedTo(ChronoUnit.MICROS);
         event.cancel();
         this.eventRepository.saveAndFlush(event);
+        this.projectionOutboxWriter.append(event, EventProjectionEvents.CANCELLED, cancelledAt);
         this.saveOutbox(event.getId(), EventCancelledPayload.EVENT_TYPE,
                 new EventCancelledPayload(event.getId(), cancelledAt), cancelledAt);
 

@@ -953,7 +953,7 @@ export function EventDetailPage() {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
       await confirmOrganizerCheckIn(keycloak.token, scannedTicketToken);
-      setScannedTicket((current) => current ? { ...current, status: "ATTENDED" } : current);
+      setScannedTicket((current) => (current ? { ...current, status: "ATTENDED" } : current));
     } catch (error) {
       const detail = error instanceof AttendanceApiError ? error.detail : "Tente novamente mais tarde.";
       setOrganizerError(`Não foi possível confirmar a presença: ${detail}`);
@@ -1166,7 +1166,11 @@ export function EventDetailPage() {
                   <p className="attendance-window">
                     Janela: {dateTime(event.startsAt)} a {dateTime(event.endsAt)}.
                   </p>
-                  <ParticipantQrScanner busy={attendanceBusy} autoSubmitOnScan onToken={(token) => void handleCheckIn(token)} />
+                  <ParticipantQrScanner
+                    busy={attendanceBusy}
+                    autoSubmitOnScan
+                    onToken={(token) => void handleCheckIn(token)}
+                  />
                 </>
               ) : attendance?.status === "CANCELLED" ? (
                 <p role="status">Sua elegibilidade para presença foi cancelada.</p>
@@ -1193,37 +1197,66 @@ export function EventDetailPage() {
             </section>
           )}
           {event.attendanceEnabled && event.createdByUserId && keycloak.subject === event.createdByUserId && (
-            <section className="registration-action-panel attendance-action-panel" aria-labelledby="organizer-attendance-title">
+            <section
+              className="registration-action-panel attendance-action-panel"
+              aria-labelledby="organizer-attendance-title"
+            >
               <h2 id="organizer-attendance-title">Organização do evento</h2>
               {event.attendanceMode === "PARTICIPANT_SCANS_EVENT" ? (
                 <>
                   <p>Gere o QR compartilhado para os participantes registrarem a presença.</p>
-                  <button className="button button-secondary" type="button" disabled={organizerBusy}
-                    onClick={() => void handleIssueEventQr()}>
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    disabled={organizerBusy}
+                    onClick={() => void handleIssueEventQr()}
+                  >
                     {organizerBusy ? "Gerando QR…" : organizerQr ? "Gerar novo QR" : "Gerar QR do evento"}
                   </button>
-                  {organizerQr && <div className="my-ticket-qr">
-                    <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(organizerQr.qrSvg)}`} alt={`QR de presença para ${event.title}`} />
-                    <span>Mostre este QR durante o evento. Gerar outro invalida o anterior.</span>
-                  </div>}
+                  {organizerQr && (
+                    <div className="my-ticket-qr">
+                      <img
+                        src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(organizerQr.qrSvg)}`}
+                        alt={`QR de presença para ${event.title}`}
+                      />
+                      <span>Mostre este QR durante o evento. Gerar outro invalida o anterior.</span>
+                    </div>
+                  )}
                 </>
               ) : (
                 <>
                   <p>Leia o QR do participante e confira o identificador antes de confirmar a presença.</p>
-                  <ParticipantQrScanner busy={organizerBusy} submitLabel="Verificar ticket"
-                    onToken={(token) => void handlePreviewOrganizerCheckIn(token)} />
-                  {scannedTicket && <div className="organizer-ticket-preview" role="status">
-                    <strong>{scannedTicket.status === "ATTENDED" ? "Presença já registrada" : "Ticket válido"}</strong>
-                    <span>Evento: {scannedTicket.eventTitle}</span>
-                    <span>Identificador do participante: {scannedTicket.participantUserId}</span>
-                    {scannedTicket.status !== "ATTENDED" && <button className="button button-primary" type="button"
-                      disabled={organizerBusy} onClick={() => void handleConfirmOrganizerCheckIn()}>
-                      Confirmar presença
-                    </button>}
-                  </div>}
+                  <ParticipantQrScanner
+                    busy={organizerBusy}
+                    submitLabel="Verificar ticket"
+                    onToken={(token) => void handlePreviewOrganizerCheckIn(token)}
+                  />
+                  {scannedTicket && (
+                    <div className="organizer-ticket-preview" role="status">
+                      <strong>
+                        {scannedTicket.status === "ATTENDED" ? "Presença já registrada" : "Ticket válido"}
+                      </strong>
+                      <span>Evento: {scannedTicket.eventTitle}</span>
+                      <span>Identificador do participante: {scannedTicket.participantUserId}</span>
+                      {scannedTicket.status !== "ATTENDED" && (
+                        <button
+                          className="button button-primary"
+                          type="button"
+                          disabled={organizerBusy}
+                          onClick={() => void handleConfirmOrganizerCheckIn()}
+                        >
+                          Confirmar presença
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
-              {organizerError && <p className="notice notice-error" role="alert">{organizerError}</p>}
+              {organizerError && (
+                <p className="notice notice-error" role="alert">
+                  {organizerError}
+                </p>
+              )}
             </section>
           )}
           <span className="eyebrow">Evento</span>

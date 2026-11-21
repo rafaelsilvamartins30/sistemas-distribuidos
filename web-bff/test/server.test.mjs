@@ -132,10 +132,13 @@ test("GET /api/v1/web/me/tickets combines Engagement registrations with Access a
       assert.equal(options.headers.authorization, "Bearer valid-token");
       if (String(url).startsWith("http://engagement:")) {
         assert.equal(url, "http://engagement:8080/api/v1/registrations/me?page=0&size=100");
-        return new Response(JSON.stringify({ items: [registration], page: 0, size: 100, totalElements: 1, totalPages: 1 }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({ items: [registration], page: 0, size: 100, totalElements: 1, totalPages: 1 }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }
       assert.equal(url, "http://access:8080/api/v1/attendance/tickets/me");
       return new Response(JSON.stringify([attendance]), {
@@ -420,10 +423,13 @@ test("semester catalog reads and admin writes are forwarded through Campus with 
     campusUrl: "http://campus:3000",
     fetch: async (url, options) => {
       requested.push([String(url), options.method, options.headers.authorization, options.body]);
-      return new Response(JSON.stringify({ id: "semester-1", name: "2026/2", startOn: "2026-08-01", endOn: "2026-12-20" }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ id: "semester-1", name: "2026/2", startOn: "2026-08-01", endOn: "2026-12-20" }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
     },
   });
   t.after(() => server.close());
@@ -748,6 +754,12 @@ test("Campus profile responses expose administrator subjects only to that profil
 });
 
 test("event list and detail forward the bearer token to Engagement and preserve responses", async (t) => {
+  const originalTimeout = AbortSignal.timeout;
+  const timeoutDurations = [];
+  AbortSignal.timeout = (milliseconds) => {
+    timeoutDurations.push(milliseconds);
+    return originalTimeout(milliseconds);
+  };
   const requested = [];
   const event = { id: "event-1", title: "Encontro UNIR", registrationMode: "INTERNAL_FREE" };
   const server = createServer({
@@ -763,7 +775,10 @@ test("event list and detail forward the bearer token to Engagement and preserve 
       });
     },
   });
-  t.after(() => server.close());
+  t.after(async () => {
+    AbortSignal.timeout = originalTimeout;
+    await server.close();
+  });
 
   const listResponse = await server.inject({
     method: "GET",
@@ -787,6 +802,37 @@ test("event list and detail forward the bearer token to Engagement and preserve 
       ["http://engagement:8080/api/v1/events/event-1", "GET", "Bearer event-token"],
     ],
   );
+  assert.deepEqual(timeoutDurations, [15_000, 15_000]);
+});
+
+test("event mutations allow the Engagement write transaction up to 15 seconds", async (t) => {
+  const originalTimeout = AbortSignal.timeout;
+  const timeoutDurations = [];
+  AbortSignal.timeout = (milliseconds) => {
+    timeoutDurations.push(milliseconds);
+    return originalTimeout(milliseconds);
+  };
+  const server = createServer({
+    fetch: async () => new Response(JSON.stringify({ id: "event-1", status: "ACTIVE" }), { status: 200 }),
+  });
+  t.after(async () => {
+    AbortSignal.timeout = originalTimeout;
+    await server.close();
+  });
+
+  for (const request of [
+    { method: "POST", url: "/api/v1/web/events", payload: { title: "Evento" } },
+    { method: "PATCH", url: "/api/v1/web/events/event-1", payload: { title: "Evento atualizado" } },
+    { method: "DELETE", url: "/api/v1/web/events/event-1" },
+  ]) {
+    const response = await server.inject({
+      ...request,
+      headers: { authorization: "Bearer event-token" },
+    });
+    assert.equal(response.statusCode, 200);
+  }
+
+  assert.deepEqual(timeoutDurations, [15_000, 15_000, 15_000]);
 });
 
 test("event routes require a bearer token and return 503 when Engagement is unavailable", async (t) => {

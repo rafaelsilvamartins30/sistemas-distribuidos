@@ -7,6 +7,7 @@ import br.unir.engagement.dto.RefundRequestedPayload;
 import br.unir.engagement.dto.RegistrationConfirmedPayload;
 import br.unir.engagement.dto.RegistrationPaymentRequestedPayload;
 import br.unir.engagement.dto.EventCancelledPayload;
+import br.unir.engagement.dto.EventProjectionEvents;
 import br.unir.engagement.dto.RegistrationCancelledByEventPayload;
 import br.unir.engagement.dto.RegistrationCancelledPayload;
 import br.unir.engagement.entity.OutboxEvent;
@@ -69,6 +70,9 @@ public class OutboxPublisher {
                 case RefundRequestedPayload.EVENT_TYPE -> RefundRequestedPayload.ROUTING_KEY;
                 case RegistrationConfirmedPayload.EVENT_TYPE -> RegistrationConfirmedPayload.ROUTING_KEY;
                 case EventCancelledPayload.EVENT_TYPE -> EventCancelledPayload.ROUTING_KEY;
+                case EventProjectionEvents.CREATED -> EventProjectionEvents.CREATED_ROUTING_KEY;
+                case EventProjectionEvents.UPDATED -> EventProjectionEvents.UPDATED_ROUTING_KEY;
+                case EventProjectionEvents.CANCELLED -> EventProjectionEvents.CANCELLED_ROUTING_KEY;
                 case RegistrationCancelledByEventPayload.EVENT_TYPE -> RegistrationCancelledByEventPayload.ROUTING_KEY;
                 case RegistrationCancelledPayload.EVENT_TYPE -> RegistrationCancelledPayload.ROUTING_KEY;
                 default -> throw new IllegalArgumentException("Unsupported Outbox event type: " + event.getEventType());

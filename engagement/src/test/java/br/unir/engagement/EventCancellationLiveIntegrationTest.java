@@ -17,6 +17,7 @@ import br.unir.engagement.entity.RegistrationStatus;
 import br.unir.engagement.repository.EventRepository;
 import br.unir.engagement.repository.OutboxRepository;
 import br.unir.engagement.service.EventCancellationService;
+import br.unir.engagement.service.EventProjectionStore;
 import br.unir.engagement.service.RegistrationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
@@ -44,6 +45,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
  * Opt-in end-to-end probe for the real local databases and RabbitMQ. It uses
@@ -53,6 +55,9 @@ import org.springframework.test.context.DynamicPropertySource;
 @EnabledIfEnvironmentVariable(named = "UNIR_LIVE_SAGA_TESTS", matches = "true")
 @SpringBootTest
 class EventCancellationLiveIntegrationTest {
+
+    @MockitoBean
+    private EventProjectionStore eventProjectionStore;
 
     private static final String PAYMENT_DB = "UNIR_PAYMENT_JDBC_URL";
     private static final String ACCESS_DB = "UNIR_ACCESS_JDBC_URL";
@@ -84,7 +89,7 @@ class EventCancellationLiveIntegrationTest {
         registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
         registry.add("spring.datasource.username", () -> environment("UNIR_TEST_DB_USERNAME", "unir"));
         registry.add("spring.datasource.password", () -> environment("UNIR_TEST_DB_PASSWORD", ""));
-        registry.add("spring.flyway.target", () -> "9");
+        registry.add("spring.flyway.target", () -> "13");
         registry.add("spring.flyway.locations", () -> "classpath:db/migration");
         registry.add("engagement.outbox.enabled", () -> "false");
         registry.add("spring.rabbitmq.host", () -> environment("UNIR_RABBITMQ_HOST", "localhost"));

@@ -1,6 +1,7 @@
 package br.unir.engagement.dto;
 
 import br.unir.engagement.entity.Event;
+import br.unir.engagement.entity.EventView;
 import br.unir.engagement.entity.AttendanceMode;
 import br.unir.engagement.entity.EventStatus;
 import br.unir.engagement.entity.RegistrationMode;
@@ -19,5 +20,13 @@ public record EventResponse(UUID id, String title, String description, String or
                 event.getStartsAt(), event.getEndsAt(), event.getCategory(), event.getCapacity(),
                 event.getRegistrationDeadline(), event.getRegistrationMode(), event.getPrice(), event.getExternalUrl(),
                 event.isAttendanceEnabled(), event.getAttendanceMode(), event.getStatus(), event.getCreatedAt());
+    }
+
+    public static EventResponse from(EventView event) {
+        return new EventResponse(UUID.fromString(event.id()), event.title(), event.description(), event.organizerType(),
+                UUID.fromString(event.organizerId()), event.createdByUserId(), event.imageUrl(), event.location(),
+                event.startsAt(), event.endsAt(), event.category(), event.capacity(), event.registrationDeadline(),
+                event.registrationMode(), event.price(), event.externalUrl(), event.attendanceEnabled(),
+                event.attendanceMode(), event.status(), event.createdAt());
     }
 }

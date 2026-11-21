@@ -172,7 +172,14 @@ export function updateSemester(
   gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<Semester> {
-  return mutate(`/api/v1/web/semesters/${encodeURIComponent(semesterId)}`, token, "PATCH", input, gatewayUrl, fetchImpl);
+  return mutate(
+    `/api/v1/web/semesters/${encodeURIComponent(semesterId)}`,
+    token,
+    "PATCH",
+    input,
+    gatewayUrl,
+    fetchImpl,
+  );
 }
 
 export function updateInstitutionalProfile(

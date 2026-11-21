@@ -150,7 +150,13 @@ export function issueMyTicketQr(
   gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<QrArtifact> {
-  return request("POST", `/api/v1/web/attendance/tickets/${encodeURIComponent(eventId)}/qr`, token, gatewayUrl, fetchImpl);
+  return request(
+    "POST",
+    `/api/v1/web/attendance/tickets/${encodeURIComponent(eventId)}/qr`,
+    token,
+    gatewayUrl,
+    fetchImpl,
+  );
 }
 
 export function issueEventAttendanceQr(
@@ -159,7 +165,13 @@ export function issueEventAttendanceQr(
   gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<QrArtifact> {
-  return request("POST", `/api/v1/web/attendance/events/${encodeURIComponent(eventId)}/qr`, token, gatewayUrl, fetchImpl);
+  return request(
+    "POST",
+    `/api/v1/web/attendance/events/${encodeURIComponent(eventId)}/qr`,
+    token,
+    gatewayUrl,
+    fetchImpl,
+  );
 }
 
 export function previewOrganizerCheckIn(

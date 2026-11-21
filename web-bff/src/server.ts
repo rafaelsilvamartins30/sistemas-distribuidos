@@ -1,5 +1,8 @@
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 
+const EVENT_WRITE_TIMEOUT_MS = 15_000;
+const EVENT_QUERY_TIMEOUT_MS = 15_000;
+
 interface ServerOptions {
   campusUrl?: string;
   engagementServiceUrl?: string;
@@ -470,6 +473,7 @@ export function createServer(options: ServerOptions = {}) {
     reply: FastifyReply,
     path: string,
     method: "GET" | "POST" | "PATCH" | "DELETE" = "GET",
+    timeoutMs = 5000,
   ) {
     const authorization = request.headers.authorization;
     if (typeof authorization !== "string" || !/^Bearer\s+\S+$/i.test(authorization)) {
@@ -489,7 +493,7 @@ export function createServer(options: ServerOptions = {}) {
         method,
         headers,
         ...(requestBody !== undefined ? { body: requestBody } : {}),
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       body = Buffer.from(await response.arrayBuffer());
     } catch (error) {
@@ -504,7 +508,7 @@ export function createServer(options: ServerOptions = {}) {
 
   server.get("/api/v1/web/events", async (request, reply) => {
     const query = new URL(request.url, "http://localhost").search;
-    return forwardToEngagementService(request, reply, `/api/v1/events${query}`);
+    return forwardToEngagementService(request, reply, `/api/v1/events${query}`, "GET", EVENT_QUERY_TIMEOUT_MS);
   });
 
   server.get("/api/v1/web/events/organizer-contexts", async (request, reply) =>
@@ -517,15 +521,27 @@ export function createServer(options: ServerOptions = {}) {
   });
 
   server.post("/api/v1/web/events", async (request, reply) =>
-    forwardToEngagementService(request, reply, "/api/v1/events", "POST"),
+    forwardToEngagementService(request, reply, "/api/v1/events", "POST", EVENT_WRITE_TIMEOUT_MS),
   );
 
   server.get<{ Params: { eventId: string } }>("/api/v1/web/events/:eventId", async (request, reply) => {
-    return forwardToEngagementService(request, reply, `/api/v1/events/${encodeURIComponent(request.params.eventId)}`);
+    return forwardToEngagementService(
+      request,
+      reply,
+      `/api/v1/events/${encodeURIComponent(request.params.eventId)}`,
+      "GET",
+      EVENT_QUERY_TIMEOUT_MS,
+    );
   });
 
   server.patch<{ Params: { eventId: string } }>("/api/v1/web/events/:eventId", async (request, reply) =>
-    forwardToEngagementService(request, reply, `/api/v1/events/${encodeURIComponent(request.params.eventId)}`, "PATCH"),
+    forwardToEngagementService(
+      request,
+      reply,
+      `/api/v1/events/${encodeURIComponent(request.params.eventId)}`,
+      "PATCH",
+      EVENT_WRITE_TIMEOUT_MS,
+    ),
   );
 
   server.delete<{ Params: { eventId: string } }>("/api/v1/web/events/:eventId", async (request, reply) =>
@@ -534,6 +550,7 @@ export function createServer(options: ServerOptions = {}) {
       reply,
       `/api/v1/events/${encodeURIComponent(request.params.eventId)}`,
       "DELETE",
+      EVENT_WRITE_TIMEOUT_MS,
     ),
   );
 
@@ -666,7 +683,8 @@ export function createServer(options: ServerOptions = {}) {
         return reply.code(502).send({ error: "Ticket data is invalid" });
       }
       const attendanceByRegistration = new Map(
-        tickets.filter((ticket) => typeof ticket.registrationId === "string")
+        tickets
+          .filter((ticket) => typeof ticket.registrationId === "string")
           .map((ticket) => [ticket.registrationId as string, ticket]),
       );
       return {
