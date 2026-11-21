@@ -1,0 +1,64 @@
+{
+  "realm": "unir",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "verifyEmail": true,
+  "roles": {
+    "realm": [
+      { "name": "USER" },
+      { "name": "PLATFORM_ADMIN" }
+    ]
+  },
+  "defaultRoles": ["USER"],
+  "smtpServer": {
+    "host": "mailpit",
+    "port": "1025",
+    "from": "no-reply@unir.local",
+    "fromDisplayName": "UNIR local",
+    "auth": "false",
+    "ssl": "false",
+    "starttls": "false"
+  },
+  "clients": [
+    {
+      "clientId": "unir-web",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:15173/*",
+        "http://localhost:15175/*"
+      ],
+      "webOrigins": [
+        "http://localhost:15173",
+        "http://localhost:15175"
+      ],
+      "defaultClientScopes": [
+        "basic",
+        "email",
+        "roles"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+  "displayName": "UNIR",
+  "displayNameHtml": "UNIR",
+  "accountTheme": "unir-account",
+  "loginTheme": "unir-theme",
+  "internationalizationEnabled": true,
+  "defaultLocale": "pt-BR",
+  "supportedLocales": [
+    "pt-BR"
+  ],
+  "resetPasswordAllowed": true
+}

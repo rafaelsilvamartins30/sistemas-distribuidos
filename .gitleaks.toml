@@ -1,0 +1,14 @@
+title = "UNIR secret scan"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Compose PostgreSQL service URL is a local service address, not a credential."
+condition = "AND"
+regexTarget = "match"
+regexes = [ '''^keycloak-db:5432/keycloak$''' ]
+paths = [ '''^compose\.yaml$''' ]

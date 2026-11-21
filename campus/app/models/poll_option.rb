@@ -1,0 +1,17 @@
+# frozen_string_literal: true
+
+# An ordered choice within a Campus poll.
+class PollOption < ApplicationRecord
+  belongs_to :poll, inverse_of: :poll_options
+  has_many :poll_votes, dependent: :restrict_with_error
+  before_validation :assign_id, on: :create
+
+  validates :text, presence: true
+  validates :position, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
+
+  private
+
+  def assign_id
+    self.id ||= SecureRandom.uuid
+  end
+end

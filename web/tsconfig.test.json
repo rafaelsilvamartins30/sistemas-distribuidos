@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": ".",
+    "outDir": "dist-test",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "types": ["node", "vite/client"],
+    "jsx": "react-jsx",
+    "noEmitOnError": true
+  },
+  "include": [
+    "src/components/DepartmentCard.tsx",
+    "src/components/EventCard.tsx",
+    "src/components/InstitutionalProfileContent.tsx",
+    "src/components/OpportunityCard.tsx",
+    "src/services/campus.ts",
+    "src/services/campusSocial.ts",
+    "src/services/events.ts",
+    "src/services/opportunities.ts",
+    "src/services/registrations.ts",
+    "src/services/attendance.ts",
+    "test/**/*.ts",
+    "test/**/*.tsx"
+  ]
+}

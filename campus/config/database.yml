@@ -1,0 +1,21 @@
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS", 5) %>
+  host: <%= ENV.fetch("DB_HOST", "127.0.0.1") %>
+  port: <%= ENV.fetch("DB_PORT", 5432) %>
+  username: <%= ENV.fetch("DB_USERNAME", "unir") %>
+  password: <%= ENV.fetch("DB_PASSWORD", "") %>
+
+development:
+  <<: *default
+  database: <%= ENV.fetch("DB_NAME", "unir_campus") %>
+
+test:
+  adapter: sqlite3
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS", 5) %>
+  database: storage/test.sqlite3
+
+production:
+  <<: *default
+  database: <%= ENV.fetch("DB_NAME", "unir_campus") %>

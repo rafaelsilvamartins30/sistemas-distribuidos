@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: unir
+  labels:
+    app.kubernetes.io/name: unir
+    app.kubernetes.io/part-of: unir-platform

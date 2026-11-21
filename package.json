@@ -1,0 +1,26 @@
+{
+  "name": "unir-quality-tools",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "lint:web": "eslint web/src web/test web/vite.config.ts",
+    "lint:keycloak-theme": "eslint keycloak-theme/src keycloak-theme/account-theme keycloak-theme/vite.config.ts",
+    "lint:web-bff": "eslint web-bff/src web-bff/test",
+    "lint:tooling": "eslint eslint.config.mjs scripts/check-ts-architecture.mjs",
+    "lint": "pnpm run lint:web && pnpm run lint:keycloak-theme && pnpm run lint:web-bff && pnpm run lint:tooling",
+    "format:check:web": "prettier --check \"web/src/**/*.{ts,tsx}\" \"web/test/**/*.{ts,tsx}\" web/vite.config.ts web/tsconfig.test.json",
+    "format:check:keycloak-theme": "prettier --check \"keycloak-theme/src/**/*.{ts,tsx}\" \"keycloak-theme/account-theme/**/*.js\" keycloak-theme/vite.config.ts",
+    "format:check:web-bff": "prettier --check \"web-bff/src/**/*.ts\" \"web-bff/test/**/*.mjs\"",
+    "format:check:tooling": "prettier --check package.json .prettierrc.json eslint.config.mjs scripts/check-ts-architecture.mjs",
+    "format:check": "pnpm run format:check:web && pnpm run format:check:keycloak-theme && pnpm run format:check:web-bff && pnpm run format:check:tooling",
+    "architecture:check": "node scripts/check-ts-architecture.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.14.0",
+    "globals": "^16.5.0",
+    "prettier": "^3.9.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.72.2"
+  }
+}
