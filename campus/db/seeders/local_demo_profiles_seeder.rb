@@ -30,7 +30,7 @@ class LocalDemoProfilesSeeder
 
   def profile_department(profile_data)
     stable_key = "department/#{profile_data.fetch('departmentUnitCode')}/#{profile_data.fetch('departmentCode')}"
-    Department.find_by!(id: stable_id(stable_key))
+    Department.find(stable_id(stable_key))
   end
 
   def profile_course(data, department)
@@ -63,7 +63,7 @@ class LocalDemoProfilesSeeder
     university = University.current
     admin_id = @accounts.fetch('unir.admin').fetch('sub')
     university.update!(administrator_user_ids: (university.administrator_user_ids + [admin_id]).uniq)
-    dcc = Department.find_by!(id: stable_id('department/ICET/DCC'))
+    dcc = Department.find(stable_id('department/ICET/DCC'))
     add_department_managers(dcc)
     add_entity_manager
   end
@@ -92,12 +92,9 @@ class LocalDemoProfilesSeeder
   def create_approved_request(account, profile, department)
     request_id = stable_id('request/professor-verification/unir.professor.aprovado')
     InstitutionalRequest.find_or_create_by!(id: request_id) do |request|
-      request.assign_attributes(approved_request_attributes(account, profile, department))
+      attributes = request_identity_attributes(account, profile, department).merge(review_attributes)
+      request.assign_attributes(attributes)
     end
-  end
-
-  def approved_request_attributes(account, profile, department)
-    request_identity_attributes(account, profile, department).merge(review_attributes)
   end
 
   def request_identity_attributes(account, profile, department)

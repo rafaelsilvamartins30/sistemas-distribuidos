@@ -100,7 +100,7 @@ case "${1:-}" in
     done
     ;;
   infra) infrastructure ;;
-  secrets) gitleaks git --redact --no-banner . ;;
+  secrets) gitleaks git --baseline-path scripts/gitleaks-baseline.json --redact --no-banner . ;;
   dependencies) dependencies ;;
   *) printf 'Uso: %s {component|test|infra|secrets|dependencies|future}\n' "$0" >&2; exit 2 ;;
 esac

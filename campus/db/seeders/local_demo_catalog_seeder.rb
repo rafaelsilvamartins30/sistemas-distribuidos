@@ -27,18 +27,25 @@ class LocalDemoCatalogSeeder
 
   def seed_units
     @catalog.fetch('academic_units').to_h do |row|
-      unit = AcademicUnit.find_or_create_by!(id: stable_id("academic-unit/#{row.fetch('code')}")) do |record|
-        record.code = row.fetch('code')
-        record.name = row.fetch('name')
-        record.source_url = row.fetch('source_url')
-        record.description = 'Unidade acadêmica listada no catálogo institucional de referência da UFLA.'
-        record.general_info_markdown = reference_markdown(row.fetch('source_url'))
-        record.links = [{ label: 'Fonte institucional', url: row.fetch('source_url') }]
-        record.administrator_user_ids = []
-        record.reference_only = true
-      end
+      unit = seed_unit(row)
       [row.fetch('code'), unit]
     end
+  end
+
+  def seed_unit(row)
+    AcademicUnit.find_or_create_by!(id: stable_id("academic-unit/#{row.fetch('code')}")) do |record|
+      record.assign_attributes(unit_attributes(row))
+    end
+  end
+
+  def unit_attributes(row)
+    source_url = row.fetch('source_url')
+    {
+      code: row.fetch('code'), name: row.fetch('name'), source_url: source_url,
+      description: 'Unidade acadêmica listada no catálogo institucional de referência da UFLA.',
+      general_info_markdown: reference_markdown(source_url),
+      links: [{ label: 'Fonte institucional', url: source_url }], administrator_user_ids: [], reference_only: true
+    }
   end
 
   def seed_departments

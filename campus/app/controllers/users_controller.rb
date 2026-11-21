@@ -68,10 +68,21 @@ class UsersController < ApplicationController
   def valid_catalog_relations?(payload, required:, profile: nil)
     course_id = payload.fetch('courseId', profile&.course_id)
     department_id = payload.fetch('departmentId', profile&.department_id)
-    return false if required && [course_id, department_id].any?(&:blank?)
-    return true if course_id.blank? && department_id.blank?
-    return false if course_id.blank? || department_id.blank?
+    return true if catalog_relations_absent?(course_id, department_id, required)
+    return false unless catalog_relation_pair?(course_id, department_id)
 
+    course_belongs_to_department?(course_id, department_id)
+  end
+
+  def catalog_relations_absent?(course_id, department_id, required)
+    course_id.blank? && department_id.blank? && !required
+  end
+
+  def catalog_relation_pair?(course_id, department_id)
+    course_id.present? && department_id.present?
+  end
+
+  def course_belongs_to_department?(course_id, department_id)
     Course.exists?(id: course_id, department_id: department_id, reference_only: false)
   end
 

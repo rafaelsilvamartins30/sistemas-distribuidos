@@ -11,7 +11,7 @@ class InstitutionalProfileLookup
   }.freeze
 
   def self.find(type, id)
-    return unless id.present?
+    return if id.blank?
     return University.current if type == 'UNIVERSITY' && id == University::SINGLETON_ID
 
     TYPES.fetch(type, nil)&.find_by(id: id)

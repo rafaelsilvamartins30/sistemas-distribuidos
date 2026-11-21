@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+# Adds university-owned academic terms for semester-based institutional posts.
 class CreateSemesters < ActiveRecord::Migration[8.1]
   def change
     create_table :semesters, id: :string do |table|

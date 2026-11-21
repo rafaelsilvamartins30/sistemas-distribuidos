@@ -28,6 +28,7 @@ class SemestersController < ApplicationController
   def create
     university = university_for_admin
     return unless university
+
     payload = semester_payload
     return unless payload
 
@@ -41,17 +42,15 @@ class SemestersController < ApplicationController
   def update
     university = university_for_admin
     return unless university
-    semester = university.semesters.find_by(id: params[:id])
-    return render_problem(:not_found, 'Semester not found') unless semester
+
+    semester = find_semester(university)
+    return unless semester
+
     payload = semester_payload
     return unless payload
 
-    semester.assign_attributes(name: payload.fetch('name', semester.name),
-                               starts_on: payload.fetch('startOn', semester.starts_on),
-                               ends_on: payload.fetch('endOn', semester.ends_on))
-    return render(json: semester_response(semester)) if semester.save
-
-    render_validation_error(semester)
+    assign_semester_attributes(semester, payload)
+    save_semester(semester)
   end
 
   private
@@ -68,21 +67,49 @@ class SemestersController < ApplicationController
 
   def semester_payload
     payload = request.request_parameters
-    unless payload.is_a?(Hash)
-      render_problem(:bad_request, 'Invalid request body')
-      return
-    end
+    return invalid_semester_body unless payload.is_a?(Hash)
 
-    invalid = payload.keys - %w[name startOn endOn]
-    invalid.concat(payload.filter_map do |key, value|
-      key if %w[name startOn endOn].include?(key) && !value.is_a?(String)
-    end)
-    unless invalid.empty?
-      render_problem(:bad_request, "Invalid fields: #{invalid.uniq.sort.join(', ')}")
-      return
-    end
+    invalid = invalid_semester_payload_fields(payload)
+    return invalid_semester_fields(invalid) unless invalid.empty?
 
     payload
+  end
+
+  def invalid_semester_body
+    render_problem(:bad_request, 'Invalid request body')
+  end
+
+  def invalid_semester_fields(fields)
+    render_problem(:bad_request, "Invalid fields: #{fields.uniq.sort.join(', ')}")
+  end
+
+  def invalid_semester_payload_fields(payload)
+    invalid = payload.keys - %w[name startOn endOn]
+    invalid.concat(payload.filter_map { |key, value| key if semester_field?(key) && !value.is_a?(String) })
+  end
+
+  def semester_field?(key)
+    %w[name startOn endOn].include?(key)
+  end
+
+  def find_semester(university)
+    semester = university.semesters.find_by(id: params[:id])
+    return semester if semester
+
+    render_problem(:not_found, 'Semester not found')
+    nil
+  end
+
+  def assign_semester_attributes(semester, payload)
+    semester.assign_attributes(name: payload.fetch('name', semester.name),
+                               starts_on: payload.fetch('startOn', semester.starts_on),
+                               ends_on: payload.fetch('endOn', semester.ends_on))
+  end
+
+  def save_semester(semester)
+    return render(json: semester_response(semester)) if semester.save
+
+    render_validation_error(semester)
   end
 
   def university_for_admin

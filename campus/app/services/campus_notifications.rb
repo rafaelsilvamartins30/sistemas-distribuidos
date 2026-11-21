@@ -61,11 +61,11 @@ class CampusNotifications
   end
   private_class_method :recipients_for_request
 
-  def self.create_notification(recipient:, actor:, event:, title:, message:, resource_type:, resource_id:)
+  def self.create_notification(recipient:, actor:, event:, **details)
     Notification.create!(
       recipient_user_id: recipient, actor_user_id: actor, event_type: event,
-      title: title.truncate(255), message: message.to_s.truncate(2_000),
-      resource_type: resource_type, resource_id: resource_id
+      title: details.fetch(:title).truncate(255), message: details.fetch(:message).to_s.truncate(2_000),
+      resource_type: details.fetch(:resource_type), resource_id: details.fetch(:resource_id)
     )
   end
   private_class_method :create_notification

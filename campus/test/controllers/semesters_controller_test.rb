@@ -30,7 +30,7 @@ class SemestersControllerTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     assert_equal university.id, Semester.find(semester_id).university_id
-    assert_equal ['2026/2'], response.parsed_body.fetch('items').map { |item| item.fetch('name') }
+    assert_equal(['2026/2'], response.parsed_body.fetch('items').map { |item| item.fetch('name') })
   end
 
   test 'semester writes require the university administrator subject and validate the simple name and dates' do

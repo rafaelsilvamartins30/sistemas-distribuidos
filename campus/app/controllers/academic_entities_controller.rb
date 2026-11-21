@@ -28,19 +28,33 @@ class AcademicEntitiesController < ApplicationController
   def update
     entity = AcademicEntity.find_by(id: params[:id])
     return render_problem(:not_found, 'Academic entity not found') unless entity
-    payload = profile_payload(%w[name description generalInfoMarkdown logoUrl bannerUrl links administratorUserIds entityType departmentId])
-    return unless payload
-    return unless require_profile_update_permissions(entity, payload)
 
+    update_entity_profile(entity)
+  end
+
+  private
+
+  def update_entity_profile(entity)
+    payload = profile_payload(%w[name description generalInfoMarkdown logoUrl bannerUrl links administratorUserIds
+                                 entityType departmentId])
+    return unless payload
+    return unless authorize_profile_update?(entity, payload)
+
+    assign_entity_fields(entity, payload)
+    save_entity(entity)
+  end
+
+  def assign_entity_fields(entity, payload)
     assign_profile_fields(entity, payload.except('entityType', 'departmentId'))
     entity.entity_type = payload['entityType'] if payload.key?('entityType')
     entity.department_id = payload['departmentId'] if payload.key?('departmentId')
+  end
+
+  def save_entity(entity)
     return render(json: entity_response(entity)) if entity.save
 
     render_problem(:unprocessable_entity, "Invalid fields: #{entity.errors.attribute_names.uniq.sort.join(', ')}")
   end
-
-  private
 
   def pagination_parameters
     page = Integer(params.fetch(:page, '0'), 10)
@@ -58,8 +72,8 @@ class AcademicEntitiesController < ApplicationController
 
   def entity_response(entity)
     institutional_profile_fields(entity).merge(entityType: entity.entity_type, departmentId: entity.department_id,
-                                                sourceUrl: entity.source_url,
-                                                sourceAffiliationText: entity.source_affiliation_text,
-                                                referenceOnly: entity.reference_only)
+                                               sourceUrl: entity.source_url,
+                                               sourceAffiliationText: entity.source_affiliation_text,
+                                               referenceOnly: entity.reference_only)
   end
 end

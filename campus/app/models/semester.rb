@@ -6,7 +6,7 @@ class Semester < ApplicationRecord
 
   before_validation :assign_id, on: :create
 
-  validates :name, presence: true, format: { with: /\A\d{4}\/[12]\z/ }, uniqueness: { scope: :university_id }
+  validates :name, presence: true, format: { with: %r{\A\d{4}/[12]\z} }, uniqueness: { scope: :university_id }
   validates :starts_on, :ends_on, presence: true
   validate :end_date_is_not_before_start_date
 

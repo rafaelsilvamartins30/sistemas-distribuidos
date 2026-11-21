@@ -5,18 +5,10 @@ class NotificationsController < ApplicationController
   include KeycloakAuthenticated
 
   def index
-    notifications = Notification.where(recipient_user_id: current_subject)
-    notifications = notifications.unread if ActiveModel::Type::Boolean.new.cast(params[:unreadOnly])
-    page = Integer(params.fetch(:page, '0'), 10)
-    size = Integer(params.fetch(:size, '20'), 10)
-    return render_problem(:bad_request, 'Invalid pagination parameters') unless page >= 0 && size.between?(1, 100)
+    page, size = notification_page_values
+    return unless page
 
-    total = notifications.count
-    items = notifications.order(created_at: :desc, id: :desc).offset(page * size).limit(size).map do |item|
-      notification_response(item)
-    end
-    render json: { items: items, page: page, size: size, totalElements: total,
-                   totalPages: (total.to_f / size).ceil, unreadCount: Notification.where(recipient_user_id: current_subject).unread.count }
+    render json: notification_page(notification_scope, page, size)
   rescue ArgumentError, TypeError
     render_problem(:bad_request, 'Invalid pagination parameters')
   end
@@ -30,11 +22,41 @@ class NotificationsController < ApplicationController
   end
 
   def mark_all_read
-    Notification.where(recipient_user_id: current_subject, read_at: nil).update_all(read_at: Time.current)
+    read_at = Time.current
+    unread_notifications.find_each { |notification| notification.update!(read_at: read_at) }
     head :no_content
   end
 
   private
+
+  def notification_scope
+    notifications = Notification.where(recipient_user_id: current_subject)
+    ActiveModel::Type::Boolean.new.cast(params[:unreadOnly]) ? notifications.unread : notifications
+  end
+
+  def unread_notifications
+    Notification.where(recipient_user_id: current_subject).unread
+  end
+
+  def notification_page_values
+    page = Integer(params.fetch(:page, '0'), 10)
+    size = Integer(params.fetch(:size, '20'), 10)
+    return render_problem(:bad_request, 'Invalid pagination parameters') unless page >= 0 && size.between?(1, 100)
+
+    [page, size]
+  end
+
+  def notification_page(notifications, page, size)
+    total = notifications.count
+    { items: notification_items(notifications, page, size), page: page, size: size, totalElements: total,
+      totalPages: (total.to_f / size).ceil, unreadCount: unread_notifications.count }
+  end
+
+  def notification_items(notifications, page, size)
+    notifications.order(created_at: :desc, id: :desc).offset(page * size).limit(size).map do |item|
+      notification_response(item)
+    end
+  end
 
   def notification_response(item)
     { id: item.id, eventType: item.event_type,
