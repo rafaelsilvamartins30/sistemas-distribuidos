@@ -65,7 +65,15 @@ class ProfessorVerificationRequestsController < ApplicationController
   end
 
   def create_verification(profile, department)
-    verification = InstitutionalRequest.new(
+    verification = build_verification(profile, department)
+    persist_verification(verification)
+    render json: verification.opportunity_verification_json(profile), status: :created
+  rescue ActiveRecord::RecordInvalid
+    render_problem(:bad_request, 'Professor verification request is invalid')
+  end
+
+  def build_verification(profile, department)
+    InstitutionalRequest.new(
       type: REQUEST_TYPE,
       title: "Verificação docente — #{profile.name}",
       requested_by_user_id: current_subject,
@@ -73,12 +81,12 @@ class ProfessorVerificationRequestsController < ApplicationController
       payload_json: { identifier: profile.registration_code },
       status: InstitutionalRequest::PENDING
     )
+  end
+
+  def persist_verification(verification)
     InstitutionalRequest.transaction do
       verification.save!
       CampusNotifications.request_submitted!(verification)
     end
-    render json: verification.opportunity_verification_json(profile), status: :created
-  rescue ActiveRecord::RecordInvalid
-    render_problem(:bad_request, 'Professor verification request is invalid')
   end
 end

@@ -31,7 +31,7 @@ module UserProfiles
     def profile_catalog_display_fields(profile)
       {
         'course' => catalog_course_name(profile),
-        'department' => catalog_department_name(profile),
+        'department' => catalog_department_name(profile)
       }
     end
 

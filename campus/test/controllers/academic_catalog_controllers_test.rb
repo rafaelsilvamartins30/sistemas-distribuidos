@@ -30,7 +30,7 @@ class AcademicCatalogControllersTest < ActionDispatch::IntegrationTest
     with_jwks { get "/courses?departmentId=#{department.id}&page=0&size=10", headers: bearer_headers }
 
     assert_response :success
-    assert_equal [active.id], response.parsed_body.fetch('items').map { |item| item.fetch('id') }
+    assert_equal([active.id], response.parsed_body.fetch('items').map { |item| item.fetch('id') })
     assert_equal department.id, response.parsed_body.fetch('items').sole.fetch('departmentId')
     with_jwks { get "/courses/#{active.id}", headers: bearer_headers }
     assert_response :success

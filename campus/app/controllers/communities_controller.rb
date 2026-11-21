@@ -28,19 +28,33 @@ class CommunitiesController < ApplicationController
   def update
     community = Community.find_by(id: params[:id])
     return render_problem(:not_found, 'Community not found') unless community
-    payload = profile_payload(%w[name description generalInfoMarkdown logoUrl bannerUrl links administratorUserIds category departmentId])
-    return unless payload
-    return unless require_profile_update_permissions(community, payload)
 
+    update_community_profile(community)
+  end
+
+  private
+
+  def update_community_profile(community)
+    payload = profile_payload(%w[name description generalInfoMarkdown logoUrl bannerUrl links administratorUserIds
+                                 category departmentId])
+    return unless payload
+    return unless authorize_profile_update?(community, payload)
+
+    assign_community_fields(community, payload)
+    save_community(community)
+  end
+
+  def assign_community_fields(community, payload)
     assign_profile_fields(community, payload.except('category', 'departmentId'))
     community.category = payload['category'] if payload.key?('category')
     community.department_id = payload['departmentId'] if payload.key?('departmentId')
+  end
+
+  def save_community(community)
     return render(json: community_response(community)) if community.save
 
     render_problem(:unprocessable_entity, "Invalid fields: #{community.errors.attribute_names.uniq.sort.join(', ')}")
   end
-
-  private
 
   def pagination_parameters
     page = Integer(params.fetch(:page, '0'), 10)

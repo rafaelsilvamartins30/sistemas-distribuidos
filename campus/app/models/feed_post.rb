@@ -28,7 +28,9 @@ class FeedPost < ApplicationRecord
   end
 
   def owner_must_exist
-    errors.add(:owner_id, :invalid) unless owner_type.in?(OWNER_TYPES) && InstitutionalProfileLookup.exists?(owner_type, owner_id)
+    errors.add(:owner_id, :invalid) unless owner_type.in?(OWNER_TYPES) && InstitutionalProfileLookup.exists?(
+      owner_type, owner_id
+    )
   end
 
   def body_or_poll_required

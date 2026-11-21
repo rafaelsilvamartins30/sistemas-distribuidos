@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
+# An immutable vote recorded for a poll option and user.
 class PollVote < ApplicationRecord
-  belongs_to :poll
+  belongs_to :poll, inverse_of: :poll_votes
   belongs_to :poll_option
   before_validation :assign_created_at, on: :create
 

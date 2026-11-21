@@ -26,9 +26,16 @@ class DepartmentsController < ApplicationController
   def create
     return unless require_university_admin
 
-    payload = profile_payload(%w[name acronym description generalInfoMarkdown logoUrl bannerUrl links administratorUserIds])
+    payload = profile_payload(%w[name acronym description generalInfoMarkdown logoUrl bannerUrl links
+                                 administratorUserIds])
     return unless payload
 
+    create_department(payload)
+  end
+
+  private
+
+  def create_department(payload)
     department = Department.new(id: SecureRandom.uuid)
     assign_profile_fields(department, payload.except('acronym'))
     department.administrator_user_ids = (Array(department.administrator_user_ids) + [current_subject]).uniq
@@ -38,12 +45,16 @@ class DepartmentsController < ApplicationController
     render_profile_validation_error(department)
   end
 
+  public
+
   def update
     department = Department.find_by(id: params[:id])
     return render_problem(:not_found, 'Department not found') unless department
-    payload = profile_payload(%w[name acronym description generalInfoMarkdown logoUrl bannerUrl links administratorUserIds])
+
+    payload = profile_payload(%w[name acronym description generalInfoMarkdown logoUrl bannerUrl links
+                                 administratorUserIds])
     return unless payload
-    return unless require_profile_update_permissions(department, payload)
+    return unless authorize_profile_update?(department, payload)
 
     assign_profile_fields(department, payload.except('acronym'))
     department.acronym = payload['acronym'] if payload.key?('acronym')
@@ -67,18 +78,20 @@ class DepartmentsController < ApplicationController
     nil
   end
 
-  def page_response(scope, page, size)
+  def page_response(scope, page, size, &)
     total = scope.count
-    { items: scope.offset(page * size).limit(size).map { |record| yield record }, page: page, size: size,
+    { items: scope.offset(page * size).limit(size).map(&), page: page, size: size,
       totalElements: total, totalPages: (total.to_f / size).ceil }
   end
 
   def department_response(department, include_courses: false)
     response = institutional_profile_fields(department).merge(acronym: department.acronym,
-                                                               sourceUrl: department.source_url)
-    response[:courses] = department.courses.where(reference_only: false).order(:name).map do |course|
-      course_response(course)
-    end if include_courses
+                                                              sourceUrl: department.source_url)
+    if include_courses
+      response[:courses] = department.courses.where(reference_only: false).order(:name).map do |course|
+        course_response(course)
+      end
+    end
     response
   end
 

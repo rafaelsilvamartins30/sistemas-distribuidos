@@ -3,10 +3,10 @@ use access::attendance::{
     issue_participant_qr, preview_organizer_check_in, process_message, record_participant_check_in,
     CheckInError,
 };
-use chrono::{Duration as ChronoDuration, Utc};
 use serde_json::{json, Value};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::{env, time::Duration};
+use time::{format_description::well_known::Rfc3339, Duration as TimeDuration, OffsetDateTime};
 use uuid::Uuid;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -86,9 +86,9 @@ async fn check_in_fixture(pool: &PgPool, user_id: &str) -> (Uuid, Uuid) {
     let event_id = Uuid::new_v4();
     let session_id = Uuid::new_v4();
     let entry_id = Uuid::new_v4();
-    let now = Utc::now();
-    let starts_at = now - ChronoDuration::minutes(5);
-    let ends_at = now + ChronoDuration::hours(1);
+    let now = OffsetDateTime::now_utc();
+    let starts_at = now - TimeDuration::minutes(5);
+    let ends_at = now + TimeDuration::hours(1);
     sqlx::query(
         "INSERT INTO attendance_sessions \
          (id, source_type, source_id, source_title, starts_at, ends_at, mode, status, \
@@ -127,9 +127,9 @@ async fn organizer_check_in_fixture(
     let registration_id = Uuid::new_v4();
     let session_id = Uuid::new_v4();
     let entry_id = Uuid::new_v4();
-    let now = Utc::now();
-    let starts_at = now - ChronoDuration::minutes(5);
-    let ends_at = now + ChronoDuration::hours(1);
+    let now = OffsetDateTime::now_utc();
+    let starts_at = now - TimeDuration::minutes(5);
+    let ends_at = now + TimeDuration::hours(1);
     sqlx::query(
         "INSERT INTO attendance_sessions \
          (id, source_type, source_id, source_title, starts_at, ends_at, mode, status, event_creator_user_id, \
@@ -242,15 +242,15 @@ async fn repeated_message_and_registration_create_one_session_and_one_eligible_e
     assert_eq!(entry.get::<String, _>("status"), "ELIGIBLE");
     assert!(entry.get::<String, _>("user_id").starts_with("kc-"));
     assert_eq!(message_count, 2);
-    let window: (chrono::DateTime<Utc>, chrono::DateTime<Utc>) = sqlx::query_as(
+    let window: (OffsetDateTime, OffsetDateTime) = sqlx::query_as(
         "SELECT check_in_opens_at, check_in_closes_at FROM attendance_sessions WHERE source_id = $1",
     )
     .bind(event_id)
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(window.0.to_rfc3339(), "2027-06-15T17:00:00+00:00");
-    assert_eq!(window.1.to_rfc3339(), "2027-06-15T19:00:00+00:00");
+    assert_eq!(window.0.format(&Rfc3339).unwrap(), "2027-06-15T17:00:00Z");
+    assert_eq!(window.1.format(&Rfc3339).unwrap(), "2027-06-15T19:00:00Z");
     cleanup(&pool, registration_id, event_id).await;
 }
 
@@ -385,8 +385,8 @@ async fn registration_cancellation_revokes_ticket_and_past_eligible_entries_are_
          check_in_opens_at = $2, check_in_closes_at = $3 WHERE source_id = $1",
     )
     .bind(past_event_id)
-    .bind(Utc::now() - ChronoDuration::hours(2))
-    .bind(Utc::now() - ChronoDuration::hours(1))
+    .bind(OffsetDateTime::now_utc() - TimeDuration::hours(2))
+    .bind(OffsetDateTime::now_utc() - TimeDuration::hours(1))
     .execute(&pool)
     .await
     .unwrap();
@@ -452,8 +452,8 @@ async fn check_in_rejects_requests_outside_the_starts_at_ends_at_window() {
     let user_id = format!("kc-{}", Uuid::new_v4());
     let (event_id, _) = check_in_fixture(&pool, &user_id).await;
     let token = issue_event_qr_token(&pool, event_id).await.unwrap();
-    let opens_at = Utc::now() + ChronoDuration::hours(2);
-    let closes_at = opens_at + ChronoDuration::hours(1);
+    let opens_at = OffsetDateTime::now_utc() + TimeDuration::hours(2);
+    let closes_at = opens_at + TimeDuration::hours(1);
     sqlx::query(
         "UPDATE attendance_sessions SET starts_at = $2, ends_at = $3, \
          check_in_opens_at = $2, check_in_closes_at = $3 WHERE source_id = $1",

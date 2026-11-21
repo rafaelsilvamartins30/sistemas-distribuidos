@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use lapin::{
     options::{
@@ -13,6 +12,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{postgres::PgPool, Postgres, Row, Transaction};
 use std::{error::Error, fmt};
+use time::OffsetDateTime;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
@@ -113,7 +113,8 @@ pub struct CheckInResult {
     pub session_id: Uuid,
     pub attendance_entry_id: Uuid,
     pub status: String,
-    pub checked_at: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub checked_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -123,8 +124,10 @@ pub struct MyAttendance {
     pub session_id: Uuid,
     pub attendance_entry_id: Uuid,
     pub status: String,
-    pub registered_at: DateTime<Utc>,
-    pub checked_at: Option<DateTime<Utc>>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub registered_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub checked_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -135,12 +138,16 @@ pub struct MyTicket {
     pub session_id: Uuid,
     pub attendance_entry_id: Uuid,
     pub event_title: String,
-    pub starts_at: DateTime<Utc>,
-    pub ends_at: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub starts_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub ends_at: OffsetDateTime,
     pub mode: String,
     pub status: String,
-    pub registered_at: DateTime<Utc>,
-    pub checked_at: Option<DateTime<Utc>>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub registered_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub checked_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -193,7 +200,7 @@ fn new_qr_token() -> String {
 
 async fn finalize_expired_tickets(pool: &PgPool) -> Result<(), sqlx::Error> {
     let mut transaction = pool.begin().await?;
-    let now = Utc::now();
+    let now = OffsetDateTime::now_utc();
     sqlx::query(
         "UPDATE attendance_sessions SET status = 'CLOSED' \
          WHERE status = 'OPEN' AND ends_at < $1",
@@ -361,8 +368,8 @@ fn validate_organizer_scan(
     let owner_id: Option<String> = row.try_get("event_creator_user_id")?;
     let mode: String = row.try_get("mode")?;
     let session_status: String = row.try_get("session_status")?;
-    let opens_at: DateTime<Utc> = row.try_get("check_in_opens_at")?;
-    let closes_at: DateTime<Utc> = row.try_get("check_in_closes_at")?;
+    let opens_at: OffsetDateTime = row.try_get("check_in_opens_at")?;
+    let closes_at: OffsetDateTime = row.try_get("check_in_closes_at")?;
     let entry_status: String = row.try_get("entry_status")?;
     if owner_id.as_deref() != Some(organizer_user_id) {
         return Err(CheckInError::NotEventCreator);
@@ -370,7 +377,7 @@ fn validate_organizer_scan(
     if mode != "ORGANIZER_SCANS_PARTICIPANT" || session_status != "OPEN" {
         return Err(CheckInError::SessionUnavailable);
     }
-    let now = Utc::now();
+    let now = OffsetDateTime::now_utc();
     if now < opens_at || now > closes_at {
         return Err(CheckInError::OutsideWindow);
     }
@@ -406,7 +413,7 @@ pub async fn confirm_organizer_check_in(
     let entry_status: String = row.try_get("entry_status")?;
     if entry_status == "ATTENDED" {
         let check_in_id: Option<Uuid> = row.try_get("check_in_id")?;
-        let checked_at: Option<DateTime<Utc>> = row.try_get("checked_at")?;
+        let checked_at: Option<OffsetDateTime> = row.try_get("checked_at")?;
         let result = CheckInResult {
             check_in_id: check_in_id.ok_or(CheckInError::EntryUnavailable)?,
             session_id,
@@ -417,7 +424,7 @@ pub async fn confirm_organizer_check_in(
         transaction.commit().await?;
         return Ok(result);
     }
-    let checked_at = Utc::now();
+    let checked_at = OffsetDateTime::now_utc();
     let check_in_id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO check_ins (id, session_id, attendance_entry_id, method, validated_by_user_id, checked_at) \
@@ -472,13 +479,13 @@ pub async fn record_participant_check_in(
     let session_id: Uuid = row.try_get("id")?;
     let mode: String = row.try_get("mode")?;
     let status: String = row.try_get("status")?;
-    let opens_at: DateTime<Utc> = row.try_get("check_in_opens_at")?;
-    let closes_at: DateTime<Utc> = row.try_get("check_in_closes_at")?;
+    let opens_at: OffsetDateTime = row.try_get("check_in_opens_at")?;
+    let closes_at: OffsetDateTime = row.try_get("check_in_closes_at")?;
     if mode != PARTICIPANT_SCANS_EVENT || status != "OPEN" {
         return Err(CheckInError::SessionUnavailable);
     }
 
-    let checked_at = Utc::now();
+    let checked_at = OffsetDateTime::now_utc();
     if checked_at < opens_at || checked_at > closes_at {
         return Err(CheckInError::OutsideWindow);
     }
@@ -531,7 +538,7 @@ pub async fn record_participant_check_in(
     .bind(checked_at)
     .fetch_one(&mut *transaction)
     .await?;
-    let persisted_checked_at: DateTime<Utc> = inserted.try_get("checked_at")?;
+    let persisted_checked_at: OffsetDateTime = inserted.try_get("checked_at")?;
 
     let updated = sqlx::query(
         "UPDATE attendance_entries SET status = 'ATTENDED', attended_at = $2 \
@@ -626,7 +633,8 @@ struct Envelope {
     event_type: String,
     aggregate_type: String,
     aggregate_id: Uuid,
-    occurred_at: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    occurred_at: OffsetDateTime,
     schema_version: i32,
     payload_json: Value,
 }
@@ -640,8 +648,10 @@ struct RegistrationConfirmed {
     attendance_enabled: bool,
     attendance_mode: Option<AttendanceMode>,
     event_title: String,
-    starts_at: DateTime<Utc>,
-    ends_at: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    starts_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    ends_at: OffsetDateTime,
     #[serde(default)]
     event_creator_user_id: Option<String>,
 }
@@ -675,7 +685,8 @@ struct EventCancelledEnvelope {
     event_type: String,
     aggregate_type: String,
     aggregate_id: Uuid,
-    occurred_at: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    occurred_at: OffsetDateTime,
     schema_version: i32,
     payload_json: Value,
 }
@@ -684,7 +695,8 @@ struct EventCancelledEnvelope {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EventCancelled {
     event_id: Uuid,
-    cancelled_at: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    cancelled_at: OffsetDateTime,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -694,7 +706,8 @@ struct RegistrationCancelledEnvelope {
     event_type: String,
     aggregate_type: String,
     aggregate_id: Uuid,
-    occurred_at: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    occurred_at: OffsetDateTime,
     schema_version: i32,
     payload_json: Value,
 }
@@ -705,7 +718,8 @@ struct RegistrationCancelled {
     registration_id: Uuid,
     event_id: Uuid,
     user_id: String,
-    cancelled_at: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    cancelled_at: OffsetDateTime,
 }
 
 struct ValidatedCancellation {
@@ -916,7 +930,7 @@ async fn process_registration_confirmed(pool: &PgPool, body: &[u8]) -> Result<()
 async fn lock_event_state(
     transaction: &mut Transaction<'_, Postgres>,
     event_id: Uuid,
-    created_at: DateTime<Utc>,
+    created_at: OffsetDateTime,
 ) -> Result<bool, ProcessError> {
     sqlx::query(
         "INSERT INTO attendance_event_states (event_id, status, created_at) \
@@ -1105,13 +1119,15 @@ async fn ensure_session(
     .await?;
     let session_id: Uuid = row.try_get("id")?;
     let source_title: String = row.try_get("source_title")?;
-    let starts_at: DateTime<Utc> = row.try_get("starts_at")?;
-    let ends_at: DateTime<Utc> = row.try_get("ends_at")?;
+    let starts_at: OffsetDateTime = row.try_get("starts_at")?;
+    let ends_at: OffsetDateTime = row.try_get("ends_at")?;
     let stored_mode: String = row.try_get("mode")?;
     let stored_owner_id: Option<String> = row.try_get("event_creator_user_id")?;
     if source_title != message.payload.event_title
-        || starts_at.timestamp_micros() != message.payload.starts_at.timestamp_micros()
-        || ends_at.timestamp_micros() != message.payload.ends_at.timestamp_micros()
+        || starts_at.unix_timestamp_nanos() / 1_000
+            != message.payload.starts_at.unix_timestamp_nanos() / 1_000
+        || ends_at.unix_timestamp_nanos() / 1_000
+            != message.payload.ends_at.unix_timestamp_nanos() / 1_000
         || stored_mode != mode.as_str()
         || stored_owner_id
             .as_ref()
@@ -1182,14 +1198,11 @@ async fn consume_once(
     pool: &PgPool,
     rabbitmq_url: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let connection_properties = ConnectionProperties::default()
-        .with_executor(tokio_executor_trait::Tokio::current())
-        .with_reactor(tokio_reactor_trait::Tokio);
-    let connection = Connection::connect(rabbitmq_url, connection_properties).await?;
+    let connection = Connection::connect(rabbitmq_url, ConnectionProperties::default()).await?;
     let channel = connection.create_channel().await?;
     channel
         .exchange_declare(
-            EXCHANGE,
+            EXCHANGE.into(),
             ExchangeKind::Topic,
             ExchangeDeclareOptions {
                 durable: true,
@@ -1201,7 +1214,7 @@ async fn consume_once(
     channel.basic_qos(1, BasicQosOptions::default()).await?;
     channel
         .queue_declare(
-            QUEUE,
+            QUEUE.into(),
             QueueDeclareOptions {
                 durable: true,
                 ..Default::default()
@@ -1211,35 +1224,35 @@ async fn consume_once(
         .await?;
     channel
         .queue_bind(
-            QUEUE,
-            EXCHANGE,
-            ROUTING_KEY,
+            QUEUE.into(),
+            EXCHANGE.into(),
+            ROUTING_KEY.into(),
             QueueBindOptions::default(),
             FieldTable::default(),
         )
         .await?;
     channel
         .queue_bind(
-            QUEUE,
-            EXCHANGE,
-            EVENT_CANCELLED_ROUTING_KEY,
+            QUEUE.into(),
+            EXCHANGE.into(),
+            EVENT_CANCELLED_ROUTING_KEY.into(),
             QueueBindOptions::default(),
             FieldTable::default(),
         )
         .await?;
     channel
         .queue_bind(
-            QUEUE,
-            EXCHANGE,
-            REGISTRATION_CANCELLED_ROUTING_KEY,
+            QUEUE.into(),
+            EXCHANGE.into(),
+            REGISTRATION_CANCELLED_ROUTING_KEY.into(),
             QueueBindOptions::default(),
             FieldTable::default(),
         )
         .await?;
     let mut consumer = channel
         .basic_consume(
-            QUEUE,
-            "access-registration-confirmed",
+            QUEUE.into(),
+            "access-registration-confirmed".into(),
             BasicConsumeOptions::default(),
             FieldTable::default(),
         )
@@ -1248,7 +1261,9 @@ async fn consume_once(
     while let Some(delivery) = consumer.next().await {
         let delivery = delivery?;
         match process_message(pool, &delivery.data).await {
-            Ok(()) => delivery.ack(BasicAckOptions::default()).await?,
+            Ok(()) => {
+                delivery.ack(BasicAckOptions::default()).await?;
+            }
             Err(ProcessError::Invalid(reason)) => {
                 eprintln!(
                     "Rejecting invalid RegistrationConfirmed {}: {reason}",

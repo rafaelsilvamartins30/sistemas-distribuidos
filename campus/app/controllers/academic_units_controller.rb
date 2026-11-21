@@ -29,9 +29,16 @@ class AcademicUnitsController < ApplicationController
   def create
     return unless require_university_admin
 
-    payload = profile_payload(%w[code name description generalInfoMarkdown logoUrl bannerUrl links administratorUserIds])
+    payload = profile_payload(%w[code name description generalInfoMarkdown logoUrl bannerUrl links
+                                 administratorUserIds])
     return unless payload
 
+    create_academic_unit(payload)
+  end
+
+  private
+
+  def create_academic_unit(payload)
     unit = AcademicUnit.new(id: SecureRandom.uuid)
     assign_profile_fields(unit, payload.except('code'))
     unit.administrator_user_ids = (Array(unit.administrator_user_ids) + [current_subject]).uniq
@@ -41,12 +48,16 @@ class AcademicUnitsController < ApplicationController
     render_validation_error(unit)
   end
 
+  public
+
   def update
     unit = AcademicUnit.find_by(id: params[:id])
     return render_problem(:not_found, 'Academic unit not found') unless unit
-    payload = profile_payload(%w[code name description generalInfoMarkdown logoUrl bannerUrl links administratorUserIds])
+
+    payload = profile_payload(%w[code name description generalInfoMarkdown logoUrl bannerUrl links
+                                 administratorUserIds])
     return unless payload
-    return unless require_profile_update_permissions(unit, payload)
+    return unless authorize_profile_update?(unit, payload)
 
     assign_profile_fields(unit, payload.except('code'))
     unit.code = payload['code'] if payload.key?('code')
@@ -72,7 +83,7 @@ class AcademicUnitsController < ApplicationController
 
   def academic_unit_response(unit)
     institutional_profile_fields(unit).merge(code: unit.code, sourceUrl: unit.source_url,
-                                              referenceOnly: unit.reference_only)
+                                             referenceOnly: unit.reference_only)
   end
 
   def render_validation_error(profile)

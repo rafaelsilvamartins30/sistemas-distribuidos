@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
+# An ordered choice within a Campus poll.
 class PollOption < ApplicationRecord
-  belongs_to :poll
+  belongs_to :poll, inverse_of: :poll_options
   has_many :poll_votes, dependent: :restrict_with_error
   before_validation :assign_id, on: :create
 

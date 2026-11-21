@@ -69,16 +69,18 @@ class DepartmentsControllerTest < ActionDispatch::IntegrationTest
     department = create_department(id: '10000000-0000-4000-8000-000000000010', acronym: 'DCC')
 
     with_jwks do
+      headers = bearer_headers(subject: 'platform-only', roles: ['PLATFORM_ADMIN'])
       patch "/departments/#{department.id}", params: { name: 'Nome alterado' },
-            headers: bearer_headers(subject: 'platform-only', roles: ['PLATFORM_ADMIN']), as: :json
+                                             headers: headers, as: :json
     end
     assert_response :forbidden
     assert_equal 'Departamento de Ciência da Computação', department.reload.name
 
     with_jwks do
-      post '/departments',
-           params: { name: 'Departamento novo', acronym: 'DN', description: 'Descrição.', generalInfoMarkdown: 'Info.' },
-           headers: bearer_headers(subject: 'platform-only', roles: ['PLATFORM_ADMIN']), as: :json
+      headers = bearer_headers(subject: 'platform-only', roles: ['PLATFORM_ADMIN'])
+      post '/departments', params: {
+        name: 'Departamento novo', acronym: 'DN', description: 'Descrição.', generalInfoMarkdown: 'Info.'
+      }, headers: headers, as: :json
     end
     assert_response :forbidden
   end
