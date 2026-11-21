@@ -1,0 +1,30 @@
+name: unir-rag
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.5
+    ports:
+      - "127.0.0.1:${QDRANT_PORT:-16333}:6333"
+    volumes:
+      - qdrant_rag_data:/qdrant/storage
+
+  ai-rag:
+    build:
+      context: ./ai-rag
+    image: unir-ai-rag:local
+    environment:
+      ENGAGEMENT_URL: ${ENGAGEMENT_URL:-http://host.docker.internal:18085}
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-unir_knowledge}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-8.0}
+      GEMINI_MAX_RETRIES: ${GEMINI_MAX_RETRIES:-2}
+    ports:
+      - "127.0.0.1:${AI_RAG_PORT:-18090}:8090"
+    depends_on:
+      - qdrant
+
+volumes:
+  qdrant_rag_data:
