@@ -638,6 +638,14 @@ export function createServer(options: ServerOptions = {}) {
     return forwardToEngagementService(request, reply, `/api/v1/sports${query}`);
   });
 
+  server.get("/api/v1/web/sports/organizer-contexts", async (request, reply) =>
+    forwardToEngagementService(request, reply, "/api/v1/sports/organizer-contexts"),
+  );
+
+  server.post("/api/v1/web/sports", async (request, reply) =>
+    forwardToEngagementService(request, reply, "/api/v1/sports", "POST"),
+  );
+
   server.get<{ Params: { sportId: string } }>("/api/v1/web/sports/:sportId", async (request, reply) =>
     forwardToEngagementService(request, reply, `/api/v1/sports/${encodeURIComponent(request.params.sportId)}`),
   );
@@ -646,6 +654,10 @@ export function createServer(options: ServerOptions = {}) {
     const query = new URL(request.url, "http://localhost").search;
     return forwardToEngagementService(request, reply, `/api/v1/competitions${query}`);
   });
+
+  server.post("/api/v1/web/competitions", async (request, reply) =>
+    forwardToEngagementService(request, reply, "/api/v1/competitions", "POST"),
+  );
 
   server.get<{ Params: { competitionId: string } }>("/api/v1/web/competitions/:competitionId", async (request, reply) =>
     forwardToEngagementService(
@@ -660,8 +672,90 @@ export function createServer(options: ServerOptions = {}) {
     return forwardToEngagementService(request, reply, `/api/v1/seasons${query}`);
   });
 
+  server.post("/api/v1/web/seasons", async (request, reply) =>
+    forwardToEngagementService(request, reply, "/api/v1/seasons", "POST"),
+  );
+
   server.get<{ Params: { seasonId: string } }>("/api/v1/web/seasons/:seasonId", async (request, reply) =>
     forwardToEngagementService(request, reply, `/api/v1/seasons/${encodeURIComponent(request.params.seasonId)}`),
+  );
+
+  server.get<{ Params: { contextType: string; contextId: string } }>(
+    "/api/v1/web/sports-events/:contextType/:contextId/overview",
+    async (request, reply) =>
+      forwardToEngagementService(
+        request,
+        reply,
+        `/api/v1/sports-events/${encodeURIComponent(request.params.contextType)}/${encodeURIComponent(request.params.contextId)}/overview`,
+      ),
+  );
+
+  server.post<{ Params: { contextType: string; contextId: string } }>(
+    "/api/v1/web/sports-events/:contextType/:contextId/teams",
+    async (request, reply) =>
+      forwardToEngagementService(
+        request,
+        reply,
+        `/api/v1/sports-events/${encodeURIComponent(request.params.contextType)}/${encodeURIComponent(request.params.contextId)}/teams`,
+        "POST",
+      ),
+  );
+
+  server.post<{ Params: { contextType: string; contextId: string } }>(
+    "/api/v1/web/sports-events/:contextType/:contextId/free-agents",
+    async (request, reply) =>
+      forwardToEngagementService(
+        request,
+        reply,
+        `/api/v1/sports-events/${encodeURIComponent(request.params.contextType)}/${encodeURIComponent(request.params.contextId)}/free-agents`,
+        "POST",
+      ),
+  );
+
+  server.post<{ Params: { contextType: string; contextId: string } }>(
+    "/api/v1/web/sports-events/:contextType/:contextId/matches/generate",
+    async (request, reply) =>
+      forwardToEngagementService(
+        request,
+        reply,
+        `/api/v1/sports-events/${encodeURIComponent(request.params.contextType)}/${encodeURIComponent(request.params.contextId)}/matches/generate`,
+        "POST",
+      ),
+  );
+
+  server.get("/api/v1/web/sports-matches/me", async (request, reply) =>
+    forwardToEngagementService(request, reply, "/api/v1/sports-matches/me"),
+  );
+
+  server.patch<{ Params: { matchId: string } }>("/api/v1/web/sports-matches/:matchId/score", async (request, reply) =>
+    forwardToEngagementService(
+      request,
+      reply,
+      `/api/v1/sports-matches/${encodeURIComponent(request.params.matchId)}/score`,
+      "PATCH",
+    ),
+  );
+
+  server.post<{ Params: { matchId: string } }>(
+    "/api/v1/web/sports-matches/:matchId/checkin-token",
+    async (request, reply) =>
+      forwardToEngagementService(
+        request,
+        reply,
+        `/api/v1/sports-matches/${encodeURIComponent(request.params.matchId)}/checkin-token`,
+        "POST",
+      ),
+  );
+
+  server.post<{ Params: { matchId: string } }>(
+    "/api/v1/web/sports-matches/:matchId/checkins",
+    async (request, reply) =>
+      forwardToEngagementService(
+        request,
+        reply,
+        `/api/v1/sports-matches/${encodeURIComponent(request.params.matchId)}/checkins`,
+        "POST",
+      ),
   );
 
   server.post<{ Params: { eventId: string } }>("/api/v1/web/events/:eventId/registrations", async (request, reply) => {

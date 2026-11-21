@@ -1,17 +1,23 @@
-import { useEffect, useState } from "react";
-import { Link, useOutletContext } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
-import { PaginationControls } from "../components/PaginationControls";
 import { SearchField } from "../components/SearchField";
 import { CompetitionCard, SeasonCard } from "../components/SportsCatalogCard";
+import { SportsCreateModal } from "../components/SportsCreateModal";
+import { SportsEventModal } from "../components/SportsEventModal";
 import {
   getCompetitions,
+  getMySportsMatches,
   getSeasons,
   getSports,
+  getSportsOrganizerContexts,
   type Competition,
+  type MySportsMatch,
   type Page,
   type Season,
   type Sport,
+  type SportsContextType,
+  type SportsOrganizerContext,
 } from "../services/sports.js";
 
 interface WebContext {
@@ -24,44 +30,40 @@ interface CatalogState {
   seasons: Page<Season>;
 }
 
-const PAGE_SIZE = 6;
-const EMPTY_PAGE = { items: [], page: 0, size: PAGE_SIZE, totalElements: 0, totalPages: 0 };
+type TypeFilter = "ALL" | "COMPETITION" | "SEASON";
 
-function ModalityCard({ sport }: { sport: Sport }) {
-  return (
-    <article className="sports-modality-card" data-sport-id={sport.id}>
-      <span className="sports-modality-mark" aria-hidden="true">
-        ✦
-      </span>
-      <div>
-        <p className="sports-kicker">Modalidade</p>
-        <h3>{sport.name}</h3>
-        <p>
-          {sport.playersOnField} em quadra · elenco de {sport.minimumRoster} a {sport.maximumRoster}
-        </p>
-      </div>
-      <Link className="text-link" to={`/esportes/modalidades/${sport.id}`}>
-        Regras da modalidade <span aria-hidden="true">→</span>
-      </Link>
-    </article>
-  );
+const EMPTY_PAGE = { items: [], page: 0, size: 50, totalElements: 0, totalPages: 0 };
+
+function formatMatchDate(value: string): string {
+  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 }
 
 export function SportsPage() {
   const { keycloak } = useOutletContext<WebContext>();
   const [query, setQuery] = useState("");
   const [sportFilter, setSportFilter] = useState("");
-  const [competitionSize, setCompetitionSize] = useState("");
-  const [seasonSize, setSeasonSize] = useState("");
-  const [competitionPage, setCompetitionPage] = useState(0);
-  const [seasonPage, setSeasonPage] = useState(0);
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("ALL");
   const [catalog, setCatalog] = useState<CatalogState>({
     sports: EMPTY_PAGE,
     competitions: EMPTY_PAGE,
     seasons: EMPTY_PAGE,
   });
+  const [organizerContexts, setOrganizerContexts] = useState<SportsOrganizerContext[]>([]);
+  const [myMatches, setMyMatches] = useState<MySportsMatch[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState(false);
+
+  const [selectedEvent, setSelectedEvent] = useState<{
+    contextType: SportsContextType;
+    contextId: string;
+    initialTab?: "overview" | "teams" | "matches";
+  } | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const refreshAll = useCallback(() => {
+    setReloadKey((k) => k + 1);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -71,24 +73,26 @@ export function SportsPage() {
       try {
         await keycloak.updateToken(30);
         if (!keycloak.token) throw new Error("Token de acesso indisponível.");
-        const [sports, competitions, seasons] = await Promise.all([
-          getSports(keycloak.token, { q: query, size: 100 }),
+        const [sports, competitions, seasons, contexts, matches] = await Promise.all([
+          getSports(keycloak.token, { size: 100 }),
           getCompetitions(keycloak.token, {
             q: query,
             sportId: sportFilter || undefined,
-            targetTeamCount: competitionSize ? Number(competitionSize) : undefined,
-            page: competitionPage,
-            size: PAGE_SIZE,
+            size: 50,
           }),
           getSeasons(keycloak.token, {
             q: query,
             sportId: sportFilter || undefined,
-            targetTeamCount: seasonSize ? Number(seasonSize) : undefined,
-            page: seasonPage,
-            size: PAGE_SIZE,
+            size: 50,
           }),
+          getSportsOrganizerContexts(keycloak.token).catch(() => ({ items: [] })),
+          getMySportsMatches(keycloak.token).catch(() => ({ items: [] })),
         ]);
-        if (active) setCatalog({ sports, competitions, seasons });
+        if (active) {
+          setCatalog({ sports, competitions, seasons });
+          setOrganizerContexts(contexts.items);
+          setMyMatches(matches.items);
+        }
       } catch {
         if (active) setCatalogError(true);
       } finally {
@@ -99,19 +103,12 @@ export function SportsPage() {
     return () => {
       active = false;
     };
-  }, [competitionPage, competitionSize, keycloak, query, seasonPage, seasonSize, sportFilter]);
+  }, [keycloak, query, reloadKey, sportFilter]);
 
-  function changeQuery(value: string) {
-    setQuery(value);
-    setCompetitionPage(0);
-    setSeasonPage(0);
-  }
-
-  function changeSport(value: string) {
-    setSportFilter(value);
-    setCompetitionPage(0);
-    setSeasonPage(0);
-  }
+  const visibleCompetitions = typeFilter === "SEASON" ? [] : catalog.competitions.items;
+  const visibleSeasons = typeFilter === "COMPETITION" ? [] : catalog.seasons.items;
+  const totalVisible = visibleCompetitions.length + visibleSeasons.length;
+  const canCreate = organizerContexts.length > 0;
 
   return (
     <div className="browse-page capability-page sports-page">
@@ -122,30 +119,86 @@ export function SportsPage() {
           </p>
           <h1>Esportes &amp; Ligas Universitárias</h1>
           <p>
-            Encontre competições e temporadas cadastradas pela comunidade universitária. Consulte os formatos,
-            regulamentos e prazos diretamente no catálogo.
+            Explore campeonatos e temporadas da UFLA. Clique em qualquer card para ver regras da modalidade, inscrever
+            sua equipe ou entrar como free agent e acompanhar suas partidas.
           </p>
         </div>
-        <div
-          className="sports-hero-count"
-          aria-label={`${catalog.competitions.totalElements + catalog.seasons.totalElements} competições e temporadas`}
-        >
-          <strong>{catalog.competitions.totalElements + catalog.seasons.totalElements}</strong>
-          <span>Competições e temporadas</span>
+        <div className="sports-hero-actions">
+          <div
+            className="sports-hero-count"
+            aria-label={`${catalog.competitions.totalElements + catalog.seasons.totalElements} competições e temporadas`}
+          >
+            <strong>{catalog.competitions.totalElements + catalog.seasons.totalElements}</strong>
+            <span>Competições e temporadas</span>
+          </div>
+          {canCreate && (
+            <button type="button" className="button button-primary" onClick={() => setCreateOpen(true)}>
+              + Criar
+            </button>
+          )}
         </div>
       </header>
 
-      <section className="sports-search-panel" aria-label="Buscar no catálogo esportivo">
+      {myMatches.length > 0 && (
+        <section className="sports-my-matches" aria-labelledby="sports-my-matches-title">
+          <div className="sports-section-heading">
+            <div>
+              <p className="sports-kicker">Meus campeonatos</p>
+              <h2 id="sports-my-matches-title">Próximas partidas</h2>
+            </div>
+            <span className="sports-count">{myMatches.length} partida(s)</span>
+          </div>
+          <div className="sports-my-matches-grid">
+            {myMatches.map((match) => (
+              <article key={match.matchId} className="sports-my-match-card">
+                <div className="sports-match-head">
+                  <span className="sports-catalog-type">{match.sportName}</span>
+                  <span className="sports-match-meta">{formatMatchDate(match.scheduledAt)}</span>
+                </div>
+                <h3>{match.eventTitle}</h3>
+                <p className="sports-my-match-versus">
+                  <strong>{match.teamName}</strong> vs <strong>{match.opponentName}</strong>
+                </p>
+                <p className="sports-match-meta">
+                  {match.location} ·{" "}
+                  {match.status === "COMPLETED"
+                    ? `Placar: ${match.homeScore} × ${match.awayScore}`
+                    : match.viewerCheckedIn
+                      ? "Presença confirmada ✓"
+                      : match.hasCheckinToken
+                        ? "Check-in aberto!"
+                        : "Agendada"}
+                </p>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() =>
+                    setSelectedEvent({
+                      contextType: match.contextType,
+                      contextId: match.contextId,
+                      initialTab: "matches",
+                    })
+                  }
+                >
+                  {match.hasCheckinToken && !match.viewerCheckedIn ? "Confirmar presença" : "Ver partida"}
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="sports-search-panel" aria-label="Filtrar campeonatos e temporadas">
         <SearchField
-          label="Buscar no catálogo esportivo"
-          placeholder="Buscar por campeonato, temporada ou modalidade…"
+          label="Buscar campeonatos e temporadas"
+          placeholder="Buscar por título ou modalidade…"
           value={query}
-          onChange={changeQuery}
+          onChange={setQuery}
         />
         <label className="sports-filter">
-          <span>Modalidade</span>
-          <select value={sportFilter} onChange={(event) => changeSport(event.target.value)}>
-            <option value="">Todas</option>
+          <span>Esporte</span>
+          <select value={sportFilter} onChange={(event) => setSportFilter(event.target.value)}>
+            <option value="">Todos</option>
             {catalog.sports.items.map((sport) => (
               <option key={sport.id} value={sport.id}>
                 {sport.name}
@@ -153,11 +206,19 @@ export function SportsPage() {
             ))}
           </select>
         </label>
+        <label className="sports-filter">
+          <span>Tipo</span>
+          <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as TypeFilter)}>
+            <option value="ALL">Todos</option>
+            <option value="COMPETITION">Campeonatos</option>
+            <option value="SEASON">Temporadas</option>
+          </select>
+        </label>
       </section>
 
       {catalogLoading && (
         <p className="notice" role="status">
-          Carregando modalidades, campeonatos e temporadas…
+          Carregando campeonatos e temporadas…
         </p>
       )}
       {catalogError && (
@@ -167,104 +228,65 @@ export function SportsPage() {
       )}
 
       {!catalogLoading && !catalogError && (
-        <>
-          <section className="sports-section" aria-labelledby="sports-modalities-title">
-            <div className="sports-section-heading">
-              <div>
-                <p className="sports-kicker">Regras concentradas por modalidade</p>
-                <h2 id="sports-modalities-title">Modalidades cadastradas</h2>
-              </div>
-              <span className="sports-count">{catalog.sports.totalElements} no catálogo</span>
+        <section className="sports-section" aria-labelledby="sports-unified-title">
+          <div className="sports-section-heading">
+            <div>
+              <p className="sports-kicker">Inscrições abertas e histórico</p>
+              <h2 id="sports-unified-title">Campeonatos &amp; Temporadas</h2>
             </div>
-            {catalog.sports.items.length ? (
-              <div className="sports-modality-grid">
-                {catalog.sports.items.map((sport) => (
-                  <ModalityCard key={sport.id} sport={sport} />
-                ))}
-              </div>
-            ) : (
-              <p className="sports-empty">Nenhuma modalidade corresponde à busca.</p>
-            )}
-          </section>
+            <span className="sports-count">{totalVisible} exibido(s)</span>
+          </div>
 
-          <section className="sports-section" aria-labelledby="sports-competitions-title">
-            <div className="sports-section-heading">
-              <div>
-                <p className="sports-kicker">16 ou 32 equipes · fase de grupos e mata-mata</p>
-                <h2 id="sports-competitions-title">Campeonatos</h2>
-              </div>
-              <label className="sports-inline-filter">
-                <span>Equipes</span>
-                <select
-                  value={competitionSize}
-                  onChange={(event) => {
-                    setCompetitionSize(event.target.value);
-                    setCompetitionPage(0);
-                  }}
-                >
-                  <option value="">Todos</option>
-                  <option value="16">16</option>
-                  <option value="32">32</option>
-                </select>
-              </label>
+          {totalVisible > 0 ? (
+            <div className="sports-catalog-grid">
+              {visibleCompetitions.map((competition) => (
+                <CompetitionCard
+                  key={`comp-${competition.id}`}
+                  competition={competition}
+                  onOpen={() =>
+                    setSelectedEvent({ contextType: "COMPETITION", contextId: competition.id, initialTab: "overview" })
+                  }
+                />
+              ))}
+              {visibleSeasons.map((season) => (
+                <SeasonCard
+                  key={`season-${season.id}`}
+                  season={season}
+                  onOpen={() =>
+                    setSelectedEvent({ contextType: "SEASON", contextId: season.id, initialTab: "overview" })
+                  }
+                />
+              ))}
             </div>
-            {catalog.competitions.items.length ? (
-              <div className="sports-catalog-grid">
-                {catalog.competitions.items.map((competition) => (
-                  <CompetitionCard key={competition.id} competition={competition} />
-                ))}
-              </div>
-            ) : (
-              <p className="sports-empty">
-                {query ? "Nenhum campeonato encontrado." : "Nenhum campeonato cadastrado."}
-              </p>
-            )}
-            <PaginationControls
-              page={catalog.competitions.page}
-              totalPages={catalog.competitions.totalPages}
-              onPageChange={setCompetitionPage}
-            />
-          </section>
+          ) : (
+            <p className="sports-empty">
+              {query || sportFilter || typeFilter !== "ALL"
+                ? "Nenhum campeonato ou temporada corresponde aos filtros selecionados."
+                : "Nenhum campeonato ou temporada cadastrado."}
+            </p>
+          )}
+        </section>
+      )}
 
-          <section className="sports-section" aria-labelledby="sports-seasons-title">
-            <div className="sports-section-heading">
-              <div>
-                <p className="sports-kicker">Pontos corridos · turno configurado pelo tamanho</p>
-                <h2 id="sports-seasons-title">Temporadas</h2>
-              </div>
-              <label className="sports-inline-filter">
-                <span>Equipes</span>
-                <select
-                  value={seasonSize}
-                  onChange={(event) => {
-                    setSeasonSize(event.target.value);
-                    setSeasonPage(0);
-                  }}
-                >
-                  <option value="">Todas</option>
-                  <option value="10">10</option>
-                  <option value="20">20</option>
-                </select>
-              </label>
-            </div>
-            {catalog.seasons.items.length ? (
-              <div className="sports-catalog-grid">
-                {catalog.seasons.items.map((season) => (
-                  <SeasonCard key={season.id} season={season} />
-                ))}
-              </div>
-            ) : (
-              <p className="sports-empty">
-                {query ? "Nenhuma temporada encontrada." : "Nenhuma temporada cadastrada."}
-              </p>
-            )}
-            <PaginationControls
-              page={catalog.seasons.page}
-              totalPages={catalog.seasons.totalPages}
-              onPageChange={setSeasonPage}
-            />
-          </section>
-        </>
+      {selectedEvent && (
+        <SportsEventModal
+          keycloak={keycloak}
+          contextType={selectedEvent.contextType}
+          contextId={selectedEvent.contextId}
+          initialTab={selectedEvent.initialTab}
+          onClose={() => setSelectedEvent(null)}
+          onChanged={refreshAll}
+        />
+      )}
+
+      {createOpen && (
+        <SportsCreateModal
+          keycloak={keycloak}
+          sports={catalog.sports.items}
+          organizerContexts={organizerContexts}
+          onClose={() => setCreateOpen(false)}
+          onCreated={refreshAll}
+        />
       )}
     </div>
   );

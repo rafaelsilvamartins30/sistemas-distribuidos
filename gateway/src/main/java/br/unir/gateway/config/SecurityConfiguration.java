@@ -96,7 +96,16 @@ public class SecurityConfiguration {
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/v1/web/sports", "/api/v1/web/sports/*",
                                 "/api/v1/web/competitions", "/api/v1/web/competitions/*", "/api/v1/web/seasons",
-                                "/api/v1/web/seasons/*")
+                                "/api/v1/web/seasons/*", "/api/v1/web/sports-events/*/*/overview",
+                                "/api/v1/web/sports-matches/me")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/web/sports", "/api/v1/web/competitions",
+                                "/api/v1/web/seasons", "/api/v1/web/sports-events/*/*/teams",
+                                "/api/v1/web/sports-events/*/*/free-agents",
+                                "/api/v1/web/sports-events/*/*/matches/generate",
+                                "/api/v1/web/sports-matches/*/checkin-token", "/api/v1/web/sports-matches/*/checkins")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/web/sports-matches/*/score")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/web/events/*/registrations")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)

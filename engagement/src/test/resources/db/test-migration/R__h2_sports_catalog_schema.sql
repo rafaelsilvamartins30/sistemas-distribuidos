@@ -55,3 +55,58 @@ CREATE TABLE IF NOT EXISTS seasons (
     CHECK ((target_team_count = 10 AND round_robin_mode = 'double round-robin')
         OR (target_team_count = 20 AND round_robin_mode = 'single round-robin'))
 );
+
+CREATE TABLE IF NOT EXISTS sports_teams (
+    id UUID PRIMARY KEY,
+    context_type VARCHAR(16) NOT NULL CHECK (context_type IN ('COMPETITION', 'SEASON')),
+    context_id UUID NOT NULL,
+    name VARCHAR(120) NOT NULL,
+    captain_user_id VARCHAR(128) NOT NULL,
+    status VARCHAR(32) NOT NULL CHECK (status IN ('CONFIRMED', 'CANCELLED')),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sports_team_members (
+    id UUID PRIMARY KEY,
+    team_id UUID NOT NULL REFERENCES sports_teams(id) ON DELETE CASCADE,
+    user_id VARCHAR(128),
+    display_name VARCHAR(160) NOT NULL,
+    role VARCHAR(32) NOT NULL CHECK (role IN ('CAPTAIN', 'MEMBER', 'FREE_AGENT')),
+    joined_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sports_free_agents (
+    id UUID PRIMARY KEY,
+    context_type VARCHAR(16) NOT NULL CHECK (context_type IN ('COMPETITION', 'SEASON')),
+    context_id UUID NOT NULL,
+    user_id VARCHAR(128) NOT NULL,
+    display_name VARCHAR(160) NOT NULL,
+    allocated_team_id UUID REFERENCES sports_teams(id) ON DELETE SET NULL,
+    status VARCHAR(32) NOT NULL CHECK (status IN ('QUEUED', 'ALLOCATED')),
+    registered_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sports_matches (
+    id UUID PRIMARY KEY,
+    context_type VARCHAR(16) NOT NULL CHECK (context_type IN ('COMPETITION', 'SEASON')),
+    context_id UUID NOT NULL,
+    round_number INTEGER NOT NULL CHECK (round_number >= 1),
+    home_team_id UUID NOT NULL REFERENCES sports_teams(id) ON DELETE CASCADE,
+    away_team_id UUID NOT NULL REFERENCES sports_teams(id) ON DELETE CASCADE,
+    scheduled_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    location VARCHAR(200) NOT NULL,
+    home_score INTEGER,
+    away_score INTEGER,
+    status VARCHAR(32) NOT NULL CHECK (status IN ('SCHEDULED', 'COMPLETED')),
+    checkin_token VARCHAR(64),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sports_match_checkins (
+    id UUID PRIMARY KEY,
+    match_id UUID NOT NULL REFERENCES sports_matches(id) ON DELETE CASCADE,
+    user_id VARCHAR(128) NOT NULL,
+    team_id UUID NOT NULL REFERENCES sports_teams(id) ON DELETE CASCADE,
+    checked_in_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    UNIQUE (match_id, user_id)
+);

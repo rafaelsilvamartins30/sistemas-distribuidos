@@ -566,8 +566,20 @@ class GatewayRoutingAndSecurityTest {
             assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
         }
 
-        this.mockMvc.perform(post("/api/v1/web/sports").header(HttpHeaders.AUTHORIZATION, authorizationHeader))
-                .andExpect(status().isForbidden());
+        this.mockMvc
+                .perform(post("/api/v1/web/sports").header(HttpHeaders.AUTHORIZATION, authorizationHeader)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Futsal\"}"))
+                .andExpect(status().isOk());
+        assertThat(LAST_METHOD.get()).isEqualTo("POST");
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/sports");
+
+        this.mockMvc
+                .perform(get("/api/v1/web/sports-matches/me").header(HttpHeaders.AUTHORIZATION, authorizationHeader))
+                .andExpect(status().isOk());
+        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/sports-matches/me");
+
+        this.mockMvc.perform(delete("/api/v1/web/sports/40000000-0000-4000-8000-000000000001")
+                .header(HttpHeaders.AUTHORIZATION, authorizationHeader)).andExpect(status().isForbidden());
     }
 
     @Test
