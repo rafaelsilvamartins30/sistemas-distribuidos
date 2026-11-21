@@ -9,7 +9,9 @@ import { CampusRequestsPage } from "./pages/CampusRequestsPage";
 import { EventDetailPage, EventsPage } from "./pages/EventsPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
+import { MyPaymentsPage } from "./pages/MyPaymentsPage";
 import { MySpacePage } from "./pages/MySpacePage";
+import { MySportsPage } from "./pages/MySportsPage";
 import { OpportunityDetailPage, OpportunitiesPage } from "./pages/OpportunitiesPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { SecurityPage } from "./pages/SecurityPage";
@@ -116,6 +118,8 @@ export function App({ keycloak }: AppProps) {
             <Route path="/oportunidades/:opportunityId" element={<OpportunityDetailPage />} />
             <Route path="/me" element={<Navigate to="/perfil" replace />} />
             <Route path="/tickets" element={<MySpacePage />} />
+            <Route path="/meus-esportes" element={<MySportsPage />} />
+            <Route path="/pagamentos" element={<MyPaymentsPage />} />
             <Route path="/my-registrations" element={<Navigate to="/tickets" replace />} />
             <Route path="/perfil" element={<AccountLayout keycloak={keycloak} />}>
               <Route index element={<ProfilePage />} />

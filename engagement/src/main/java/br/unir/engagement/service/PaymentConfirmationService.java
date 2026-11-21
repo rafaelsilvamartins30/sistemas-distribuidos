@@ -38,20 +38,30 @@ public class PaymentConfirmationService {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final SportsParticipationService sportsParticipationService;
 
     @Autowired
     public PaymentConfirmationService(EventRepository eventRepository, RegistrationRepository registrationRepository,
-            JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
-        this(eventRepository, registrationRepository, jdbcTemplate, objectMapper, Clock.systemUTC());
+            JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
+            SportsParticipationService sportsParticipationService) {
+        this(eventRepository, registrationRepository, jdbcTemplate, objectMapper, Clock.systemUTC(),
+                sportsParticipationService);
     }
 
     PaymentConfirmationService(EventRepository eventRepository, RegistrationRepository registrationRepository,
             JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, Clock clock) {
+        this(eventRepository, registrationRepository, jdbcTemplate, objectMapper, clock, null);
+    }
+
+    PaymentConfirmationService(EventRepository eventRepository, RegistrationRepository registrationRepository,
+            JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, Clock clock,
+            SportsParticipationService sportsParticipationService) {
         this.eventRepository = eventRepository;
         this.registrationRepository = registrationRepository;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper.copy();
         this.clock = clock;
+        this.sportsParticipationService = sportsParticipationService;
     }
 
     @Transactional
@@ -73,6 +83,10 @@ public class PaymentConfirmationService {
             return;
         }
         if (registration == null) {
+            if (this.sportsParticipationService != null && this.sportsParticipationService
+                    .confirmSportsPayment(payload.registrationId(), payload.userId())) {
+                return;
+            }
             this.recordCompensation(payload, envelope.messageId(), "REGISTRATION_NOT_FOUND");
             return;
         }

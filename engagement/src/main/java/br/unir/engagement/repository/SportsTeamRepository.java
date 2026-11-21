@@ -11,5 +11,8 @@ public interface SportsTeamRepository extends JpaRepository<SportsTeam, UUID> {
     List<SportsTeam> findByContextTypeAndContextIdAndStatusOrderByCreatedAtAsc(String contextType, UUID contextId,
             String status);
 
+    List<SportsTeam> findByContextTypeAndContextIdAndStatusInOrderByCreatedAtAsc(String contextType, UUID contextId,
+            Collection<String> statuses);
+
     List<SportsTeam> findByIdIn(Collection<UUID> ids);
 }

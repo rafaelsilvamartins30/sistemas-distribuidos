@@ -73,4 +73,8 @@ public class SportsTeam {
     public Instant getCreatedAt() {
         return this.createdAt;
     }
+
+    public void confirmPayment() {
+        this.status = "CONFIRMED";
+    }
 }

@@ -20,6 +20,7 @@ import br.unir.engagement.repository.CompetitionRepository;
 import br.unir.engagement.repository.SeasonRepository;
 import br.unir.engagement.repository.SportRepository;
 import br.unir.engagement.service.EventProjectionStore;
+import br.unir.engagement.service.PaymentConfirmationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
@@ -71,8 +72,13 @@ class SportsCatalogEndpointTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private PaymentConfirmationService paymentConfirmationService;
+
     @BeforeEach
     void clearSportsCatalog() {
+        this.jdbcTemplate.update("DELETE FROM processed_payment_confirmations");
+        this.jdbcTemplate.update("DELETE FROM outbox_events");
         this.jdbcTemplate.update("DELETE FROM sports_match_checkins");
         this.jdbcTemplate.update("DELETE FROM sports_matches");
         this.jdbcTemplate.update("DELETE FROM sports_free_agents");
@@ -325,6 +331,51 @@ class SportsCatalogEndpointTest {
                         .with(userJwt("fa-2", "Bruno")).contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("ALLOCATED"))
                 .andExpect(jsonPath("$.teamName").value("Equipe Free Agents #1"));
+    }
+
+    @Test
+    void paidSportsRegistrationUsesOutboxAndConfirmsViaPaymentSaga() throws Exception {
+        Sport sport = new Sport(SPORT_ID, "Futsal Pago", 5, 2, 4, true, 3, 1, 0, 3, "Regras.", "DEPARTMENT",
+                ORGANIZER_ID, "ACTIVE");
+        this.sportRepository.saveAndFlush(sport);
+        Competition comp = new Competition(UUID.randomUUID(), "Copa Paga UFLA", sport, "COMPETITIVE", "DEPARTMENT",
+                ORGANIZER_ID, new UUID[0], 16, 2, 4, new String[]{"SCORE_DIFFERENCE"}, 5000, 1000,
+                Instant.now().plusSeconds(86_400), null, "OPEN", "GROUPS_KNOCKOUT");
+        this.competitionRepository.saveAndFlush(comp);
+
+        MvcResult teamResult = this.mockMvc
+                .perform(post("/api/v1/sports-events/COMPETITION/{id}/teams", comp.getId())
+                        .with(userJwt("payer-1", "Rafael")).contentType(MediaType.APPLICATION_JSON).content("""
+                                {"name":"Time Pago","memberNames":[]}
+                                """))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("PENDING_PAYMENT")).andReturn();
+        String teamId = this.objectMapper.readTree(teamResult.getResponse().getContentAsString()).get("id").asText();
+
+        // Not yet in /sports-events/me before payment confirmation
+        this.mockMvc.perform(get("/api/v1/sports-events/me").with(userJwt("payer-1", "Rafael")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(0));
+
+        // Outbox event was written for Payment service
+        Integer outboxCount = this.jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM outbox_events WHERE aggregate_id = ?", Integer.class, UUID.fromString(teamId));
+        org.junit.jupiter.api.Assertions.assertEquals(1, outboxCount);
+
+        // Payment service publishes PaymentConfirmed -> Engagement confirms the team
+        UUID chargeId = UUID.randomUUID();
+        Instant now = Instant.now();
+        String envelopeJson = """
+                {"messageId":"%s","eventType":"PaymentConfirmed","aggregateType":"Charge","aggregateId":"%s",
+                 "schemaVersion":1,"occurredAt":"%s",
+                 "payloadJson":{"chargeId":"%s","registrationId":"%s","eventId":"%s","userId":"payer-1",
+                                "amountMinor":5000,"currency":"BRL","paidAt":"%s"}}
+                """.formatted(UUID.randomUUID(), chargeId, now, chargeId, teamId, comp.getId(), now);
+        this.paymentConfirmationService.consume(envelopeJson.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        // Now appears in /sports-events/me!
+        this.mockMvc.perform(get("/api/v1/sports-events/me").with(userJwt("payer-1", "Rafael")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].title").value("Copa Paga UFLA"))
+                .andExpect(jsonPath("$.items[0].teamName").value("Time Pago"));
     }
 
     @Test

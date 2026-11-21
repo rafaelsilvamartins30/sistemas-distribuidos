@@ -8,6 +8,7 @@ import br.unir.engagement.dto.CreateSportRequest;
 import br.unir.engagement.dto.CreateSportsTeamRequest;
 import br.unir.engagement.dto.EventOrganizerContextsResponse;
 import br.unir.engagement.dto.GenerateSportsMatchesRequest;
+import br.unir.engagement.dto.MySportsEnrollmentsResponse;
 import br.unir.engagement.dto.MySportsMatchesResponse;
 import br.unir.engagement.dto.RecordSportsMatchScoreRequest;
 import br.unir.engagement.dto.RegisterFreeAgentRequest;
@@ -24,6 +25,7 @@ import br.unir.engagement.dto.SportsMatchResponse;
 import br.unir.engagement.dto.SportsTeamResponse;
 import br.unir.engagement.service.SportsCatalogService;
 import br.unir.engagement.service.SportsParticipationService;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -46,6 +48,7 @@ public class SportsCatalogController {
     private final SportsCatalogService sportsCatalogService;
     private final SportsParticipationService participationService;
 
+    @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Spring injects container-managed service beans")
     public SportsCatalogController(SportsCatalogService sportsCatalogService,
             SportsParticipationService participationService) {
         this.sportsCatalogService = sportsCatalogService;
@@ -165,6 +168,11 @@ public class SportsCatalogController {
     public SportsMatchCheckInResponse checkIn(@PathVariable UUID matchId,
             @RequestBody SportsMatchCheckInRequest request, @AuthenticationPrincipal Jwt jwt) {
         return this.participationService.checkIn(matchId, request, jwt.getSubject());
+    }
+
+    @GetMapping("/sports-events/me")
+    public MySportsEnrollmentsResponse myEnrollments(@AuthenticationPrincipal Jwt jwt) {
+        return this.participationService.getMyEnrollments(jwt.getSubject());
     }
 
     @GetMapping("/sports-matches/me")

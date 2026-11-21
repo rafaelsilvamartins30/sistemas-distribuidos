@@ -6,6 +6,7 @@ const server = createServer({
   engagementServiceUrl: process.env.ENGAGEMENT_SERVICE_URL,
   accessServiceUrl: process.env.ACCESS_SERVICE_URL,
   ragServiceUrl: process.env.RAG_SERVICE_URL,
+  paymentServiceUrl: process.env.PAYMENT_SERVICE_URL,
 });
 
 try {

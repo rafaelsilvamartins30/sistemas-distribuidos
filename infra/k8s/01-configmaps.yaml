@@ -26,6 +26,7 @@ data:
   RAG_SYNC_CLIENT_ID: "unir-rag-sync"
   EMBEDDING_MODEL: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
   ACCESS_SERVICE_URL: "http://access:8080"
+  PAYMENT_SERVICE_URL: "http://payment:8080"
   WEB_BFF_URL: "http://web-bff:3000"
   ADMIN_BFF_URL: "http://admin-bff:3000"
   WEB_ORIGIN: "http://localhost:18080"

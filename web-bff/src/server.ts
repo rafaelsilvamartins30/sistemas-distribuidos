@@ -9,6 +9,7 @@ interface ServerOptions {
   engagementServiceUrl?: string;
   accessServiceUrl?: string;
   ragServiceUrl?: string;
+  paymentServiceUrl?: string;
   fetch?: typeof globalThis.fetch;
 }
 
@@ -17,10 +18,12 @@ export function createServer(options: ServerOptions = {}) {
   const engagementServiceUrl = (options.engagementServiceUrl ?? "http://localhost:8080").replace(/\/+$/, "");
   const accessServiceUrl = (options.accessServiceUrl ?? "http://localhost:18087").replace(/\/+$/, "");
   const ragServiceUrl = (options.ragServiceUrl ?? "http://localhost:8090").replace(/\/+$/, "");
+  const paymentServiceUrl = (options.paymentServiceUrl ?? "http://localhost:18086").replace(/\/+$/, "");
   const fetchCampus = options.fetch ?? globalThis.fetch;
   const fetchEngagementService = options.fetch ?? globalThis.fetch;
   const fetchAccessService = options.fetch ?? globalThis.fetch;
   const fetchRagService = options.fetch ?? globalThis.fetch;
+  const fetchPaymentService = options.fetch ?? globalThis.fetch;
   const server = Fastify({ logger: true });
 
   server.get("/health", async () => ({ status: "ok" }));
@@ -723,8 +726,60 @@ export function createServer(options: ServerOptions = {}) {
       ),
   );
 
+  server.get("/api/v1/web/sports-events/me", async (request, reply) =>
+    forwardToEngagementService(request, reply, "/api/v1/sports-events/me"),
+  );
+
   server.get("/api/v1/web/sports-matches/me", async (request, reply) =>
     forwardToEngagementService(request, reply, "/api/v1/sports-matches/me"),
+  );
+
+  async function forwardToPaymentService(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    path: string,
+    method: "GET" | "POST" = "GET",
+  ) {
+    const authorization = request.headers.authorization;
+    if (typeof authorization !== "string" || !/^Bearer\s+\S+$/i.test(authorization)) {
+      return reply.code(401).send({ error: "A bearer token is required" });
+    }
+    const headers: Record<string, string> = { authorization };
+    let requestBody: string | undefined;
+    if (method === "POST" && request.body !== undefined) {
+      headers["content-type"] = "application/json";
+      requestBody = typeof request.body === "string" ? request.body : JSON.stringify(request.body);
+    }
+    try {
+      const response = await fetchPaymentService(`${paymentServiceUrl}${path}`, {
+        method,
+        headers,
+        ...(requestBody !== undefined ? { body: requestBody } : {}),
+        signal: AbortSignal.timeout(5000),
+      });
+      const body = Buffer.from(await response.arrayBuffer());
+      const contentType = response.headers.get("content-type");
+      if (contentType) reply.header("content-type", contentType);
+      return reply.code(response.status).send(body);
+    } catch (error) {
+      request.log.error({ err: error }, "Payment Service request failed");
+      return reply.code(503).send({ error: "Payment Service unavailable" });
+    }
+  }
+
+  server.get("/api/v1/web/payments/me", async (request, reply) =>
+    forwardToPaymentService(request, reply, "/api/v1/payments/me"),
+  );
+
+  server.post<{ Params: { registrationId: string } }>(
+    "/api/v1/web/payments/:registrationId/confirm",
+    async (request, reply) =>
+      forwardToPaymentService(
+        request,
+        reply,
+        `/api/v1/payments/${encodeURIComponent(request.params.registrationId)}/confirm`,
+        "POST",
+      ),
   );
 
   server.patch<{ Params: { matchId: string } }>("/api/v1/web/sports-matches/:matchId/score", async (request, reply) =>

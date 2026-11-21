@@ -37,7 +37,11 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
       ? "Minha conta"
       : location.pathname.startsWith("/tickets")
         ? "Meus tickets"
-        : (section?.label ?? "Campus");
+        : location.pathname.startsWith("/meus-esportes")
+          ? "Meus esportes"
+          : location.pathname.startsWith("/pagamentos")
+            ? "Meus pagamentos"
+            : (section?.label ?? "Campus");
     document.title = `UNIR — ${label}`;
   }, [location.pathname]);
 
@@ -131,6 +135,12 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
                 </Link>
                 <Link to="/tickets">
                   <Icon name="calendar" width="17" height="17" /> Meus tickets
+                </Link>
+                <Link to="/meus-esportes">
+                  <Icon name="calendar" width="17" height="17" /> Meus esportes
+                </Link>
+                <Link to="/pagamentos">
+                  <Icon name="opportunity" width="17" height="17" /> Meus pagamentos
                 </Link>
                 <Link to="/solicitacoes">
                   <Icon name="message" width="17" height="17" /> Solicitações

@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS sports_teams (
     context_id UUID NOT NULL,
     name VARCHAR(120) NOT NULL,
     captain_user_id VARCHAR(128) NOT NULL,
-    status VARCHAR(32) NOT NULL CHECK (status IN ('CONFIRMED', 'CANCELLED')),
+    status VARCHAR(32) NOT NULL CHECK (status IN ('PENDING_PAYMENT', 'CONFIRMED', 'CANCELLED')),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS sports_free_agents (
     user_id VARCHAR(128) NOT NULL,
     display_name VARCHAR(160) NOT NULL,
     allocated_team_id UUID REFERENCES sports_teams(id) ON DELETE SET NULL,
-    status VARCHAR(32) NOT NULL CHECK (status IN ('QUEUED', 'ALLOCATED')),
+    status VARCHAR(32) NOT NULL CHECK (status IN ('PENDING_PAYMENT', 'QUEUED', 'ALLOCATED')),
     registered_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 

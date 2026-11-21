@@ -97,7 +97,7 @@ export interface SportsFreeAgent {
 }
 
 export interface SportsFreeAgentRegistrationResult {
-  status: "QUEUED" | "ALLOCATED";
+  status: "PENDING_PAYMENT" | "QUEUED" | "ALLOCATED";
   teamId: string | null;
   teamName: string | null;
 }
@@ -143,6 +143,18 @@ export interface SportsEventOverview {
   viewerCanManage: boolean;
   viewerTeamId: string | null;
   viewerFreeAgentQueued: boolean;
+  viewerPendingPayment: boolean;
+}
+
+export interface MySportsEnrollment {
+  contextType: SportsContextType;
+  contextId: string;
+  title: string;
+  sportName: string;
+  skillLevel: string;
+  enrollmentRole: "TEAM" | "FREE_AGENT_QUEUED";
+  teamName: string | null;
+  registrationDeadline: string;
 }
 
 export interface MySportsMatch {
@@ -505,4 +517,17 @@ export function getMySportsMatches(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<{ items: MySportsMatch[] }> {
   return request<{ items: MySportsMatch[] }>("/api/v1/web/sports-matches/me", token, gatewayUrl(baseUrl), fetchImpl);
+}
+
+export function getMySportsEnrollments(
+  token: string,
+  baseUrl?: string,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<{ items: MySportsEnrollment[] }> {
+  return request<{ items: MySportsEnrollment[] }>(
+    "/api/v1/web/sports-events/me",
+    token,
+    gatewayUrl(baseUrl),
+    fetchImpl,
+  );
 }

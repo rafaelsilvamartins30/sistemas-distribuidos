@@ -258,6 +258,7 @@ services:
       CAMPUS_URL: http://campus:3000
       ENGAGEMENT_SERVICE_URL: http://engagement:8080
       ACCESS_SERVICE_URL: http://access:8080
+      PAYMENT_SERVICE_URL: http://payment:8080
     ports:
       - "127.0.0.1:${WEB_BFF_PORT:-18083}:3000"
     depends_on:

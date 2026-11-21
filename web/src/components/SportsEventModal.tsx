@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import {
   checkInSportsMatch,
@@ -116,7 +117,13 @@ export function SportsEventModal({
       });
       setTeamName("");
       setMemberNamesRaw("");
-      setFeedback(`Equipe "${created.name}" inscrita com sucesso!`);
+      if (created.status === "PENDING_PAYMENT") {
+        setFeedback(
+          `Inscrição da equipe "${created.name}" criada! Finalize o pagamento em Meus pagamentos para confirmar sua vaga.`,
+        );
+      } else {
+        setFeedback(`Equipe "${created.name}" inscrita com sucesso! Ela já aparece em Meus esportes.`);
+      }
       await loadOverview();
       onChanged();
     } catch (err) {
@@ -138,7 +145,11 @@ export function SportsEventModal({
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Sessão expirada.");
       const result = await registerSportsFreeAgent(keycloak.token, contextType, contextId, {});
-      if (result.status === "ALLOCATED" && result.teamName) {
+      if (result.status === "PENDING_PAYMENT") {
+        setFeedback(
+          "Cobrança gerada! Conclua o pagamento em Meus pagamentos para ser alocado automaticamente e liberar em Meus esportes.",
+        );
+      } else if (result.status === "ALLOCATED" && result.teamName) {
         setFeedback(`Você foi alocado automaticamente na equipe "${result.teamName}"!`);
       } else {
         setFeedback(
@@ -236,7 +247,10 @@ export function SportsEventModal({
     }
   }
 
-  const isEnrolled = Boolean(overview?.viewerTeamId) || Boolean(overview?.viewerFreeAgentQueued);
+  const isEnrolled =
+    Boolean(overview?.viewerTeamId) ||
+    Boolean(overview?.viewerFreeAgentQueued) ||
+    Boolean(overview?.viewerPendingPayment);
 
   return (
     <div className="sports-modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
@@ -381,11 +395,25 @@ export function SportsEventModal({
                   </div>
                 </div>
               ) : (
-                <p className="sports-detail-note">
-                  {overview.viewerTeamId
-                    ? "Você já está inscrito em uma equipe neste campeonato."
-                    : "Você está na fila de Free Agents aguardando alocação automática."}
-                </p>
+                <div className="sports-detail-note">
+                  {overview.viewerPendingPayment ? (
+                    <>
+                      Sua inscrição está aguardando pagamento.{" "}
+                      <Link className="text-link" to="/pagamentos" onClick={onClose}>
+                        Ir para Meus pagamentos →
+                      </Link>
+                    </>
+                  ) : overview.viewerTeamId ? (
+                    <>
+                      Você já está inscrito em uma equipe neste campeonato.{" "}
+                      <Link className="text-link" to="/meus-esportes" onClick={onClose}>
+                        Ver em Meus esportes →
+                      </Link>
+                    </>
+                  ) : (
+                    "Você está na fila de Free Agents aguardando alocação automática."
+                  )}
+                </div>
               )}
 
               <section className="sports-modal-section">

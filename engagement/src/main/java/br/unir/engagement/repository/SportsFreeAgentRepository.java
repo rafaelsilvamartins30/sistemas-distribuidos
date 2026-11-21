@@ -12,4 +12,6 @@ public interface SportsFreeAgentRepository extends JpaRepository<SportsFreeAgent
 
     boolean existsByContextTypeAndContextIdAndUserIdAndStatus(String contextType, UUID contextId, String userId,
             String status);
+
+    List<SportsFreeAgent> findByUserIdAndStatusOrderByRegisteredAtDesc(String userId, String status);
 }

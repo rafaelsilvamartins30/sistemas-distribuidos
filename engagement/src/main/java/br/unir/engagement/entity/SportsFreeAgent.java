@@ -86,4 +86,8 @@ public class SportsFreeAgent {
         this.allocatedTeamId = teamId;
         this.status = "ALLOCATED";
     }
+
+    public void markQueued() {
+        this.status = "QUEUED";
+    }
 }

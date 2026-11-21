@@ -63,7 +63,7 @@ func run() error {
 	port := envOr("PORT", "8080")
 	httpServer := &http.Server{
 		Addr:              ":" + port,
-		Handler:           server.NewHandlerWithSimulation(db, simulatedConfirmer(processor)),
+		Handler:           server.NewHandlerWithStore(db, processor, simulatedConfirmer(processor)),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	serverErrors := make(chan error, 1)

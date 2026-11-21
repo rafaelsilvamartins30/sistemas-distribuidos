@@ -29,6 +29,7 @@ const (
 
 var (
 	ErrChargeNotFound        = errors.New("charge not found")
+	ErrChargeForbidden       = errors.New("charge does not belong to authenticated user")
 	ErrChargeNotPending      = errors.New("charge is not pending")
 	ErrNotSimulated          = errors.New("charge is not managed by the simulated provider")
 	ErrInvalidPaidAt         = errors.New("paidAt must not be in the future")
@@ -383,6 +384,89 @@ func (s *Store) persistExpiredRequest(ctx context.Context, tx *sql.Tx, request R
 		return fmt.Errorf("commit expired payment request: %w", err)
 	}
 	return nil
+}
+
+// ChargeSummary is the read model exposed to authenticated payers.
+type ChargeSummary struct {
+	ChargeID      string     `json:"chargeId"`
+	ReferenceType string     `json:"referenceType"`
+	ReferenceID   string     `json:"referenceId"`
+	PayerUserID   string     `json:"payerUserId"`
+	AmountMinor   int64      `json:"amountMinor"`
+	Currency      string     `json:"currency"`
+	Status        string     `json:"status"`
+	Provider      string     `json:"provider"`
+	PixCopyPaste  string     `json:"pixCopyPaste,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	ExpiresAt     *time.Time `json:"expiresAt,omitempty"`
+	PaidAt        *time.Time `json:"paidAt,omitempty"`
+	RefundedAt    *time.Time `json:"refundedAt,omitempty"`
+}
+
+// ListChargesForUser returns persisted charge projections owned by payerUserID.
+func (s *Store) ListChargesForUser(ctx context.Context, payerUserID string) ([]ChargeSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT charge_id, reference_type, reference_id, payer_user_id, amount_minor, currency,
+		       status, provider, COALESCE(pix_copy_paste, ''), created_at, expires_at, paid_at, refunded_at
+		FROM charge_projections
+		WHERE payer_user_id = $1
+		ORDER BY created_at DESC
+	`, payerUserID)
+	if err != nil {
+		return nil, fmt.Errorf("query user charges: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	items := make([]ChargeSummary, 0)
+	for rows.Next() {
+		var item ChargeSummary
+		var expiresAt, paidAt, refundedAt sql.NullTime
+		if err := rows.Scan(&item.ChargeID, &item.ReferenceType, &item.ReferenceID, &item.PayerUserID,
+			&item.AmountMinor, &item.Currency, &item.Status, &item.Provider, &item.PixCopyPaste,
+			&item.CreatedAt, &expiresAt, &paidAt, &refundedAt); err != nil {
+			return nil, fmt.Errorf("scan user charge: %w", err)
+		}
+		if expiresAt.Valid {
+			t := expiresAt.Time.UTC()
+			item.ExpiresAt = &t
+		}
+		if paidAt.Valid {
+			t := paidAt.Time.UTC()
+			item.PaidAt = &t
+		}
+		if refundedAt.Valid {
+			t := refundedAt.Time.UTC()
+			item.RefundedAt = &t
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate user charges: %w", err)
+	}
+	return items, nil
+}
+
+// ConfirmSimulatedPaymentForUser verifies charge ownership before settling a simulated charge.
+func (s *Store) ConfirmSimulatedPaymentForUser(ctx context.Context, registrationID, payerUserID string,
+	requestedPaidAt time.Time) (PaymentConfirmedEvent, error) {
+	if !uuidPattern.MatchString(registrationID) {
+		return PaymentConfirmedEvent{}, ErrInvalidReference
+	}
+	var owner string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT payer_user_id FROM charge_projections
+		WHERE reference_type = $1 AND reference_id = $2
+	`, RegistrationReferenceType, strings.ToLower(registrationID)).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PaymentConfirmedEvent{}, ErrChargeNotFound
+	}
+	if err != nil {
+		return PaymentConfirmedEvent{}, fmt.Errorf("load charge owner: %w", err)
+	}
+	if owner != payerUserID {
+		return PaymentConfirmedEvent{}, ErrChargeForbidden
+	}
+	return s.ConfirmSimulatedPayment(ctx, registrationID, requestedPaidAt)
 }
 
 // ConfirmSimulatedPayment explicitly settles a pending simulated charge. It is

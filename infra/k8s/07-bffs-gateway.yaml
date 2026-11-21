@@ -47,6 +47,11 @@ spec:
                 configMapKeyRef:
                   name: unir-common-config
                   key: RAG_SERVICE_URL
+            - name: PAYMENT_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: PAYMENT_SERVICE_URL
           readinessProbe:
             httpGet:
               path: /health

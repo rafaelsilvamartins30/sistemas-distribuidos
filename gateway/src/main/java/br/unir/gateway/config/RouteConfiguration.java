@@ -108,6 +108,7 @@ public class RouteConfiguration {
                 .route(RequestPredicates.GET("/api/v1/web/seasons"), HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/seasons"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/seasons/{seasonId}"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/sports-events/me"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/sports-events/{contextType}/{contextId}/overview"),
                         HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/sports-events/{contextType}/{contextId}/teams"),
@@ -121,6 +122,8 @@ public class RouteConfiguration {
                 .route(RequestPredicates.POST("/api/v1/web/sports-matches/{matchId}/checkin-token"),
                         HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/sports-matches/{matchId}/checkins"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/payments/me"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/payments/{registrationId}/confirm"), HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/events/{eventId}/registrations"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/me/activities"), HandlerFunctions.http())
                 .route(RequestPredicates.DELETE("/api/v1/web/registrations/{registrationId}"), HandlerFunctions.http())
