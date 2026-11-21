@@ -99,11 +99,28 @@ public class RouteConfiguration {
                 .route(RequestPredicates.POST("/api/v1/web/notifications/{notificationId}/read"),
                         HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/sports"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/sports/organizer-contexts"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/sports"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/sports/{sportId}"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/competitions"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/competitions"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/competitions/{competitionId}"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/seasons"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/seasons"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/seasons/{seasonId}"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/sports-events/{contextType}/{contextId}/overview"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/sports-events/{contextType}/{contextId}/teams"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/sports-events/{contextType}/{contextId}/free-agents"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/sports-events/{contextType}/{contextId}/matches/generate"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/sports-matches/me"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/web/sports-matches/{matchId}/score"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/sports-matches/{matchId}/checkin-token"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/sports-matches/{matchId}/checkins"), HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/events/{eventId}/registrations"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/me/activities"), HandlerFunctions.http())
                 .route(RequestPredicates.DELETE("/api/v1/web/registrations/{registrationId}"), HandlerFunctions.http())

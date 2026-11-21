@@ -42,7 +42,7 @@ function Facts({ item }: { item: Competition | Season }) {
   );
 }
 
-export function CompetitionCard({ competition }: { competition: Competition }) {
+export function CompetitionCard({ competition, onOpen }: { competition: Competition; onOpen?: () => void }) {
   return (
     <article className="sports-catalog-card" data-competition-id={competition.id}>
       <div className="sports-catalog-card-heading">
@@ -65,14 +65,20 @@ export function CompetitionCard({ competition }: { competition: Competition }) {
           Free agent <strong>{currency(competition.freeAgentPrice)}</strong>
         </span>
       </div>
-      <Link className="button button-primary" to={`/esportes/campeonatos/${competition.id}`}>
-        Ver campeonato
-      </Link>
+      {onOpen ? (
+        <button type="button" className="button button-primary" onClick={onOpen}>
+          Abrir campeonato
+        </button>
+      ) : (
+        <Link className="button button-primary" to={`/esportes/campeonatos/${competition.id}`}>
+          Ver campeonato
+        </Link>
+      )}
     </article>
   );
 }
 
-export function SeasonCard({ season }: { season: Season }) {
+export function SeasonCard({ season, onOpen }: { season: Season; onOpen?: () => void }) {
   const roundLabel = season.roundRobinMode === "double round-robin" ? "Turno e returno" : "Turno único";
   return (
     <article className="sports-catalog-card" data-season-id={season.id}>
@@ -98,9 +104,15 @@ export function SeasonCard({ season }: { season: Season }) {
           Free agent <strong>{currency(season.freeAgentPrice)}</strong>
         </span>
       </div>
-      <Link className="button button-primary" to={`/esportes/temporadas/${season.id}`}>
-        Ver temporada
-      </Link>
+      {onOpen ? (
+        <button type="button" className="button button-primary" onClick={onOpen}>
+          Abrir temporada
+        </button>
+      ) : (
+        <Link className="button button-primary" to={`/esportes/temporadas/${season.id}`}>
+          Ver temporada
+        </Link>
+      )}
     </article>
   );
 }

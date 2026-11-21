@@ -5,12 +5,17 @@ import { MemoryRouter } from "react-router-dom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CompetitionCard, SeasonCard } from "../src/components/SportsCatalogCard.js";
 import {
+  checkInSportsMatch,
   getCompetition,
   getCompetitions,
+  getMySportsMatches,
   getSeason,
   getSeasons,
   getSport,
   getSports,
+  getSportsEventOverview,
+  registerSportsFreeAgent,
+  registerSportsTeam,
   SportsApiError,
   type Competition,
   type Season,
@@ -151,4 +156,34 @@ test("catalog cards use stored attributes and link only to informational details
   assert.match(seasonMarkup, /Turno e returno/);
   assert.match(seasonMarkup, new RegExp(`/esportes/temporadas/${season.id}`));
   assert.doesNotMatch(`${competitionMarkup}${seasonMarkup}`, /Inscrever-se|Garantir vaga|Classificação/);
+
+  const modalButtonMarkup = renderToStaticMarkup(
+    createElement(MemoryRouter, null, createElement(CompetitionCard, { competition, onOpen: () => undefined })),
+  );
+  assert.match(modalButtonMarkup, /Abrir campeonato/);
+});
+
+test("participation services call overview, team, free-agent, matches and check-in routes", async () => {
+  const requests: Array<{ url: string; method: string }> = [];
+  const fetchImpl: typeof globalThis.fetch = async (input, init) => {
+    requests.push({ url: String(input), method: init?.method ?? "GET" });
+    return new Response(JSON.stringify({ items: [], status: "ALLOCATED" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  await getSportsEventOverview("token", "COMPETITION", competition.id, "http://gateway", fetchImpl);
+  await registerSportsTeam("token", "COMPETITION", competition.id, { name: "Time A" }, "http://gateway", fetchImpl);
+  await registerSportsFreeAgent("token", "COMPETITION", competition.id, {}, "http://gateway", fetchImpl);
+  await getMySportsMatches("token", "http://gateway", fetchImpl);
+  await checkInSportsMatch("token", "match-1", "UNIR-12345678", "http://gateway", fetchImpl);
+
+  assert.deepEqual(requests, [
+    { url: `http://gateway/api/v1/web/sports-events/COMPETITION/${competition.id}/overview`, method: "GET" },
+    { url: `http://gateway/api/v1/web/sports-events/COMPETITION/${competition.id}/teams`, method: "POST" },
+    { url: `http://gateway/api/v1/web/sports-events/COMPETITION/${competition.id}/free-agents`, method: "POST" },
+    { url: "http://gateway/api/v1/web/sports-matches/me", method: "GET" },
+    { url: "http://gateway/api/v1/web/sports-matches/match-1/checkins", method: "POST" },
+  ]);
 });
