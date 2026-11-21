@@ -84,23 +84,27 @@ class GeminiLangChainGenerator:
         )
         chain = prompt | llm
 
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(
+            chain.invoke,
+            {
+                "system_instructions": system_prompt,
+                "user_message": user_prompt,
+            },
+        )
         try:
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(
-                    chain.invoke,
-                    {
-                        "system_instructions": system_prompt,
-                        "user_message": user_prompt,
-                    },
-                )
-                response = future.result(timeout=timeout_seconds)
+            response = future.result(timeout=timeout_seconds)
         except FuturesTimeoutError as exc:
+            future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
             raise TransientLlmError(f"Gemini call exceeded timeout of {timeout_seconds}s") from exc
         except (TimeoutError, httpx.TimeoutException, ConnectionError) as exc:
+            executor.shutdown(wait=True, cancel_futures=True)
             raise TransientLlmError(
                 f"Transient network/timeout error calling Gemini: {exc}"
             ) from exc
         except Exception as exc:
+            executor.shutdown(wait=True, cancel_futures=True)
             msg = str(exc).lower()
             if any(
                 token in msg
@@ -117,6 +121,8 @@ class GeminiLangChainGenerator:
             ):
                 raise TransientLlmError(f"Transient Gemini error: {exc}") from exc
             raise NonRetryableLlmError(f"Gemini error: {exc}") from exc
+        else:
+            executor.shutdown(wait=True)
 
         content = str(getattr(response, "content", "")).strip()
         usage = getattr(response, "usage_metadata", None) or {}

@@ -4,6 +4,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { EventCard } from "../src/components/EventCard.js";
 import {
+  attendanceInstructions,
+  eventCategoryLabel,
+  filterEvents,
+  organizerTypeLabel,
+} from "../src/utils/eventPresentation.js";
+import {
   EventApiError,
   cancelEvent,
   createEvent,
@@ -77,9 +83,52 @@ test("EventCard presents values returned by the Engagement contract", () => {
   assert.match(markup, /Encontro de Boas-vindas UNIR/);
   assert.match(markup, /Encontro aberto para conhecer projetos/);
   assert.match(markup, /Auditório Central/);
-  assert.match(markup, /ACADEMIC/);
+  assert.match(markup, /Acadêmico/);
+  assert.match(markup, /Universidade/);
+  assert.doesNotMatch(markup, /ACADEMIC|UNIVERSITY/);
   assert.match(markup, /Gratuito/);
   assert.match(markup, /\/eventos\/10000000-0000-4000-8000-000000000001/);
+});
+
+test("event filters search user-facing fields and followed organizers", () => {
+  const otherEvent = {
+    ...event,
+    id: "other",
+    title: "Oficina de extensão",
+    organizerType: "DEPARTMENT",
+    location: "Sala de leitura",
+  };
+  const followedOrganizerKeys = new Set([`UNIVERSITY:${event.organizerId}`]);
+
+  assert.deepEqual(
+    filterEvents([event, otherEvent], {
+      query: "auditório",
+      category: "",
+      followedOrganizerKeys,
+      followedOnly: false,
+    }).map((item) => item.id),
+    [event.id],
+  );
+  assert.deepEqual(
+    filterEvents([event, otherEvent], {
+      query: "",
+      category: "",
+      followedOrganizerKeys,
+      followedOnly: true,
+    }).map((item) => item.id),
+    [event.id],
+  );
+  assert.equal(eventCategoryLabel("EXTENSION"), "Extensão");
+  assert.equal(organizerTypeLabel("ACADEMIC_ENTITY"), "Entidade acadêmica");
+});
+
+test("attendance instructions explain each QR flow without exposing internal modes", () => {
+  const participantScans = attendanceInstructions("PARTICIPANT_SCANS_EVENT");
+  const organizerScans = attendanceInstructions("ORGANIZER_SCANS_PARTICIPANT");
+
+  assert.match(participantScans, /leia o QR Code exibido pela organização/i);
+  assert.match(organizerScans, /apresente seu QR Code à organização/i);
+  assert.doesNotMatch(`${participantScans} ${organizerScans}`, /PARTICIPANT_SCANS_EVENT|ORGANIZER_SCANS_PARTICIPANT/);
 });
 
 test("organizer contexts, create, update, and cancel event routes use the authenticated Gateway contract", async () => {

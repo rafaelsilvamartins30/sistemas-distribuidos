@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useOutletContext, useParams } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { CampusSpaceCard } from "../components/CampusSpaceCard";
-import { CommunitySpacePanel, FollowControl, InstitutionalPostsPanel } from "../components/CampusSocial";
+import { FollowControl, InstitutionalPostsPanel } from "../components/CampusSocial";
 import { Icon } from "../components/Icon";
 import { InstitutionalProfileEditor } from "../components/InstitutionalProfileEditor";
 import {
@@ -130,8 +130,7 @@ export function EntityDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentTerm, setCurrentTerm] = useState("");
-  const [following, setFollowing] = useState(false);
-  const [selectedTab, setSelectedTab] = useInstitutionalProfileTab(isCommunity);
+  const [selectedTab, setSelectedTab] = useInstitutionalProfileTab();
 
   useEffect(() => {
     let active = true;
@@ -196,11 +195,15 @@ export function EntityDetailPage() {
                 token={keycloak.token ?? ""}
                 type={isCommunity ? "COMMUNITY" : "ACADEMIC_ENTITY"}
                 profileId={record.id}
-                onChange={setFollowing}
               />
+              {isCommunity && (
+                <Link className="button button-secondary" to={`/comunidades/${encodeURIComponent(record.id)}/central`}>
+                  Abrir central da comunidade
+                </Link>
+              )}
             </div>
           </article>
-          <InstitutionalProfileTabs selected={selectedTab} onSelect={setSelectedTab} community={isCommunity} />
+          <InstitutionalProfileTabs selected={selectedTab} onSelect={setSelectedTab} />
           <section
             id="profile-panel-profile"
             role="tabpanel"
@@ -268,18 +271,6 @@ export function EntityDetailPage() {
               />
             )}
           </section>
-          {isCommunity && (
-            <section
-              id="profile-panel-community"
-              role="tabpanel"
-              aria-labelledby="profile-tab-community"
-              hidden={selectedTab !== "community"}
-            >
-              {selectedTab === "community" && (
-                <CommunitySpacePanel token={keycloak.token ?? ""} communityId={record.id} following={following} />
-              )}
-            </section>
-          )}
         </>
       ) : null}
     </div>

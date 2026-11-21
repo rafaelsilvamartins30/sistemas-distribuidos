@@ -1,4 +1,5 @@
 import type { Event } from "../services/events.js";
+import { eventCategoryLabel, eventStatusLabel, organizerTypeLabel } from "../utils/eventPresentation.js";
 
 function eventDate(value: string): string {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "medium" }).format(new Date(value));
@@ -19,8 +20,8 @@ export function EventCard({ event }: { event: Event }) {
     <article className="content-card event-catalog-card" data-event-id={event.id}>
       {event.imageUrl && <img className="event-catalog-image" src={event.imageUrl} alt="" />}
       <div className="event-catalog-card-top">
-        <span className="event-kind-tag">{event.category}</span>
-        <span className="event-status">{event.status === "ACTIVE" ? "Ativo" : "Cancelado"}</span>
+        <span className="event-kind-tag">{eventCategoryLabel(event.category)}</span>
+        <span className="event-status">{eventStatusLabel(event.status)}</span>
       </div>
       <h3>
         <a href={`/eventos/${event.id}`}>{event.title}</a>
@@ -32,7 +33,7 @@ export function EventCard({ event }: { event: Event }) {
           {` · ${eventTime(event.startsAt)}–${eventTime(event.endsAt)}`}
         </span>
         <span>{event.location}</span>
-        <span>{event.organizerType}</span>
+        <span>{organizerTypeLabel(event.organizerType)}</span>
       </div>
       <div className="event-catalog-footer">
         <span>{priceLabel(event)}</span>

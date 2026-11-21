@@ -15,6 +15,7 @@ Endpoints expostos (exigem JWT válido do Keycloak e preservam o header `Authori
 - `PATCH /api/v1/me` (`USER` ou `PLATFORM_ADMIN`) → encaminha para `PATCH /api/v1/me` no Web BFF e `PATCH /users/me` no Campus.
 - `GET /api/v1/admin/me` (somente `PLATFORM_ADMIN`, retorna `403` para usuários comuns) → encaminha para `GET /api/v1/admin/me` no Admin BFF e `GET /users/me` no Campus.
 - `GET /api/v1/web/events` e `GET /api/v1/web/events/{eventId}` (`USER` ou `PLATFORM_ADMIN`) → encaminham para as mesmas rotas no Web BFF e daí para `GET /api/v1/events` e `GET /api/v1/events/{eventId}` no Engagement.
+- `POST /api/v1/web/rag/query` (`USER` ou `PLATFORM_ADMIN`) → encaminha pergunta e JWT validado para o Web BFF, que chama AI/RAG. Somente esse endpoint de consulta é publicado no Gateway; sincronização e avaliação permanecem internas.
 - `GET /api/v1/web/opportunities` e `GET /api/v1/web/opportunities/{opportunityId}` (`USER` ou `PLATFORM_ADMIN`) → encaminham para o Web BFF e daí para os detalhes/lista de oportunidades do Engagement.
 - `GET /api/v1/web/opportunities/publisher-contexts` e `POST /api/v1/web/opportunities` (`USER` ou `PLATFORM_ADMIN`) → encaminham para Engagement, que consulta o Campus com o token original e revalida o contexto institucional antes de gravar.
 - As rotas de pedido, consulta e revisão da verificação docente (`/api/v1/web/professor-verification-requests...`) encaminham para Campus; a permissão de revisão é decidida pelo vínculo de administrador do departamento registrado no Campus.

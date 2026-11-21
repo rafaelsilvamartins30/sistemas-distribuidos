@@ -1,12 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
-import { EventCard } from "../components/EventCard";
-import { Icon } from "../components/Icon";
 import { PaginationControls } from "../components/PaginationControls";
 import { SearchField } from "../components/SearchField";
 import { CompetitionCard, SeasonCard } from "../components/SportsCatalogCard";
-import { useEventList } from "../hooks/useEventList";
 import {
   getCompetitions,
   getSeasons,
@@ -30,14 +27,6 @@ interface CatalogState {
 const PAGE_SIZE = 6;
 const EMPTY_PAGE = { items: [], page: 0, size: PAGE_SIZE, totalElements: 0, totalPages: 0 };
 
-function isSportsCategory(category: string): boolean {
-  const normalized = category
-    .toLocaleLowerCase("pt-BR")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-  return /sport|futebol|futsal|volei|voleibol|basquete|handebol/.test(normalized);
-}
-
 function ModalityCard({ sport }: { sport: Sport }) {
   return (
     <article className="sports-modality-card" data-sport-id={sport.id}>
@@ -60,7 +49,6 @@ function ModalityCard({ sport }: { sport: Sport }) {
 
 export function SportsPage() {
   const { keycloak } = useOutletContext<WebContext>();
-  const { events, loading: eventsLoading, error: eventsError } = useEventList(keycloak);
   const [query, setQuery] = useState("");
   const [sportFilter, setSportFilter] = useState("");
   const [competitionSize, setCompetitionSize] = useState("");
@@ -113,16 +101,6 @@ export function SportsPage() {
     };
   }, [competitionPage, competitionSize, keycloak, query, seasonPage, seasonSize, sportFilter]);
 
-  const sportsEvents = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
-    return events.filter((event) => {
-      if (!isSportsCategory(`${event.category} ${event.title} ${event.description} ${event.location}`)) return false;
-      return `${event.title} ${event.category} ${event.description} ${event.location}`
-        .toLocaleLowerCase("pt-BR")
-        .includes(normalizedQuery);
-    });
-  }, [events, query]);
-
   function changeQuery(value: string) {
     setQuery(value);
     setCompetitionPage(0);
@@ -156,36 +134,6 @@ export function SportsPage() {
           <span>Competições e temporadas</span>
         </div>
       </header>
-
-      <section className="sports-policy-panel" aria-label="Formatos disponíveis">
-        <article>
-          <span className="sports-policy-icon">
-            <Icon name="calendar" />
-          </span>
-          <div>
-            <strong>Campeonatos</strong>
-            <p>16 ou 32 equipes · grupos e mata-mata.</p>
-          </div>
-        </article>
-        <article>
-          <span className="sports-policy-icon">
-            <Icon name="communities" />
-          </span>
-          <div>
-            <strong>Temporadas</strong>
-            <p>10 equipes em turno e returno; 20 em turno único.</p>
-          </div>
-        </article>
-        <article>
-          <span className="sports-policy-icon">
-            <Icon name="shield" />
-          </span>
-          <div>
-            <strong>Regras da modalidade</strong>
-            <p>Elencos e pontuação ficam no cadastro do esporte.</p>
-          </div>
-        </article>
-      </section>
 
       <section className="sports-search-panel" aria-label="Buscar no catálogo esportivo">
         <SearchField
@@ -242,7 +190,7 @@ export function SportsPage() {
           <section className="sports-section" aria-labelledby="sports-competitions-title">
             <div className="sports-section-heading">
               <div>
-                <p className="sports-kicker">16 ou 32 equipes · GROUPS_KNOCKOUT</p>
+                <p className="sports-kicker">16 ou 32 equipes · fase de grupos e mata-mata</p>
                 <h2 id="sports-competitions-title">Campeonatos</h2>
               </div>
               <label className="sports-inline-filter">
@@ -318,37 +266,6 @@ export function SportsPage() {
           </section>
         </>
       )}
-
-      <section className="sports-section sports-event-section" aria-labelledby="sports-events-title">
-        <div className="sports-section-heading">
-          <div>
-            <p className="sports-kicker">Agenda oficial</p>
-            <h2 id="sports-events-title">Eventos esportivos do campus</h2>
-          </div>
-          <Link className="text-link" to="/eventos">
-            Todos os eventos <span aria-hidden="true">→</span>
-          </Link>
-        </div>
-        {eventsLoading ? (
-          <p className="notice" role="status">
-            Carregando eventos esportivos…
-          </p>
-        ) : eventsError ? (
-          <p className="notice notice-error" role="alert">
-            Não foi possível carregar os eventos esportivos.
-          </p>
-        ) : sportsEvents.length ? (
-          <div className="content-grid">
-            {sportsEvents.map((event) => (
-              <EventCard key={event.id} event={event} />
-            ))}
-          </div>
-        ) : (
-          <p className="sports-empty">
-            {query ? "Nenhum evento esportivo corresponde à busca." : "Nenhum evento esportivo publicado no momento."}
-          </p>
-        )}
-      </section>
     </div>
   );
 }

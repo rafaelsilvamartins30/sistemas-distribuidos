@@ -55,6 +55,36 @@ class SocialGraphControllerTest < ActionDispatch::IntegrationTest
     assert_equal [University::SINGLETON_ID], response.parsed_body.fetch('items').map { |item| item.fetch('targetId') }
   end
 
+  test 'feed combines current-term institutional posts with followed community conversations' do
+    university = create_university
+    community = create_community
+    other_community = create_community
+    now = Time.current
+    create_post(university, term: '2026/2', body: 'Aviso institucional', author_user_id: 'student',
+                            created_at: now - 2.minutes)
+    CommunitySpacePost.create!(id: SecureRandom.uuid, community: community, author_user_id: 'student',
+                                body: 'Conversa na comunidade', image_urls: [], created_at: now - 1.minute)
+    CommunitySpacePost.create!(id: SecureRandom.uuid, community: other_community, author_user_id: 'student',
+                                body: 'Conversa de comunidade não seguida', image_urls: [], created_at: now)
+
+    with_jwks do
+      post '/follows', params: { targetType: 'UNIVERSITY', targetId: University::SINGLETON_ID },
+           headers: bearer_headers(subject: 'student'), as: :json
+    end
+    assert_response :created
+    follow_community(community, 'student')
+
+    with_jwks do
+      get '/feed', headers: bearer_headers(subject: 'student', name: 'Rafael Silva')
+    end
+    assert_response :success
+    items = response.parsed_body.fetch('items')
+    assert_equal ['Conversa na comunidade', 'Aviso institucional'], items.map { |item| item.fetch('body') }
+    assert_equal %w[COMMUNITY_SPACE OFFICIAL], items.map { |item| item.fetch('postType') }
+    assert_equal ['Rafael Silva', 'Rafael Silva'], items.map { |item| item.fetch('authorName') }
+    assert_equal 2, response.parsed_body.fetch('totalElements')
+  end
+
   test 'community followers can post, vote once, comment, and reply' do
     community = create_community
     post_id = nil
@@ -75,10 +105,11 @@ class SocialGraphControllerTest < ActionDispatch::IntegrationTest
            params: {
              body: 'Vamos marcar o próximo encontro?',
              poll: { question: 'Qual dia?', options: ['Quarta', 'Sexta'] }
-           }, headers: bearer_headers(subject: 'community-owner'), as: :json
+           }, headers: bearer_headers(subject: 'community-owner', name: 'Marina Costa'), as: :json
     end
     assert_response :created
     post_id = response.parsed_body.fetch('id')
+    assert_equal 'Marina Costa', response.parsed_body.fetch('authorName')
     poll = response.parsed_body.fetch('poll')
     poll_id = poll.fetch('id')
     option_id = poll.fetch('options').first.fetch('id')
@@ -96,9 +127,10 @@ class SocialGraphControllerTest < ActionDispatch::IntegrationTest
 
     with_jwks do
       post "/community-space-posts/#{post_id}/comments", params: { body: 'Posso ir também?' },
-           headers: bearer_headers(subject: 'follower'), as: :json
+           headers: bearer_headers(subject: 'follower', name: 'Rafael Silva'), as: :json
     end
     assert_response :created
+    assert_equal 'Rafael Silva', response.parsed_body.fetch('authorName')
     parent_id = response.parsed_body.fetch('id')
     comment_notification = Notification.find_by!(recipient_user_id: 'community-owner', event_type: 'COMMUNITY_SPACE_COMMENT')
     assert_equal 'COMMUNITY', comment_notification.resource_type
@@ -107,9 +139,10 @@ class SocialGraphControllerTest < ActionDispatch::IntegrationTest
     with_jwks do
       post "/community-space-posts/#{post_id}/comments",
            params: { body: 'Claro!', parentCommentId: parent_id },
-           headers: bearer_headers(subject: 'community-owner'), as: :json
+           headers: bearer_headers(subject: 'community-owner', name: 'Marina Costa'), as: :json
     end
     assert_response :created
+    assert_equal 'Marina Costa', response.parsed_body.fetch('authorName')
     assert_equal parent_id, response.parsed_body.fetch('parentCommentId')
     assert Notification.exists?(recipient_user_id: 'follower', event_type: 'COMMUNITY_SPACE_COMMENT')
 
@@ -147,10 +180,11 @@ class SocialGraphControllerTest < ActionDispatch::IntegrationTest
                        links: [], administrator_user_ids: ['university-admin'])
   end
 
-  def create_post(university, term:, body:, available_until: nil)
+  def create_post(university, term:, body:, available_until: nil, author_user_id: 'university-admin',
+                  created_at: Time.current)
     FeedPost.create!(id: SecureRandom.uuid, owner_type: 'UNIVERSITY', owner_id: university.id,
-                     author_user_id: 'university-admin', term: term, body: body,
-                     image_urls: [], available_until: available_until)
+                     author_user_id: author_user_id, term: term, body: body,
+                     image_urls: [], available_until: available_until, created_at: created_at)
   end
 
   def create_community

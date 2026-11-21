@@ -18,6 +18,7 @@ export type IconName =
   | "message"
   | "bookmark"
   | "calendar"
+  | "clock"
   | "pin"
   | "arrowUpRight"
   | "arrowLeft"
@@ -45,6 +46,7 @@ const paths: Record<IconName, string> = {
     "M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z",
   bookmark: "M6 4h12v17l-6-4-6 4z",
   calendar: "M8 2v4m8-4v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z",
+  clock: "M12 8v4l3 2m6-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
   pin: "M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Zm-5 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
   arrowUpRight: "M7 17 17 7M7 7h10v10",
   arrowLeft: "M19 12H5m7 7-7-7 7-7",

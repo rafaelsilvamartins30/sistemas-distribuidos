@@ -4,6 +4,7 @@ import br.unir.engagement.dto.EventProjectionPayload;
 import br.unir.engagement.entity.EventStatus;
 import br.unir.engagement.entity.EventView;
 import br.unir.engagement.entity.RegistrationMode;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.time.Instant;
 import java.util.Optional;
 import org.springframework.dao.DuplicateKeyException;
@@ -21,6 +22,7 @@ public class EventProjectionStore {
 
     private final MongoTemplate mongoTemplate;
 
+    @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Spring injects the container-managed Mongo client")
     public EventProjectionStore(MongoTemplate mongoTemplate) {
         this.mongoTemplate = mongoTemplate;
     }

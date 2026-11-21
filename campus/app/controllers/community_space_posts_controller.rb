@@ -12,7 +12,11 @@ class CommunitySpacePostsController < ApplicationController
     return render_problem(:not_found, 'Community not found') unless community
 
     scope = community.community_space_posts.visible.includes(:poll).order(created_at: :desc, id: :desc)
-    render_paginated(scope) { |post| CampusSocialResponse.community_post(post, voter_id: current_subject) }
+    render_paginated(scope) do |post|
+      CampusSocialResponse.community_post(
+        post, voter_id: current_subject, viewer_id: current_subject, viewer_name: current_display_name
+      )
+    end
   end
 
   def create
@@ -35,8 +39,12 @@ class CommunitySpacePostsController < ApplicationController
       persist_poll!(post, payload[:poll])
       CampusNotifications.community_post_published!(post)
     end
-    render json: CampusSocialResponse.community_post(post, voter_id: current_subject), status: :created
-  rescue ActiveRecord::RecordInvalid => error
-    render_problem(:unprocessable_entity, "Invalid post fields: #{error.record.errors.attribute_names.uniq.sort.join(', ')}")
+    response = CampusSocialResponse.community_post(
+      post, voter_id: current_subject, viewer_id: current_subject, viewer_name: current_display_name
+    )
+    render json: response, status: :created
+  rescue ActiveRecord::RecordInvalid => e
+    attributes = e.record.errors.attribute_names.uniq.sort.join(', ')
+    render_problem(:unprocessable_entity, "Invalid post fields: #{attributes}")
   end
 end

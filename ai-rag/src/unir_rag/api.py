@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from dataclasses import asdict
 from typing import Any
 
@@ -9,6 +10,12 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 
+from unir_rag.auth import (
+    IdentityProviderUnavailable,
+    InvalidAccessToken,
+    KeycloakServiceTokenProvider,
+    KeycloakTokenValidator,
+)
 from unir_rag.chain import GeminiLangChainGenerator, LlmGenerator, UnirRagChain
 from unir_rag.config import RagConfig
 from unir_rag.evaluation import run_academic_evaluation
@@ -32,18 +39,15 @@ class RagQueryRequest(BaseModel):
 
 def extract_bearer_token(
     authorization: str | None = Header(default=None),
-    x_rag_sync_token: str | None = Header(default=None),
 ) -> str:
-    """Require a non-empty Bearer token or configured sync token on protected endpoints."""
+    """Require a Bearer token; its signature and claims are checked separately."""
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization[7:].strip()
         if token:
             return token
-    if x_rag_sync_token and x_rag_sync_token.strip():
-        return x_rag_sync_token.strip()
     raise HTTPException(
         status_code=401,
-        detail="A valid Bearer token or X-RAG-Sync-Token is required",
+        detail="A Bearer access token is required",
     )
 
 
@@ -53,6 +57,8 @@ def create_app(
     embeddings: EmbeddingProvider | None = None,
     llm_generator: LlmGenerator | None = None,
     engagement_client: UnirEngagementClient | None = None,
+    token_validator: KeycloakTokenValidator | None = None,
+    service_token_provider: KeycloakServiceTokenProvider | None = None,
 ) -> FastAPI:
     """Create and wire the FastAPI RAG application."""
     cfg = config or RagConfig.from_env()
@@ -78,6 +84,16 @@ def create_app(
         api_key=cfg.gemini_api_key,
         model_name=cfg.gemini_model,
     )
+    validator = token_validator or KeycloakTokenValidator(
+        issuer=cfg.keycloak_issuer,
+        jwks_url=cfg.keycloak_jwks_url,
+        user_client_ids=cfg.user_client_ids,
+    )
+    sync_tokens = service_token_provider or KeycloakServiceTokenProvider(
+        token_url=cfg.keycloak_token_url,
+        client_id=cfg.sync_client_id,
+        client_secret=cfg.sync_client_secret,
+    )
     rag_chain = UnirRagChain(
         config=cfg,
         indexer=indexer,
@@ -86,6 +102,22 @@ def create_app(
     )
 
     app = FastAPI(title="UNIR AI/RAG Service", version="0.1.0")
+
+    def require_user_token(token: str = Depends(extract_bearer_token)) -> str:
+        try:
+            validator.verify(token)
+            return token
+        except IdentityProviderUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Identity provider unavailable") from exc
+        except InvalidAccessToken as exc:
+            raise HTTPException(status_code=401, detail="Invalid access token") from exc
+
+    def require_sync_token(x_rag_sync_token: str | None = Header(default=None)) -> bool:
+        if cfg.sync_token is None:
+            raise HTTPException(status_code=503, detail="RAG ingestion is not configured")
+        if not x_rag_sync_token or not hmac.compare_digest(x_rag_sync_token, cfg.sync_token):
+            raise HTTPException(status_code=401, detail="Invalid RAG sync credential")
+        return True
 
     @app.get("/health")
     @app.get("/health/live")
@@ -111,20 +143,21 @@ def create_app(
 
     @app.post("/api/v1/rag/ingest")
     def ingest_knowledge_base(
-        token: str = Depends(extract_bearer_token),
+        _authorized: bool = Depends(require_sync_token),
     ) -> dict[str, Any]:
-        if cfg.sync_token and token != cfg.sync_token and "." not in token:
-            raise HTTPException(status_code=403, detail="Invalid RAG sync token")
         try:
-            summary = indexer.sync_from_engagement(engagement, bearer_token=token)
+            service_token = sync_tokens.get_token()
+            summary = indexer.sync_from_engagement(engagement, bearer_token=service_token)
             return asdict(summary)
+        except IdentityProviderUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Identity provider unavailable") from exc
         except EngagementClientError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     @app.post("/api/v1/rag/query")
     def query_knowledge_base(
         request: RagQueryRequest,
-        token: str = Depends(extract_bearer_token),
+        token: str = Depends(require_user_token),
     ) -> dict[str, Any]:
         try:
             response = rag_chain.query(
@@ -144,7 +177,7 @@ def create_app(
         category: str | None = Query(default=None, max_length=60),
         free_only: bool = Query(default=False),
         max_results: int = Query(default=5, ge=1, le=20),
-        token: str = Depends(extract_bearer_token),
+        token: str = Depends(require_user_token),
     ) -> dict[str, Any]:
         try:
             tool = build_search_live_events_tool(engagement, bearer_token=token)
@@ -162,7 +195,7 @@ def create_app(
 
     @app.post("/api/v1/rag/evaluate")
     def evaluate_rag(
-        token: str = Depends(extract_bearer_token),
+        token: str = Depends(require_user_token),
     ) -> dict[str, Any]:
         _ = token
         return run_academic_evaluation(rag_chain)

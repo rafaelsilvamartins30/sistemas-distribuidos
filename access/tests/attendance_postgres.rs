@@ -359,7 +359,7 @@ async fn registration_cancellation_revokes_ticket_and_past_eligible_entries_are_
     let pool = test_pool().await;
     let participant_id = format!("kc-{}", Uuid::new_v4());
     let organizer_id = format!("kc-{}", Uuid::new_v4());
-    let (event_id, registration_id, entry_id) =
+    let (event_id, registration_id, _entry_id) =
         organizer_check_in_fixture(&pool, &participant_id, &organizer_id).await;
     let qr = issue_participant_qr(&pool, event_id, &participant_id)
         .await

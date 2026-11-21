@@ -21,7 +21,11 @@ class InstitutionalProfilePostsController < ApplicationController
     scope = scope.where('available_until IS NULL OR available_until >= ?', Time.current) if
       term == University.current&.current_term && params[:includeExpired] != 'true'
     scope = scope.includes(:poll).order(created_at: :desc, id: :desc)
-    render_paginated(scope) { |post| CampusSocialResponse.feed_post(post, voter_id: current_subject) }
+    render_paginated(scope) do |post|
+      CampusSocialResponse.feed_post(
+        post, voter_id: current_subject, viewer_id: current_subject, viewer_name: current_display_name
+      )
+    end
   end
 
   def create
@@ -45,7 +49,10 @@ class InstitutionalProfilePostsController < ApplicationController
       persist_poll!(post, payload[:poll])
       CampusNotifications.official_post_published!(post)
     end
-    render json: CampusSocialResponse.feed_post(post, voter_id: current_subject), status: :created
+    response = CampusSocialResponse.feed_post(
+      post, voter_id: current_subject, viewer_id: current_subject, viewer_name: current_display_name
+    )
+    render json: response, status: :created
   rescue ActiveRecord::RecordInvalid => error
     render_problem(:unprocessable_entity, "Invalid post fields: #{error.record.errors.attribute_names.uniq.sort.join(', ')}")
   end

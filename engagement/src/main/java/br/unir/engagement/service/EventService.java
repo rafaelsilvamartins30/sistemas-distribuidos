@@ -13,6 +13,7 @@ import br.unir.engagement.entity.Event;
 import br.unir.engagement.entity.EventStatus;
 import br.unir.engagement.entity.RegistrationMode;
 import br.unir.engagement.repository.EventRepository;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Instant;
@@ -47,6 +48,7 @@ public class EventService {
     private final EventProjectionOutboxWriter projectionOutboxWriter;
 
     @Autowired
+    @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Spring injects the container-managed service dependencies")
     public EventService(EventRepository eventRepository, CampusEventOrganizerClient campusOrganizerClient,
             EventCancellationService eventCancellationService, EventProjectionStore eventProjectionStore,
             EventProjectionOutboxWriter projectionOutboxWriter) {
@@ -178,7 +180,7 @@ public class EventService {
         String externalUrl = Boolean.TRUE.equals(request.clearExternalUrl())
                 ? null
                 : request.externalUrl() == null ? event.getExternalUrl() : request.externalUrl();
-        Boolean attendanceEnabled = request.attendanceEnabled() == null
+        boolean attendanceEnabled = request.attendanceEnabled() == null
                 ? event.isAttendanceEnabled()
                 : request.attendanceEnabled();
         AttendanceMode attendanceMode = request.attendanceMode() == null

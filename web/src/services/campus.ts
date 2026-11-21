@@ -310,9 +310,10 @@ export function getAcademicEntities(
   page = 0,
   gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+  size = 20,
 ): Promise<CampusPage<AcademicEntity>> {
   return request<CampusPage<AcademicEntity>>(
-    `/api/v1/web/entities?page=${page}&size=20&sort=name`,
+    `/api/v1/web/entities?page=${page}&size=${size}&sort=name`,
     token,
     gatewayUrl,
     fetchImpl,
@@ -333,9 +334,10 @@ export function getCommunities(
   page = 0,
   gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+  size = 20,
 ): Promise<CampusPage<Community>> {
   return request<CampusPage<Community>>(
-    `/api/v1/web/communities?page=${page}&size=20&sort=name`,
+    `/api/v1/web/communities?page=${page}&size=${size}&sort=name`,
     token,
     gatewayUrl,
     fetchImpl,

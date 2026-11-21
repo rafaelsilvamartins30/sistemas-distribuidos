@@ -6,30 +6,30 @@ class CampusSocialResponse
     { type: type, id: profile.id, name: profile.name }
   end
 
-  def self.feed_post(post, voter_id: nil)
+  def self.feed_post(post, voter_id: nil, viewer_id: nil, viewer_name: nil)
     owner = InstitutionalProfileLookup.find(post.owner_type, post.owner_id)
     {
       id: post.id, postType: 'OFFICIAL', owner: profile(post.owner_type, owner),
-      authorName: user_name(post.author_user_id),
+      authorName: user_name(post.author_user_id, viewer_id: viewer_id, viewer_name: viewer_name),
       term: post.term, body: post.body, imageUrls: post.image_urls, externalUrl: post.external_url,
       availableUntil: post.available_until, createdAt: post.created_at, poll: poll(post.poll, voter_id: voter_id)
     }
   end
 
-  def self.community_post(post, voter_id: nil)
+  def self.community_post(post, voter_id: nil, viewer_id: nil, viewer_name: nil)
     {
       id: post.id, postType: 'COMMUNITY_SPACE', community: profile('COMMUNITY', post.community),
-      authorName: user_name(post.author_user_id),
+      authorName: user_name(post.author_user_id, viewer_id: viewer_id, viewer_name: viewer_name),
       body: post.body, imageUrls: post.image_urls, externalUrl: post.external_url,
       availableUntil: post.available_until, createdAt: post.created_at,
       commentsCount: post.comments.visible.count, poll: poll(post.poll, voter_id: voter_id)
     }
   end
 
-  def self.comment(comment)
+  def self.comment(comment, viewer_id: nil, viewer_name: nil)
     {
       id: comment.id, postId: comment.community_space_post_id, parentCommentId: comment.parent_comment_id,
-      authorName: user_name(comment.author_user_id),
+      authorName: user_name(comment.author_user_id, viewer_id: viewer_id, viewer_name: viewer_name),
       body: comment.body, createdAt: comment.created_at
     }
   end
@@ -46,8 +46,8 @@ class CampusSocialResponse
     }
   end
 
-  def self.user_name(subject)
-    UserProfile.find_by(keycloak_user_id: subject)&.name || 'Usuário UNIR'
+  def self.user_name(subject, viewer_id:, viewer_name:)
+    UserProfile.find_by(keycloak_user_id: subject)&.name || (viewer_name if subject == viewer_id) || 'Usuário UNIR'
   end
   private_class_method :user_name
 end

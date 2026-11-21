@@ -135,7 +135,12 @@ export function unfollowProfile(token: string, followId: string): Promise<void> 
   return request(token, `/api/v1/web/follows/${encodeURIComponent(followId)}`, "DELETE");
 }
 
-export function getCampusFeed(token: string, term?: string, page = 0, size = 20): Promise<CampusPage<FeedPost>> {
+export function getCampusFeed(
+  token: string,
+  term?: string,
+  page = 0,
+  size = 20,
+): Promise<CampusPage<FeedPost | CommunitySpacePost>> {
   const filter = term ? `?term=${encodeURIComponent(term)}` : "";
   return request(token, paginatedPath(`/api/v1/web/feed${filter}`, page, size));
 }

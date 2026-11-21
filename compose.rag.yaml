@@ -17,6 +17,13 @@ services:
       QDRANT_URL: http://qdrant:6333
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-unir_knowledge}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:18080/realms/unir}
+      KEYCLOAK_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI:-http://host.docker.internal:18080/realms/unir/protocol/openid-connect/certs}
+      KEYCLOAK_TOKEN_URL: ${KEYCLOAK_TOKEN_URL:-http://host.docker.internal:18080/realms/unir/protocol/openid-connect/token}
+      RAG_USER_CLIENT_IDS: ${RAG_USER_CLIENT_IDS:-unir-web}
+      RAG_SYNC_TOKEN: ${RAG_SYNC_TOKEN:-unir-rag-sync-local-only}
+      RAG_SYNC_CLIENT_ID: ${RAG_SYNC_CLIENT_ID:-unir-rag-sync}
+      RAG_SYNC_CLIENT_SECRET: ${RAG_SYNC_CLIENT_SECRET:-unir-rag-client-local-only}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-8.0}

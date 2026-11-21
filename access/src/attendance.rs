@@ -1356,7 +1356,9 @@ mod tests {
     fn creates_an_svg_qr_artifact() {
         let artifact = qr_artifact("attendance-token".into()).unwrap();
         assert_eq!(artifact.token, "attendance-token");
-        assert!(artifact.qr_svg.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""));
+        assert!(artifact
+            .qr_svg
+            .starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""));
         assert!(artifact.qr_svg.contains("<path d=\"M"));
         assert!(artifact.qr_svg.ends_with("</svg>"));
     }

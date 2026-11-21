@@ -12,7 +12,9 @@ class CommentsController < ApplicationController
     return render_problem(:not_found, 'Community post not found') unless post
 
     scope = post.comments.visible.order(:created_at, :id)
-    render_paginated(scope) { |comment| CampusSocialResponse.comment(comment) }
+    render_paginated(scope) do |comment|
+      CampusSocialResponse.comment(comment, viewer_id: current_subject, viewer_name: current_display_name)
+    end
   end
 
   def create
@@ -40,8 +42,12 @@ class CommentsController < ApplicationController
       comment.save!
       CampusNotifications.comment_added!(comment)
     end
-    render json: CampusSocialResponse.comment(comment), status: :created
-  rescue ActiveRecord::RecordInvalid => error
-    render_problem(:unprocessable_entity, "Invalid comment fields: #{error.record.errors.attribute_names.uniq.sort.join(', ')}")
+    response = CampusSocialResponse.comment(
+      comment, viewer_id: current_subject, viewer_name: current_display_name
+    )
+    render json: response, status: :created
+  rescue ActiveRecord::RecordInvalid => e
+    attributes = e.record.errors.attribute_names.uniq.sort.join(', ')
+    render_problem(:unprocessable_entity, "Invalid comment fields: #{attributes}")
   end
 end

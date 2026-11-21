@@ -40,24 +40,17 @@ test("institutional links are readable and unsafe schemes are not linked", () =>
   assert.doesNotMatch(markup, /href="javascript:/);
 });
 
-test("community profiles get a community-only tab", () => {
-  const institutional = renderToStaticMarkup(
+test("institutional profile tabs keep the community central separate", () => {
+  const markup = renderToStaticMarkup(
     createElement(InstitutionalProfileTabs, {
-      selected: "profile",
-      onSelect: () => undefined,
-    }),
-  );
-  const community = renderToStaticMarkup(
-    createElement(InstitutionalProfileTabs, {
-      selected: "community",
-      community: true,
+      selected: "posts",
       onSelect: () => undefined,
     }),
   );
 
-  assert.doesNotMatch(institutional, /Central da comunidade/);
-  assert.match(community, /Central da comunidade/);
-  assert.match(community, /aria-selected="true"/);
+  assert.match(markup, /Publicações/);
+  assert.doesNotMatch(markup, /Central da comunidade/);
+  assert.match(markup, /aria-selected="true"/);
 });
 
 test("notifications open the right institutional profile tab", () => {
@@ -71,11 +64,20 @@ test("notifications open the right institutional profile tab", () => {
   };
   assert.equal(
     notificationPath({ ...base, resourceType: "DEPARTMENT", resourceId: "dept / 1" }),
-    "/departamentos/dept%20%2F%201?tab=posts",
+    "/perfis/departamento/dept%20%2F%201?tab=posts",
   );
   assert.equal(
     notificationPath({ ...base, resourceType: "COMMUNITY", resourceId: "community-1" }),
-    "/comunidades/community-1?tab=community",
+    "/perfis/comunidade/community-1?tab=posts",
+  );
+  assert.equal(
+    notificationPath({
+      ...base,
+      eventType: "COMMUNITY_SPACE_POST",
+      resourceType: "COMMUNITY",
+      resourceId: "community-1",
+    }),
+    "/comunidades/community-1/central",
   );
   assert.equal(notificationPath({ ...base, resourceType: "REQUEST", resourceId: "request-1" }), "/solicitacoes");
 });
