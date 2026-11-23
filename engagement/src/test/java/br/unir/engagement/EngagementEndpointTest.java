@@ -462,7 +462,7 @@ class EngagementEndpointTest {
         this.eventRepository.saveAndFlush(event);
         Instant paymentDeadline = now.plus(Duration.ofMinutes(8));
         Instant reservationExpires = now.plus(Duration.ofMinutes(13));
-        Instant paidAt = now.minusSeconds(5);
+        Instant paidAt = now.minusSeconds(5).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         Registration registration = new Registration(UUID.randomUUID(), event.getId(), "kc-paid-user",
                 RegistrationStatus.PENDING_PAYMENT, now.minus(Duration.ofMinutes(2)), null, null, paymentDeadline,
                 reservationExpires);
