@@ -957,13 +957,16 @@ export function OpportunityDetailPage() {
         {canManage && (
           <section className="opportunity-publishing-tools" aria-label="Administrar esta oportunidade">
             <div className="opportunity-publishing-heading">
-              <div>
+              <span className="opportunity-publishing-icon" aria-hidden="true">
+                <Icon name="opportunity" width="22" height="22" />
+              </span>
+              <div className="opportunity-publishing-copy">
                 <p className="eyebrow">Administração do publicador</p>
                 <h2>Gerenciar publicação</h2>
               </div>
-              <div className="opportunity-review-actions">
-                <button className="button button-secondary" type="button" onClick={() => setEditing((open) => !open)}>
-                  {editing ? "Fechar edição" : "Editar / Alterar data"}
+              <div className="opportunity-publishing-actions" style={{ display: "flex", gap: "0.5rem" }}>
+                <button className="button button-primary" type="button" onClick={() => setEditing(true)}>
+                  Editar / Alterar data
                 </button>
                 {opportunity.status === "ACTIVE" && (
                   <button
@@ -978,61 +981,96 @@ export function OpportunityDetailPage() {
               </div>
             </div>
             {feedback && (
-              <p className="notice" role="status">
+              <p className="notice" role="status" style={{ marginTop: "0.75rem" }}>
                 {feedback}
               </p>
             )}
             {editing && (
-              <form className="opportunity-publish-form" onSubmit={handleSaveEdit}>
-                <div className="opportunity-publish-fields">
-                  <label>
-                    Título
-                    <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} required />
-                  </label>
-                  <label>
-                    Categoria
-                    <input value={editCategory} onChange={(event) => setEditCategory(event.target.value)} required />
-                  </label>
-                  <label className="opportunity-publish-wide">
-                    Informações da oportunidade
-                    <textarea
-                      value={editDescription}
-                      onChange={(event) => setEditDescription(event.target.value)}
-                      required
-                      rows={4}
-                    />
-                  </label>
-                  <label>
-                    Data de disponibilidade (vazio = sem data limite)
-                    <input
-                      type="datetime-local"
-                      value={editDeadline}
-                      onChange={(event) => setEditDeadline(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Link externo de inscrição
-                    <input
-                      type="url"
-                      value={editExternalUrl}
-                      onChange={(event) => setEditExternalUrl(event.target.value)}
-                      required
-                    />
-                  </label>
-                  <label className="opportunity-publish-wide">
-                    Imagem (opcional)
-                    <input
-                      type="url"
-                      value={editImageUrl}
-                      onChange={(event) => setEditImageUrl(event.target.value)}
-                      placeholder="https://…"
-                    />
-                  </label>
+              <div
+                className="sports-modal-backdrop"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="edit-opportunity-modal-title"
+                onClick={() => setEditing(false)}
+              >
+                <div className="sports-modal" style={{ maxWidth: "700px" }} onClick={(e) => e.stopPropagation()}>
+                  <header className="sports-modal-header">
+                    <div>
+                      <p className="sports-kicker">Administração do publicador</p>
+                      <h2 id="edit-opportunity-modal-title">Editar oportunidade</h2>
+                    </div>
+                    <button
+                      type="button"
+                      className="sports-modal-close"
+                      aria-label="Fechar"
+                      onClick={() => setEditing(false)}
+                    >
+                      ✕
+                    </button>
+                  </header>
+                  <div className="sports-modal-body">
+                    <form className="opportunity-publish-form" onSubmit={handleSaveEdit}>
+                      <div className="opportunity-publish-fields">
+                        <label>
+                          Título
+                          <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} required />
+                        </label>
+                        <label>
+                          Categoria
+                          <input
+                            value={editCategory}
+                            onChange={(event) => setEditCategory(event.target.value)}
+                            required
+                          />
+                        </label>
+                        <label className="opportunity-publish-wide">
+                          Informações da oportunidade
+                          <textarea
+                            value={editDescription}
+                            onChange={(event) => setEditDescription(event.target.value)}
+                            required
+                            rows={4}
+                          />
+                        </label>
+                        <label>
+                          Data de disponibilidade (vazio = sem data limite)
+                          <input
+                            type="datetime-local"
+                            value={editDeadline}
+                            onChange={(event) => setEditDeadline(event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          Link externo de inscrição
+                          <input
+                            type="url"
+                            value={editExternalUrl}
+                            onChange={(event) => setEditExternalUrl(event.target.value)}
+                            required
+                          />
+                        </label>
+                        <label className="opportunity-publish-wide">
+                          Imagem (opcional)
+                          <input
+                            type="url"
+                            value={editImageUrl}
+                            onChange={(event) => setEditImageUrl(event.target.value)}
+                            placeholder="https://…"
+                          />
+                        </label>
+                      </div>
+                      <div className="sports-form-actions">
+                        <button className="button button-secondary" type="button" onClick={() => setEditing(false)}>
+                          Cancelar
+                        </button>
+                        <button className="button button-primary" type="submit" disabled={busy}>
+                          {busy ? "Salvando…" : "Salvar e manter ativa"}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
                 </div>
-                <button className="button button-primary" type="submit" disabled={busy}>
-                  {busy ? "Salvando…" : "Salvar e manter ativa"}
-                </button>
-              </form>
+              </div>
             )}
           </section>
         )}

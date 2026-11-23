@@ -1,71 +1,35 @@
-# Web BFF
+# Web BFF (`web-bff`)
 
-Fastify service for web-specific HTTP endpoints. The BFF has no database; it
-forwards the caller's bearer token and JSON payloads to Campus, which validates
-them and persists profiles.
+Backend for Frontend dedicado ao cliente principal **UNIR Web (`web`)**. Atua como camada de adaptação HTTP sem banco de dados próprio.
 
-## Endpoints
+- **Stack:** Node.js 22 + Fastify + TypeScript (`pnpm`).
+- **Acesso:** interno no Kubernetes (`ClusterIP` `web-bff:3000`), chamado exclusivamente pelo `gateway`.
 
-- `GET /health` returns `200` while the process is running.
-- `GET /api/v1/me` forwards the bearer token to `GET /users/me` on Campus and
-  preserves its status and response body.
-- `POST /api/v1/users` forwards the bearer token and JSON payload to
-  `POST /users` on Campus and preserves its status (`201`, `400`,
-  `409`) and response body.
-- `PATCH /api/v1/me` forwards the bearer token and JSON payload to
-  `PATCH /users/me` on Campus and preserves its status (`200`, `400`,
-  `404`) and response body.
-- `GET /api/v1/web/events` and `GET /api/v1/web/events/{eventId}` forward the
-  bearer token and list query to the Engagement Service (`/api/v1/events` and
-  `/api/v1/events/{eventId}`), preserving its status, content type, and body.
-  Connection failures return `503`.
-- `POST /api/v1/web/rag/query` forwards the original user bearer token and JSON
-  question to AI/RAG (`/api/v1/rag/query`) with a 30-second request deadline.
-  AI/RAG validates the Keycloak signature, issuer, expiry, user client and
-  `USER`/`PLATFORM_ADMIN` role; BFF connection failures return `503`.
-- `GET /api/v1/web/opportunities` and
-  `GET /api/v1/web/opportunities/{opportunityId}` forward the bearer token and
-  list filters to Engagement, preserving its status, content type, and body.
-- `GET /api/v1/web/opportunities/publisher-contexts` and
-  `POST /api/v1/web/opportunities` forward the original user token to
-  Engagement. Engagement rechecks each selected publisher context against
-  Campus; the BFF does not make authorization decisions.
-- `POST /api/v1/web/professor-verification-requests`, the department-scoped
-  pending-list route, and the approve/reject routes forward requests to Campus,
-  which derives both requester and reviewer identity from the token.
-  Opportunities still use only external application links; no internal
-  application is created.
-- `POST /api/v1/web/events/{eventId}/registrations`,
-  `GET /api/v1/web/me/activities`, and
-  `DELETE /api/v1/web/registrations/{registrationId}` forward free-event
-  registration operations to Engagement. DELETE performs a logical
-  cancellation and preserves the registration history.
-- `GET /api/v1/web/university`, `GET /api/v1/web/departments`, and
-  `GET /api/v1/web/departments/{departmentId}` forward the bearer token and
-  list query to Campus. Department responses omit `administratorUserIds` from
-  the Web contract; Campus retains those references in its model.
-- `GET /api/v1/web/academic-units`, `GET /api/v1/web/academic-units/{unitId}`,
-  `GET /api/v1/web/courses`, and `GET /api/v1/web/courses/{courseId}` forward
-  the bearer token and pagination/filter query to the Campus reference
-  catalogue. Course results are associated with their academic unit only; the
-  catalogue does not claim a course-to-department relationship.
-- `GET /api/v1/web/entities`, `GET /api/v1/web/entities/{entityId}`,
-  `GET /api/v1/web/communities`, and
-  `GET /api/v1/web/communities/{communityId}` forward the bearer token and
-  pagination query to Campus. Responses omit `managerUserIds`, which remain
-  internal references to Keycloak users.
+---
 
-## Local development
+## Como funciona e singularidades
 
-Requires Node.js 22 and pnpm 11.25.0.
+1. **Sem estado e sem banco de dados:** o `web-bff` nunca acessa bancos diretamente (regra aplicada automaticamente em `scripts/check-ts-architecture.mjs`). Ele pode ser escalado horizontalmente de forma trivial (`kubectl scale deployment/web-bff --replicas=3`, validado em `make k8s-scale-demo`).
+2. **Propagação de identidade e zero decisão de autorização:** sempre repassa o header `Authorization: Bearer <jwt>` intacto para `Campus`, `Engagement`, `Payment`, `Access` e `AI / RAG`, preservando status codes e payloads de erro de domínio (falhas de conexão retornam `503`).
+3. **Timeouts dedicados por natureza da operação:** consultas padrão de domínio usam timeout curto, enquanto `POST /api/v1/web/rag/query` aplica deadline dedicado de `30s` para acomodar busca vetorial + geração no Gemini.
+4. **Sanitização de respostas públicas:** remove campos internos de controle administrativo onde apropriado antes de responder ao cliente Web.
+
+---
+
+## Rotas expostas (via Gateway)
+
+- `GET /health`
+- **Campus:** `/api/v1/me`, `/api/v1/users`, `/api/v1/web/users`, `/api/v1/web/university`, `/academic-units`, `/departments`, `/courses`, `/entities`, `/communities`, `/requests`, `/professor-verification-requests`, `/profiles/:type/:id/posts`, `/follows`, `/feed`, `/polls/:id/votes`, `/notifications`
+- **Engagement:** `/api/v1/web/events/**`, `/registrations/**`, `/me/activities`, `/opportunities/**`, `/sports/**`, `/competitions/**`, `/seasons/**`, `/sports-events/**`, `/sports-matches/**`
+- **Payment:** `/api/v1/web/payments/me`, `/api/v1/web/payments/:registrationId/confirm`
+- **Access:** `/api/v1/web/attendance/**`
+- **AI / RAG:** `POST /api/v1/web/rag/query`
+- **Contratos:** [OpenAPI](../docs/api/openapi.yaml) e [docs/contracts/](../docs/contracts/)
+
+---
+
+## Qualidade
 
 ```sh
-pnpm install --frozen-lockfile
-pnpm test
-pnpm start
+make web-bff
 ```
-
-`CAMPUS_URL` defaults to `http://localhost:3000`; `ENGAGEMENT_SERVICE_URL`
-defaults to `http://localhost:8080`; `RAG_SERVICE_URL` defaults to
-`http://localhost:8090`. `PORT` defaults to `3000`. Compose sets the service
-URLs to `http://campus:3000` and `http://engagement:8080`.

@@ -352,3 +352,21 @@ export function getCommunity(
 ): Promise<Community> {
   return request<Community>(`/api/v1/web/communities/${encodeURIComponent(communityId)}`, token, gatewayUrl, fetchImpl);
 }
+
+export interface DirectoryUser {
+  id: string;
+  keycloakUserId: string;
+  name: string;
+  registrationCode: string;
+  userType: string;
+}
+
+export function searchCampusUsers(
+  token: string,
+  query = "",
+  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<{ items: DirectoryUser[] }> {
+  const qs = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+  return request<{ items: DirectoryUser[] }>(`/api/v1/web/users${qs}`, token, gatewayUrl, fetchImpl);
+}

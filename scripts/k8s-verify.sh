@@ -105,8 +105,8 @@ def token_for(alias):
         return json.loads(resp.read().decode("utf-8"))["access_token"]
 
 print(json.dumps({
-    "student": token_for("unir.aluno1"),
-    "admin": token_for("unir.admin"),
+    "student": token_for("aluno1" if "aluno1" in accounts else "admin"),
+    "admin": token_for("admin"),
 }))
 PY
 )"

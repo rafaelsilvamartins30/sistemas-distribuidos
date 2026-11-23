@@ -1,76 +1,41 @@
-# UNIR — Serviço de IA / RAG (`ai-rag`)
+# AI / RAG (`ai-rag`)
 
-Serviço responsável pela recuperação aumentada por geração (RAG) da plataforma **UNIR** (GCC129 — Sistemas Distribuídos). Auxilia estudantes a descobrir **eventos** e **oportunidades** reais da universidade a partir de perguntas em linguagem natural.
+Serviço de **Recuperação Aumentada por Geração (RAG)** que indexa eventos e oportunidades do `Engagement` e responde a perguntas em linguagem natural com fontes clicáveis e rastreáveis (consumido pelo botão flutuante **Assistente UNIR** no cliente `web`).
 
-## 1. Arquitetura e Decisões Técnicas
+- **Stack:** Python 3.12 + FastAPI + LangChain (`langchain-core`, `langchain-google-genai`) + **Qdrant** (`qdrant:6333`) + **FastEmbed** (`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, 384 dimensões, ONNX local) + **Google Gemini (`gemini-3.5-flash`)**.
+- **Acesso:** interno no Kubernetes (`ClusterIP` `ai-rag:8090`, sem rota direta no Ingress). Apenas `POST /api/v1/web/rag/query` é publicado pelo `Gateway → Web BFF`.
 
-- **Stack:** Python 3.12 + FastAPI + LangChain (`langchain-core`, `langchain-google-genai`) + Qdrant (`qdrant-client`) + FastEmbed (`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, 384 dimensões, ONNX local multilíngue com suporte nativo ao português) + Google Gemini (`gemini-2.5-flash`).
-- **Fontes de conhecimento (v1):**
-  1. Eventos ativos do Engagement (`GET /api/v1/events`).
-  2. Oportunidades ativas do Engagement (`GET /api/v1/opportunities`).
-  - Nenhum acesso direto ao PostgreSQL do Engagement é realizado; o cliente HTTP respeita paginação e autenticação Bearer JWT.
-  - O Qdrant é tratado como índice vetorial derivado: cada registro recebe um Point ID determinístico (`UUIDv5(NAMESPACE, "EVENT:<id>")` ou `"OPPORTUNITY:<id>"`), tornando a reindexação idempotente (via `upsert`) e removendo pontos obsoletos/cancelados a cada sincronização completa.
-  - Credenciais, JWTs, perfis privados de usuários e dados financeiros nunca são indexados.
-- **Chain determinística vs. Agente autônomo:**
-  - O fluxo principal utiliza uma chain LCEL determinística (`RunnableLambda` de recuperação + formatação de contexto delimitado `|` `ChatPromptTemplate` `|` Gemini) e uma `StructuredTool` explícita (`search_live_events`) que consulta em tempo real `GET /api/v1/events`.
-  - **Justificativa:** Para o domínio de descoberta acadêmica, uma chain determinística combinada com invocação controlada da tool garante latência previsível, limite estrito de tokens enviados ao provedor remoto, ausência de loops de raciocínio e rastreabilidade direta das fontes recuperadas.
-- **Proteção contra Prompt Injection:**
-  - O conteúdo recuperado é delimitado em `<contexto_recuperado>` e tratado como dado cadastral não confiável; as instruções de sistema proíbem a execução de comandos contidos nos documentos e exigem citação explícita de `[ID: <uuid>]`.
-- **Dois mecanismos de resiliência para o Gemini:**
-  1. **Timeout por tentativa + Retry com Backoff Exponencial** (`GEMINI_TIMEOUT_SECONDS=8.0`, `GEMINI_MAX_RETRIES=2`, apenas em falhas transitórias como timeouts, erros de rede e HTTP 429/5xx).
-  2. **Fallback Explícito Degradado:** Quando o Gemini está indisponível ou sem chave configurada, o serviço retorna `generation_status="FALLBACK_RETRIEVAL_ONLY"` e `fallback_used=true`, apresentando claramente os registros recuperados do Qdrant com suas fontes e IDs sem fingir uma resposta gerada pelo modelo.
+---
 
-## 2. Estrutura do Serviço
+## Como funciona e singularidades
 
-```text
-ai-rag/
-├── Dockerfile
-├── Makefile
-├── pyproject.toml
-├── uv.lock
-├── src/unir_rag/
-│   ├── config.py          # Configuração via variáveis de ambiente e fórmula de custo USD
-│   ├── unir_client.py     # Cliente HTTP paginado para Eventos e Oportunidades do Engagement
-│   ├── ingestion.py       # Construção de documentos, embeddings locais e indexação idempotente no Qdrant
-│   ├── tools.py           # LangChain StructuredTool `search_live_events`
-│   ├── chain.py           # Chain LCEL LangChain + timeout, retry/backoff e fallback explícito
-│   ├── evaluation.py      # Avaliação acadêmica (5 perguntas: Baseline sem RAG vs. RAG)
-│   └── api.py             # Endpoints HTTP FastAPI
-└── tests/
-    └── test_rag_service.py
+1. **Base vetorial derivada e idempotente (Qdrant):**
+   - Indexa apenas eventos e oportunidades ativos lidos via HTTP do `Engagement` usando client credentials (`unir-rag-sync`), nunca acessando o banco PostgreSQL diretamente e nunca indexando credenciais, JWTs ou dados financeiros.
+   - Cada documento usa Point ID determinístico (`UUIDv5`), permitindo reindexação idempotente (`upsert`) e remoção de registros cancelados/expirados.
+2. **Chain LCEL determinística + Live Tool:**
+   - Combina recuperação vetorial no Qdrant com a `StructuredTool` opcional `search_live_events` (consulta em tempo real ao `Engagement` com o JWT do usuário), delimitando o contexto em `<contexto_recuperado>` para proteção contra *prompt injection* e exigindo citação explícita `[ID: <uuid>]`.
+3. **Resiliência e Fallback Explícito Degradado:**
+   - **Timeout + Retry:** `GEMINI_TIMEOUT_SECONDS=20.0`, `GEMINI_MAX_RETRIES=2` com backoff exponencial apenas em falhas transitórias (timeout, rede, 429/5xx).
+   - **Normalização Gemini 3.x:** extrai apenas os blocos de texto limpos (`extract_response_text`) sem expor blocos internos de raciocínio/assinatura.
+   - **Fallback explícito:** sem `GEMINI_API_KEY` ou com provedor indisponível, retorna `generation_status="FALLBACK_RETRIEVAL_ONLY"` (`fallback_used=true`) listando os registros reais do Qdrant sem simular resposta gerada por LLM.
+4. **Telemetria em toda resposta:** devolve latência de busca, latência do LLM, contagem de tokens e estimativa de custo em USD.
+
+---
+
+## Endpoints e contratos
+
+- `GET /health`, `/health/live`, `/health/ready` (verifica Qdrant, contagem de pontos e `geminiConfigured`)
+- `POST /api/v1/rag/query` — consulta RAG (JWT de usuário assinado pelo Keycloak, `azp` em `unir-web`, role `USER` ou `PLATFORM_ADMIN`)
+- `POST /api/v1/rag/ingest` — sincronização interna protegida por `X-RAG-Sync-Token` (não exposta no Gateway)
+- `GET /api/v1/rag/tools/live-events` e `POST /api/v1/rag/evaluate` — rotas internas de tool e avaliação acadêmica (não expostas no Gateway)
+- **Contrato detalhado:** [RAG Query v1](../docs/contracts/rag-query-v1.md)
+
+---
+
+## Qualidade
+
+```sh
+make ai-rag
+# ou dentro de ai-rag/:
+make quality   # uv sync, ruff check, ruff format --check e pytest
 ```
-
-## 3. Endpoints HTTP
-
-- `GET /health` e `GET /health/live` — Liveness (`200 OK`).
-- `GET /health/ready` — Readiness verificando conectividade e contagem de pontos no Qdrant (`200 OK` ou `503`).
-- `POST /api/v1/rag/ingest` — Sincroniza eventos e oportunidades ativos do Engagement para o Qdrant. Exige `X-RAG-Sync-Token` e obtém um token separado de client credentials para consultar Engagement. Um token de usuário ou JWT arbitrário não autoriza ingestão.
-- `POST /api/v1/rag/query` — Executa a chain RAG para uma pergunta (`question`, `top_k`, `source_type`, `use_live_tool`) e retorna resposta, fontes, latências e custo. Exige um JWT assinado pelo Keycloak, emissor e validade corretos, `azp` em `RAG_USER_CLIENT_IDS` (por padrão `unir-web`) e role `USER` ou `PLATFORM_ADMIN`.
-- `GET /api/v1/rag/tools/live-events?q=&category=&free_only=&max_results=` — Invoca a tool LangChain `search_live_events` diretamente contra o Engagement, com o JWT de usuário validado.
-- `POST /api/v1/rag/evaluate` — Executa o benchmark acadêmico das 5 perguntas comparando `baseline` e `rag`; exige JWT de usuário e não é exposto pelo Gateway/Ingress.
-
-## 4. Execução Isolada e Qualidade
-
-### Rodar lint, formatação e testes automatizados
-
-```bash
-make -C ai-rag quality
-```
-
-### Subir Qdrant e `ai-rag` isoladamente via `compose.rag.yaml`
-
-Sem alterar o `compose.yaml` principal:
-
-```bash
-GEMINI_API_KEY="sua-chave-opcional" docker compose -f compose.rag.yaml up --build -d
-```
-
-- Qdrant: `http://localhost:16333`
-- AI/RAG Service: `http://localhost:18090`
-
-Para consultar no modo Compose, configure `KEYCLOAK_ISSUER_URI` com o emissor
-que aparece no token do navegador e `KEYCLOAK_JWK_SET_URI`/`KEYCLOAK_TOKEN_URL`
-com endereços alcançáveis pelo container. A sincronização exige um client
-confidencial de serviço no realm (`RAG_SYNC_CLIENT_ID` e
-`RAG_SYNC_CLIENT_SECRET`) com role `USER`; o bootstrap Kubernetes provisiona
-esse client e guarda as credenciais em um Secret local.

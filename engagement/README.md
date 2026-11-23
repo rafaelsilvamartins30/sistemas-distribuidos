@@ -1,59 +1,48 @@
-# Engagement
+# Engagement (`engagement`)
 
-Serviço de domínio responsável por atividades/eventos, inscrições e processos seletivos de oportunidades da UNIR. Stack: Java 21, Spring Boot, Maven, PostgreSQL, MongoDB e Flyway.
+Serviço de domínio responsável por **Eventos**, **Inscrições**, **Oportunidades** e **Esportes Universitários** (modalidades, campeonatos e temporadas).
 
-## Endpoints
+- **Stack:** Java 21 + Spring Boot + Flyway + PostgreSQL próprio (`engagement-db`) + **MongoDB** (`engagement-read-db`, read model CQRS) + RabbitMQ (`unir.events`).
+- **Acesso:** interno no Kubernetes (`ClusterIP` `engagement:8080`), acessado pelo `Web BFF` e (para indexação/live tool) pelo `AI / RAG`.
 
-The Sports catalog is documented in [`docs/contracts/sports-v1.md`](../docs/contracts/sports-v1.md). Migration `V11__create_sports_catalog.sql` adds Sport, Competition, and Season; the endpoints are read-only and do not expose organizer management.
+---
 
-- `GET /health` verifica a conectividade com o banco PostgreSQL próprio (`unir_engagement`) e retorna `200`.
-- `GET /api/v1/events?page=0&size=20` lista eventos ativos em ordem de início, no envelope paginado compartilhado. Eventos pagos externos com prazo encerrado não aparecem na descoberta; eventos cancelados não aparecem na listagem.
-- `GET /api/v1/events/organizer-contexts` consulta no Campus (`/internal/v1/event-organizers`), com o token original do usuário, os contextos de organização disponíveis (`PROFESSOR`, `DEPARTMENT`, `ACADEMIC_UNIT`, `UNIVERSITY`, `ACADEMIC_ENTITY`, `COMMUNITY`).
-- `GET /api/v1/events/managed?page=0&size=20` lista todos os eventos (ativos e cancelados) pertencentes aos contextos de organização autorizados do usuário.
-- `POST /api/v1/events` cria um evento em nome de um contexto autorizado pelo Campus. Todos os organizadores podem criar `INTERNAL_FREE`. Eventos pagos criados por `PROFESSOR`, `DEPARTMENT`, `ACADEMIC_UNIT` ou `UNIVERSITY` usam obrigatoriamente `INTERNAL_PAID` (Saga de pagamento Pix); eventos pagos criados por `COMMUNITY` ou `ACADEMIC_ENTITY` usam obrigatoriamente `EXTERNAL_PAID` (com `externalUrl`).
-- `GET /api/v1/events/{eventId}` retorna os detalhes de um evento persistido (inclusive cancelado) ou `404`.
-- `PATCH /api/v1/events/{eventId}` permite ao organizador autorizado editar dados, datas, capacidade, preço/link e configuração de presença de um evento ativo.
-- `DELETE /api/v1/events/{eventId}` executa o cancelamento institucional (`status=CANCELLED`) quando solicitado pelo organizador autorizado, cancelando inscrições (`CANCELLED_BY_EVENT`) e disparando eventos de Outbox para Payment (estorno integral) e Access.
-- `GET /api/v1/opportunities?page=0&size=20` lista oportunidades ativas em ordem de publicação, com filtros opcionais `q`, `category` e `publisherType`. A página aceita de 1 a 100 itens; `publisherType` aceita `PROFESSOR`, `DEPARTMENT` ou `ACADEMIC_ENTITY`. O prazo encerrado ou status diferente de `ACTIVE` remove o registro da lista.
-- `GET /api/v1/opportunities/{opportunityId}` retorna detalhes persistidos inclusive após o prazo ou mudança de status, preservando o histórico consultável. O modelo e as regras estão em [`docs/contracts/opportunities-v1.md`](../docs/contracts/opportunities-v1.md).
-- `GET /api/v1/opportunities/publisher-contexts` consulta no Campus, com o token original do usuário, os contextos de publicação disponíveis.
-- `GET /api/v1/opportunities/managed?page=0&size=20` lista todas as oportunidades (ativas, expiradas ou encerradas) vinculadas aos contextos de publicação autorizados do usuário no Campus.
-- `POST /api/v1/opportunities` publica em um contexto retornado pelo Campus. Engagement confere novamente `publisherType` e `publisherId`, gera `id`, `createdAt` e `ACTIVE`, e falha fechado se Campus estiver indisponível. `COMMUNITY` é proibida. Não há candidatura interna.
-- `PATCH /api/v1/opportunities/{opportunityId}` permite ao publicador autorizado editar os dados da oportunidade, alterar/limpar a data de disponibilidade (`deadline`) e alternar o `status` (`ACTIVE` ou `CLOSED`).
-- `DELETE /api/v1/opportunities/{opportunityId}` encerra logicamente (`status=CLOSED`) a oportunidade no mural ativo quando solicitado pelo publicador autorizado, preservando o registro histórico.
-- A autorização de departamento/entidade vem dos vínculos mantidos pelo Campus; a autorização docente exige `ProfessorAffiliation` `ACTIVE`, criada após aprovação de administrador do departamento. `user_type` autodeclarado não autoriza publicação.
-- `POST /api/v1/events/{eventId}/registrations` inscreve o titular do JWT em evento `INTERNAL_FREE` (`201`, `CONFIRMED`) ou reserva vaga de evento `INTERNAL_PAID` (`201`, `PENDING_PAYMENT`). A reserva paga expõe `paymentDeadlineAt` (10 minutos) e `reservationExpiresAt` (15 minutos), com `RegistrationPaymentRequested` gravado no Outbox na mesma transação. Evento cancelado, prazo encerrado, modalidade não suportada, duplicidade ativa, lotação ou preço não configurado retornam `409`.
-- `GET /api/v1/registrations/me?page=0&size=20` lista as inscrições do `sub` autenticado, incluindo os dados do evento e o histórico de cancelamento.
-- `DELETE /api/v1/registrations/{registrationId}` realiza cancelamento lógico de inscrição gratuita até 24 horas antes do início. O registro permanece no banco com `CANCELLED_BY_USER` e `cancelledAt`; nenhum registro é apagado.
-- Inscrição e cancelamento usam uma transação PostgreSQL e `SELECT FOR UPDATE` na linha do evento para serializar capacidade e mudanças de ocupação. Uma restrição única parcial impede mais de uma inscrição ativa por evento e usuário.
-- Inscrições `PENDING_PAYMENT` ocupam capacidade somente até `reservationExpiresAt`; a expiração finaliza o estado e libera o índice de inscrição ativa. O publicador do Outbox envia mensagens persistentes ao RabbitMQ fora da transação de reserva, exige confirmação roteada e retenta eventos ainda não publicados. O payload v1 está em [`docs/contracts/registration-payment-requested-v1.md`](../docs/contracts/registration-payment-requested-v1.md).
-- O consumidor da fila durável `engagement.payment-events` recebe `PaymentConfirmed` v1 em ACK manual: valida os identificadores, bloqueia o Event antes da Registration e confirma somente quando `paidAt` está entre `registeredAt` e `paymentDeadlineAt` e a mensagem é processada antes de `reservationExpiresAt`. O inbox deduplica por `messageId`; confirmações incompatíveis com o estado terminal não reativam a inscrição. Quando a inscrição não pode ser confirmada, Engagement grava/atualiza `payment_compensation_cases` e o pedido `RefundRequested` na Outbox dentro da mesma transação. Consome `RefundSucceeded` e `RefundFailed` com ACK após commit e deduplicação persistente; o estado da compensação passa por `PENDING`, `FAILED` e `COMPLETED` sem alterar o estado terminal da inscrição. O contrato está em [`docs/contracts/refund-flow-v1.md`](../docs/contracts/refund-flow-v1.md), e `PaymentConfirmed` em [`docs/contracts/payment-confirmed-v1.md`](../docs/contracts/payment-confirmed-v1.md).
-- As rotas de eventos e inscrições exigem JWT válido do Keycloak com papel `USER` ou `PLATFORM_ADMIN`. `userId` vem exclusivamente do claim `sub`; Campus armazena esse valor em `keycloak_user_id` e o expõe como `UserProfile.id`, enquanto o UUID interno do perfil é distinto. Engagement mantém essa referência sem foreign key entre bancos.
-- `DELETE` representa cancelamento de domínio, não exclusão física. Outras rotas permanecem negadas (`denyAll`).
+## Como funciona e singularidades
 
-## Ambiente local
+1. **CQRS no domínio de Eventos (PostgreSQL escrita → Outbox → RabbitMQ → MongoDB leitura):**
+   - Todas as escritas (`POST/PATCH/DELETE /api/v1/events`) acontecem no **PostgreSQL**, gravando o evento de domínio na tabela `outbox_events` dentro da **mesma transação**.
+   - O `OutboxPublisher` envia as mensagens ao RabbitMQ com confirmação de roteamento; o `EventProjectionConsumer` atualiza a coleção `event_views` no **MongoDB** usando controle de versão (`aggregateVersion`) para manter consistência eventual idempotente.
+   - As listagens públicas (`GET /api/v1/events`) leem exclusivamente do MongoDB (sem fallback silencioso para PostgreSQL — em falha do read model retorna `503`). Para reidratação após seeds ou manutenção, `ENGAGEMENT_EVENT_PROJECTION_REBUILD_AND_EXIT=true` reconstrói `event_views` a partir do PostgreSQL.
+2. **Saga Coreografada de Pagamento e Estorno (Eventos e Esportes):**
+   - Inscrições pagas (`INTERNAL_PAID` em eventos ou taxas de equipe/free agent em esportes) nascem em `PENDING_PAYMENT` com janela de pagamento (10 min) e reserva de vaga (15 min), gravando `RegistrationPaymentRequested` no Outbox.
+   - Ao consumir `PaymentConfirmed` (com deduplicação por `messageId`), o serviço confirma a inscrição (`CONFIRMED`) ou dispara `RefundRequested` em caso de janela expirada/incompatibilidade.
+   - Cancelar um evento (`DELETE /api/v1/events/{id}`) ou um campeonato (`POST /api/v1/sports-events/{contextType}/{id}/cancel`) marca os registros como `CANCELLED` e publica `EventCancelled` / `RegistrationCancelledByEvent` no Outbox, disparando estorno integral no `Payment` e preservação histórica no `Access`.
+3. **Regras de Esportes Universitários:**
+   - Formatos oficiais obrigatórios: **Copa** com **32 times** (8 grupos de 4 → Oitavas, Quartas, Semifinal e Final em Ida e Volta + Pênaltis) e **Temporada** com **10 times** (pontos corridos turno e returno, 18 rodadas).
+   - **Código de convite 24h + Free Agents:** ao criar um time, o capitão define quantas vagas reservará por código (`inviteCode` válido por 24h); vagas não reservadas ou expiradas após 24h são liberadas automaticamente para a fila de Free Agents.
+   - **Mata-mata (Agregado + Pênaltis):** na partida de Volta, o sistema soma o placar da Ida considerando o mando invertido; pênaltis (`homePenaltyScore` / `awayPenaltyScore`, sem igualdade) só são exigidos e persistidos quando o **placar agregado** empata.
+   - **Check-in de partidas esportivas:** mantido neste serviço (não cria ticket no `Access`).
 
-No `compose.yaml`, `engagement` expõe a porta `18085` (`ENGAGEMENT_PORT`), conecta ao banco de escrita `engagement-db` (`unir_engagement`, porta `15434`), ao MongoDB (`mongodb`, banco `unir_engagement`) e publica/consome pelo RabbitMQ interno `rabbitmq` (`unir.events`). MongoDB persiste em `mongodb_data`; RabbitMQ persiste em `rabbitmq_data`.
-O Compose aponta `CAMPUS_URL` para `http://campus:3000`; fora do Compose, o padrão local é `http://localhost:3000`.
+---
 
-As leituras públicas de eventos usam a projeção MongoDB e podem refletir mudanças após o processamento assíncrono do Outbox. Uma falha do read model retorna `503`, sem consulta de fallback ao PostgreSQL. Criação, edição, cancelamento, inscrições e eventos gerenciados continuam na fonte de escrita PostgreSQL. O BFF e o Gateway preservam as rotas e respostas HTTP. Contrato, filas, rebuild e integração futura com Kubernetes estão em [`docs/contracts/event-projection-v1.md`](../docs/contracts/event-projection-v1.md).
+## Endpoints e contratos
 
-Para reconstruir `event_views` a partir de todos os eventos PostgreSQL, incluindo os cancelados, execute o comando documentado no contrato. O rebuild é idempotente, não apaga dados do MongoDB e usa a mesma comparação de `aggregateVersion` do consumidor para proteger alterações concorrentes.
+- **Eventos e inscrições:** `GET/POST /api/v1/events`, `GET/PATCH/DELETE /api/v1/events/{eventId}`, `GET /api/v1/events/organizer-contexts`, `GET /api/v1/events/managed`, `POST /api/v1/events/{eventId}/registrations`, `GET /api/v1/registrations/me`, `DELETE /api/v1/registrations/{registrationId}`
+- **Oportunidades:** `GET/POST /api/v1/opportunities`, `GET/PATCH/DELETE /api/v1/opportunities/{opportunityId}`, `GET /api/v1/opportunities/publisher-contexts`, `GET /api/v1/opportunities/managed`
+- **Esportes:** `/api/v1/sports`, `/api/v1/competitions`, `/api/v1/seasons`, `/api/v1/sports-events/{contextType}/{contextId}/overview|teams|teams/join|free-agents|matches/generate|cancel`, `PATCH /api/v1/sports-events/{contextType}/{contextId}`, `PATCH /api/v1/sports-matches/{matchId}/score`, `POST /api/v1/sports-matches/{matchId}/checkin-token|checkins`
+- **Contratos detalhados:**
+  - [Projeção CQRS de Eventos](../docs/contracts/event-projection-v1.md)
+  - [Esportes v1](../docs/contracts/sports-v1.md)
+  - [Oportunidades v1](../docs/contracts/opportunities-v1.md)
+  - [Pagamento, Confirmação e Estorno](../docs/contracts/registration-payment-requested-v1.md) · [PaymentConfirmed](../docs/contracts/payment-confirmed-v1.md) · [Refund Flow](../docs/contracts/refund-flow-v1.md)
+  - [Cancelamento de Evento](../docs/contracts/event-cancellation-v1.md) · [RegistrationConfirmed](../docs/contracts/registration-confirmed-v1.md) · [RegistrationCancelled](../docs/contracts/registration-cancelled-v1.md)
 
-O procedimento completo e repetível é `scripts/seed-local-demo.sh`, que aplica as migrations Campus, provisiona as contas locais e então carrega o catálogo e as demonstrações. Ele não remove volumes. Após o preparo, os arquivos SQL também podem ser reaplicados individualmente:
-
-```sh
-docker compose exec -T engagement-db psql -v ON_ERROR_STOP=1 -U unir -d unir_engagement < engagement/seed/local-events.sql
-docker compose exec -T engagement-db psql -v ON_ERROR_STOP=1 -U unir -d unir_engagement < engagement/seed/local-opportunities.sql
-docker compose exec -T engagement-db psql -v ON_ERROR_STOP=1 -U unir -d unir_engagement < engagement/seed/local-sports.sql
-```
-
-Os seeds criam 18 eventos, 12 oportunidades, três modalidades, duas competições e duas temporadas, todas explicitamente sintéticas. Todos usam IDs estáveis e `ON CONFLICT DO NOTHING`; reaplicar não altera nem remove registros existentes. Os links das oportunidades são domínios reservados `example.org`, não editais reais. Não são criadas inscrições, pagamentos ou históricos de presença.
+---
 
 ## Qualidade
 
-Na pasta `engagement`: `make quality` (`mvn --batch-mode verify`) ou `make test` (`mvn --batch-mode test`), ou pela raiz com `make engagement`.
-
-# Presence handoff
-
-When a free registration is confirmed, or a paid registration is confirmed by a committed `PaymentConfirmed`, Engagement writes `RegistrationConfirmed` to the same transactional Outbox if attendance is enabled. The publisher sends it with routing key `engagement.registration.confirmed.v1`; Access creates its own attendance records idempotently. See [`../docs/contracts/registration-confirmed-v1.md`](../docs/contracts/registration-confirmed-v1.md).
+```sh
+make engagement
+# ou dentro de engagement/:
+make quality   # Spotless, Checkstyle, JUnit/SpringBootTest (H2), ArchUnit, PMD e SpotBugs
+```

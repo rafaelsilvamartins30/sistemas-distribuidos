@@ -84,6 +84,10 @@ export interface SportsTeam {
   captainUserId: string;
   status: string;
   createdAt: string;
+  inviteCode?: string | null;
+  inviteExpiresAt?: string | null;
+  reservedPlayerCount?: number | null;
+  inviteActive?: boolean;
   members: SportsTeamMember[];
 }
 
@@ -113,6 +117,8 @@ export interface SportsMatch {
   location: string;
   homeScore: number | null;
   awayScore: number | null;
+  homePenaltyScore?: number | null;
+  awayPenaltyScore?: number | null;
   status: "SCHEDULED" | "COMPLETED";
   checkinCount: number;
   viewerCheckedIn: boolean;
@@ -171,6 +177,8 @@ export interface MySportsMatch {
   location: string;
   homeScore: number | null;
   awayScore: number | null;
+  homePenaltyScore?: number | null;
+  awayPenaltyScore?: number | null;
   status: "SCHEDULED" | "COMPLETED";
   hasCheckinToken: boolean;
   viewerCheckedIn: boolean;
@@ -411,12 +419,30 @@ export function registerSportsTeam(
   token: string,
   contextType: SportsContextType,
   contextId: string,
-  payload: { name: string; captainName?: string; memberNames?: string[] },
+  payload: { name: string; captainName?: string; memberNames?: string[]; reservedPlayerCount?: number },
   baseUrl?: string,
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<SportsTeam> {
   return request<SportsTeam>(
     `/api/v1/web/sports-events/${encodeURIComponent(contextType)}/${encodeURIComponent(contextId)}/teams`,
+    token,
+    gatewayUrl(baseUrl),
+    fetchImpl,
+    "POST",
+    payload,
+  );
+}
+
+export function joinSportsTeamByCode(
+  token: string,
+  contextType: SportsContextType,
+  contextId: string,
+  payload: { inviteCode: string; displayName?: string },
+  baseUrl?: string,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<SportsTeam> {
+  return request<SportsTeam>(
+    `/api/v1/web/sports-events/${encodeURIComponent(contextType)}/${encodeURIComponent(contextId)}/teams/join`,
     token,
     gatewayUrl(baseUrl),
     fetchImpl,
@@ -464,7 +490,12 @@ export function generateSportsMatches(
 export function recordSportsMatchScore(
   token: string,
   matchId: string,
-  payload: { homeScore: number; awayScore: number },
+  payload: {
+    homeScore: number;
+    awayScore: number;
+    homePenaltyScore?: number | null;
+    awayPenaltyScore?: number | null;
+  },
   baseUrl?: string,
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<SportsMatch> {
@@ -529,5 +560,47 @@ export function getMySportsEnrollments(
     token,
     gatewayUrl(baseUrl),
     fetchImpl,
+  );
+}
+
+export function updateSportsEventDeadline(
+  token: string,
+  contextType: SportsContextType,
+  contextId: string,
+  registrationDeadline: string,
+  baseUrl?: string,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<{ contextType: string; contextId: string; registrationDeadline: string; status: string }> {
+  return request<{ contextType: string; contextId: string; registrationDeadline: string; status: string }>(
+    `/api/v1/web/sports-events/${encodeURIComponent(contextType)}/${encodeURIComponent(contextId)}`,
+    token,
+    gatewayUrl(baseUrl),
+    fetchImpl,
+    "PATCH",
+    { registrationDeadline },
+  );
+}
+
+export function cancelSportsEvent(
+  token: string,
+  contextType: SportsContextType,
+  contextId: string,
+  baseUrl?: string,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<{
+  contextType: string;
+  contextId: string;
+  status: string;
+  cancelledTeams: number;
+  cancelledFreeAgents: number;
+  refundsRequested: number;
+}> {
+  return request(
+    `/api/v1/web/sports-events/${encodeURIComponent(contextType)}/${encodeURIComponent(contextId)}/cancel`,
+    token,
+    gatewayUrl(baseUrl),
+    fetchImpl,
+    "POST",
+    {},
   );
 }

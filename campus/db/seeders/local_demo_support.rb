@@ -1,34 +1,18 @@
 # frozen_string_literal: true
 
-# Shares stable keys, source disclaimers and local seed input validation.
+# Shares stable UUIDv5 keys, university defaults and local seed manifest loading.
 module LocalDemoSeedSupport
   NAMESPACE = '6bc5849c-694a-4cef-8839-6b9ef7ad5cf4'
-  REFERENCE_INFO = [
-    'Registro de referência institucional para demonstração local.',
-    'A atividade atual não foi verificada; este registro não confirma funcionamento nem vínculo administrativo.'
-  ].join(' ').freeze
-  CATALOG_PATH = Rails.root.join('db/seed_data/ufla_catalogo_referencia_2026-11-18.json')
   ACCOUNTS_PATH = Pathname.new(ENV.fetch('LOCAL_DEMO_ACCOUNTS_FILE',
                                          Rails.root.join('../config/local-demo-accounts.json').to_s))
-  ACCOUNT_USERNAMES = %w[
-    unir.admin unir.departamento unir.entidade unir.professor.aprovado unir.professor.novo
-    unir.aluno1 unir.aluno2 unir.aluno3
-  ].freeze
-  CATALOG_COUNTS = {
-    'academic_units' => 9,
-    'departments' => 32,
-    'undergraduate_course_references' => 53,
-    'extension_entities' => 107,
-    'other_student_organizations' => 5
-  }.freeze
   UNIVERSITY_ATTRIBUTES = {
-    name: 'Universidade Federal de Lavras', acronym: 'UFLA',
+    name: 'Universidade Federal de Lavras',
+    acronym: 'UFLA',
     description: 'Universidade Federal de Lavras (UFLA).',
-    general_info_markdown: 'Ambiente local de demonstração com catálogo institucional de referência da UFLA.',
+    general_info_markdown: 'Plataforma universitária UNIR configurada para a Universidade Federal de Lavras (UFLA).',
     current_term: '2026/2',
     links: [
-      { label: 'Unidades acadêmicas', url: 'https://ufla.br/sobre/administracao/unidades-academicas' },
-      { label: 'Calendário escolar da PROGRAD', url: 'https://prograd.ufla.br/calendario-escolar/' }
+      { label: 'Portal institucional', url: 'https://ufla.br' }
     ]
   }.freeze
 
@@ -42,24 +26,20 @@ module LocalDemoSeedSupport
     versioned_id(digest.digest.bytes.first(16))
   end
 
-  def reference_markdown(source_url)
-    "#{REFERENCE_INFO}\n\nFonte: [registro institucional](#{source_url})."
-  end
-
-  def catalog
-    data = JSON.parse(CATALOG_PATH.read)
-    CATALOG_COUNTS.each do |key, count|
-      actual = data.fetch(key).length
-      raise "Catálogo inválido: #{key}=#{actual}, esperado #{count}" unless actual == count
-    end
-    data
-  end
-
-  def accounts
+  def manifest
     ensure_accounts_file
+    JSON.parse(ACCOUNTS_PATH.read)
+  end
 
-    loaded = JSON.parse(ACCOUNTS_PATH.read).fetch('accounts')
-    validate_account_names(loaded)
+  def seed_mode(parsed_manifest = manifest)
+    raw = ENV.fetch('UNIR_SEED_MODE', nil) || parsed_manifest['mode'] || 'demo'
+    mode = raw.to_s.strip.downcase
+    %w[clean demo].include?(mode) ? mode : 'demo'
+  end
+
+  def accounts(parsed_manifest = manifest)
+    loaded = parsed_manifest.fetch('accounts')
+    raise 'Arquivo local deve conter ao menos a conta admin.' unless loaded.key?('admin')
 
     loaded
   end
@@ -68,12 +48,6 @@ module LocalDemoSeedSupport
     return if ACCOUNTS_PATH.file?
 
     raise "Arquivo local de contas ausente: #{ACCOUNTS_PATH}. Execute scripts/prepare-local-demo-accounts.py."
-  end
-
-  def validate_account_names(accounts)
-    return if accounts.keys.sort == ACCOUNT_USERNAMES.sort
-
-    raise 'Arquivo local deve conter exatamente as 8 contas de demonstração esperadas.'
   end
 
   def versioned_id(bytes)

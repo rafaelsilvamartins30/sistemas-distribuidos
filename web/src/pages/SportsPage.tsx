@@ -1,22 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { Link, useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { SearchField } from "../components/SearchField";
 import { CompetitionCard, SeasonCard } from "../components/SportsCatalogCard";
 import { SportsCreateModal } from "../components/SportsCreateModal";
-import { SportsEventModal } from "../components/SportsEventModal";
 import {
   getCompetitions,
-  getMySportsMatches,
+  getMySportsEnrollments,
   getSeasons,
   getSports,
   getSportsOrganizerContexts,
   type Competition,
-  type MySportsMatch,
+  type MySportsEnrollment,
   type Page,
   type Season,
   type Sport,
-  type SportsContextType,
   type SportsOrganizerContext,
 } from "../services/sports.js";
 
@@ -34,10 +32,6 @@ type TypeFilter = "ALL" | "COMPETITION" | "SEASON";
 
 const EMPTY_PAGE = { items: [], page: 0, size: 50, totalElements: 0, totalPages: 0 };
 
-function formatMatchDate(value: string): string {
-  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
-}
-
 export function SportsPage() {
   const { keycloak } = useOutletContext<WebContext>();
   const [query, setQuery] = useState("");
@@ -49,15 +43,9 @@ export function SportsPage() {
     seasons: EMPTY_PAGE,
   });
   const [organizerContexts, setOrganizerContexts] = useState<SportsOrganizerContext[]>([]);
-  const [myMatches, setMyMatches] = useState<MySportsMatch[]>([]);
+  const [myEnrollments, setMyEnrollments] = useState<MySportsEnrollment[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState(false);
-
-  const [selectedEvent, setSelectedEvent] = useState<{
-    contextType: SportsContextType;
-    contextId: string;
-    initialTab?: "overview" | "teams" | "matches";
-  } | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -73,7 +61,7 @@ export function SportsPage() {
       try {
         await keycloak.updateToken(30);
         if (!keycloak.token) throw new Error("Token de acesso indisponível.");
-        const [sports, competitions, seasons, contexts, matches] = await Promise.all([
+        const [sports, competitions, seasons, contexts, enrollments] = await Promise.all([
           getSports(keycloak.token, { size: 100 }),
           getCompetitions(keycloak.token, {
             q: query,
@@ -86,12 +74,12 @@ export function SportsPage() {
             size: 50,
           }),
           getSportsOrganizerContexts(keycloak.token).catch(() => ({ items: [] })),
-          getMySportsMatches(keycloak.token).catch(() => ({ items: [] })),
+          getMySportsEnrollments(keycloak.token).catch(() => ({ items: [] })),
         ]);
         if (active) {
           setCatalog({ sports, competitions, seasons });
-          setOrganizerContexts(contexts.items);
-          setMyMatches(matches.items);
+          setOrganizerContexts(contexts.items.filter((ctx) => ctx.organizerType === "UNIVERSITY"));
+          setMyEnrollments(enrollments.items);
         }
       } catch {
         if (active) setCatalogError(true);
@@ -115,12 +103,14 @@ export function SportsPage() {
       <header className="sports-hero">
         <div className="sports-hero-copy">
           <p className="sports-kicker">
-            <span aria-hidden="true">●</span> Campus integrado · esporte universitário
+            <span aria-hidden="true">●</span>{" "}
+            {canCreate ? "Painel da Universidade · gestão esportiva" : "Campus integrado · esporte universitário"}
           </p>
-          <h1>Esportes &amp; Ligas Universitárias</h1>
+          <h1>{canCreate ? "Gestão de Campeonatos da Universidade" : "Esportes & Ligas Universitárias"}</h1>
           <p>
-            Explore campeonatos e temporadas da UFLA. Clique em qualquer card para ver regras da modalidade, inscrever
-            sua equipe ou entrar como free agent e acompanhar suas partidas.
+            {canCreate
+              ? "Crie e gerencie as Copas de Mata-Mata (32 times obrigatórios, finais de semana) e Temporadas de Pontos Corridos (10 times obrigatórios, terças e quintas). Abra qualquer campeonato para acompanhar inscrições, lançar placares e liberar códigos de presença."
+              : "Explore os campeonatos de mata-mata (finais de semana) e as temporadas de pontos corridos (terças e quintas) organizados pela Universidade. Abra qualquer campeonato para ver a situação atual, tabela, calendário de partidas e equipes."}
           </p>
         </div>
         <div className="sports-hero-actions">
@@ -131,62 +121,18 @@ export function SportsPage() {
             <strong>{catalog.competitions.totalElements + catalog.seasons.totalElements}</strong>
             <span>Competições e temporadas</span>
           </div>
+          {!canCreate && (
+            <Link className="button button-secondary" to="/meus-esportes">
+              Meus Campeonatos ({myEnrollments.length}) →
+            </Link>
+          )}
           {canCreate && (
             <button type="button" className="button button-primary" onClick={() => setCreateOpen(true)}>
-              + Criar
+              + Criar Campeonato
             </button>
           )}
         </div>
       </header>
-
-      {myMatches.length > 0 && (
-        <section className="sports-my-matches" aria-labelledby="sports-my-matches-title">
-          <div className="sports-section-heading">
-            <div>
-              <p className="sports-kicker">Meus campeonatos</p>
-              <h2 id="sports-my-matches-title">Próximas partidas</h2>
-            </div>
-            <span className="sports-count">{myMatches.length} partida(s)</span>
-          </div>
-          <div className="sports-my-matches-grid">
-            {myMatches.map((match) => (
-              <article key={match.matchId} className="sports-my-match-card">
-                <div className="sports-match-head">
-                  <span className="sports-catalog-type">{match.sportName}</span>
-                  <span className="sports-match-meta">{formatMatchDate(match.scheduledAt)}</span>
-                </div>
-                <h3>{match.eventTitle}</h3>
-                <p className="sports-my-match-versus">
-                  <strong>{match.teamName}</strong> vs <strong>{match.opponentName}</strong>
-                </p>
-                <p className="sports-match-meta">
-                  {match.location} ·{" "}
-                  {match.status === "COMPLETED"
-                    ? `Placar: ${match.homeScore} × ${match.awayScore}`
-                    : match.viewerCheckedIn
-                      ? "Presença confirmada ✓"
-                      : match.hasCheckinToken
-                        ? "Check-in aberto!"
-                        : "Agendada"}
-                </p>
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  onClick={() =>
-                    setSelectedEvent({
-                      contextType: match.contextType,
-                      contextId: match.contextId,
-                      initialTab: "matches",
-                    })
-                  }
-                >
-                  {match.hasCheckinToken && !match.viewerCheckedIn ? "Confirmar presença" : "Ver partida"}
-                </button>
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
 
       <section className="sports-search-panel" aria-label="Filtrar campeonatos e temporadas">
         <SearchField
@@ -210,8 +156,8 @@ export function SportsPage() {
           <span>Tipo</span>
           <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as TypeFilter)}>
             <option value="ALL">Todos</option>
-            <option value="COMPETITION">Campeonatos</option>
-            <option value="SEASON">Temporadas</option>
+            <option value="COMPETITION">Campeonatos (Mata-mata)</option>
+            <option value="SEASON">Temporadas (Pontos corridos)</option>
           </select>
         </label>
       </section>
@@ -231,7 +177,7 @@ export function SportsPage() {
         <section className="sports-section" aria-labelledby="sports-unified-title">
           <div className="sports-section-heading">
             <div>
-              <p className="sports-kicker">Inscrições abertas e histórico</p>
+              <p className="sports-kicker">Calendário oficial da Universidade</p>
               <h2 id="sports-unified-title">Campeonatos &amp; Temporadas</h2>
             </div>
             <span className="sports-count">{totalVisible} exibido(s)</span>
@@ -243,18 +189,14 @@ export function SportsPage() {
                 <CompetitionCard
                   key={`comp-${competition.id}`}
                   competition={competition}
-                  onOpen={() =>
-                    setSelectedEvent({ contextType: "COMPETITION", contextId: competition.id, initialTab: "overview" })
-                  }
+                  actionLabel={canCreate ? "Gerenciar campeonato" : undefined}
                 />
               ))}
               {visibleSeasons.map((season) => (
                 <SeasonCard
                   key={`season-${season.id}`}
                   season={season}
-                  onOpen={() =>
-                    setSelectedEvent({ contextType: "SEASON", contextId: season.id, initialTab: "overview" })
-                  }
+                  actionLabel={canCreate ? "Gerenciar temporada" : undefined}
                 />
               ))}
             </div>
@@ -266,17 +208,6 @@ export function SportsPage() {
             </p>
           )}
         </section>
-      )}
-
-      {selectedEvent && (
-        <SportsEventModal
-          keycloak={keycloak}
-          contextType={selectedEvent.contextType}
-          contextId={selectedEvent.contextId}
-          initialTab={selectedEvent.initialTab}
-          onClose={() => setSelectedEvent(null)}
-          onChanged={refreshAll}
-        />
       )}
 
       {createOpen && (

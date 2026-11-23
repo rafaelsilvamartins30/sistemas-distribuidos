@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { Icon } from "../components/Icon";
-import { ParticipantQrScanner } from "../components/ParticipantQrScanner";
+import { UniversalAttendanceModal } from "../components/UniversalAttendanceModal";
 import {
   AttendanceApiError,
   checkInWithEventQr,
@@ -57,10 +57,6 @@ function toTicketPage(value: TicketPage, ticket: TicketRegistration, attendance:
   };
 }
 
-function qrDataUri(qr: QrArtifact): string {
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(qr.qrSvg)}`;
-}
-
 export function MySpacePage() {
   const { keycloak } = useOutletContext<{ keycloak: Keycloak }>();
   const [filter, setFilter] = useState<TicketFilter>("upcoming");
@@ -68,8 +64,13 @@ export function MySpacePage() {
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState("");
   const [busyId, setBusyId] = useState("");
-  const [scannerId, setScannerId] = useState("");
-  const [qr, setQr] = useState<{ registrationId: string; value: QrArtifact } | null>(null);
+  const [attendanceModal, setAttendanceModal] = useState<{
+    ticket: TicketRegistration;
+    mode: "participant" | "organizer";
+    qr?: QrArtifact | null;
+    error?: string | null;
+    feedback?: string | null;
+  } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -145,7 +146,7 @@ export function MySpacePage() {
 
   async function scanEventQr(ticket: TicketRegistration, token: string) {
     setBusyId(ticket.id);
-    setFailure("");
+    setAttendanceModal((prev) => (prev ? { ...prev, error: null, feedback: null } : prev));
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
@@ -154,13 +155,13 @@ export function MySpacePage() {
         const attendance = { ...ticket.attendance, status: "ATTENDED" as const, checkedAt: result.checkedAt };
         setPage((current) => (current ? toTicketPage(current, ticket, attendance) : current));
       }
-      setScannerId("");
+      setAttendanceModal(null);
     } catch (error) {
-      setFailure(
+      const message =
         error instanceof AttendanceApiError
           ? `Não foi possível registrar a presença: ${error.detail}.`
-          : "Não foi possível registrar a presença. Tente novamente.",
-      );
+          : "Não foi possível registrar a presença. Tente novamente.";
+      setAttendanceModal((prev) => (prev ? { ...prev, error: message } : prev));
     } finally {
       setBusyId("");
     }
@@ -168,18 +169,24 @@ export function MySpacePage() {
 
   async function openMyQr(ticket: TicketRegistration) {
     setBusyId(ticket.id);
-    setFailure("");
+    setAttendanceModal({ ticket, mode: "organizer", qr: null, error: null, feedback: null });
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
       const issued = await issueMyTicketQr(keycloak.token, ticket.eventId);
-      setQr({ registrationId: ticket.id, value: issued });
+      setAttendanceModal({
+        ticket,
+        mode: "organizer",
+        qr: issued,
+        error: null,
+        feedback: "Apresente este QR ou código ao organizador na entrada do evento.",
+      });
     } catch (error) {
-      setFailure(
+      const message =
         error instanceof AttendanceApiError
           ? `Não foi possível abrir seu QR: ${error.detail}.`
-          : "Não foi possível abrir seu QR. Tente novamente.",
-      );
+          : "Não foi possível abrir seu QR. Tente novamente.";
+      setAttendanceModal({ ticket, mode: "organizer", qr: null, error: message, feedback: null });
     } finally {
       setBusyId("");
     }
@@ -265,43 +272,31 @@ export function MySpacePage() {
                           attendance?.status === "ELIGIBLE" && (
                             <div className="ticket-actions">
                               {attendance.mode === "PARTICIPANT_SCANS_EVENT" ? (
-                                <>
-                                  <p>
-                                    Leia o QR exibido pela organização durante o evento para registrar sua presença.
-                                  </p>
-                                  <button
-                                    className="button button-secondary"
-                                    type="button"
-                                    disabled={busyId === ticket.id}
-                                    onClick={() => setScannerId(scannerId === ticket.id ? "" : ticket.id)}
-                                  >
-                                    {scannerId === ticket.id ? "Fechar leitor" : "Ler QR do evento"}
-                                  </button>
-                                  {scannerId === ticket.id && (
-                                    <ParticipantQrScanner
-                                      busy={busyId === ticket.id}
-                                      autoSubmitOnScan
-                                      onToken={(value) => void scanEventQr(ticket, value)}
-                                    />
-                                  )}
-                                </>
+                                <button
+                                  className="button button-primary"
+                                  type="button"
+                                  disabled={busyId === ticket.id}
+                                  onClick={() =>
+                                    setAttendanceModal({
+                                      ticket,
+                                      mode: "participant",
+                                      qr: null,
+                                      error: null,
+                                      feedback: null,
+                                    })
+                                  }
+                                >
+                                  Confirmar Presença
+                                </button>
                               ) : (
-                                <>
-                                  <button
-                                    className="button button-secondary"
-                                    type="button"
-                                    disabled={busyId === ticket.id}
-                                    onClick={() => void openMyQr(ticket)}
-                                  >
-                                    {busyId === ticket.id ? "Gerando QR…" : "Abrir meu QR"}
-                                  </button>
-                                  {qr?.registrationId === ticket.id && (
-                                    <div className="my-ticket-qr">
-                                      <img src={qrDataUri(qr.value)} alt={`QR do ticket para ${ticket.event.title}`} />
-                                      <span>Apresente este QR ao organizador na entrada.</span>
-                                    </div>
-                                  )}
-                                </>
+                                <button
+                                  className="button button-primary"
+                                  type="button"
+                                  disabled={busyId === ticket.id}
+                                  onClick={() => void openMyQr(ticket)}
+                                >
+                                  {busyId === ticket.id ? "Gerando QR…" : "Abrir meu QR de entrada"}
+                                </button>
                               )}
                             </div>
                           )}
@@ -351,6 +346,29 @@ export function MySpacePage() {
           </>
         )}
       </section>
+
+      {attendanceModal && (
+        <UniversalAttendanceModal
+          mode={attendanceModal.mode}
+          busy={busyId === attendanceModal.ticket.id}
+          title={attendanceModal.mode === "participant" ? "Confirmar Presença no Evento" : "Meu Ticket QR de Entrada"}
+          subtitle={`${attendanceModal.ticket.event.title} · ${dateTime(attendanceModal.ticket.event.startsAt)}`}
+          token={attendanceModal.qr?.token ?? null}
+          qrSvg={attendanceModal.qr?.qrSvg ?? null}
+          checkedIn={attendanceModal.ticket.attendance?.status === "ATTENDED"}
+          error={attendanceModal.error}
+          feedback={attendanceModal.feedback}
+          onSubmitToken={
+            attendanceModal.mode === "participant"
+              ? (code) => void scanEventQr(attendanceModal.ticket, code)
+              : undefined
+          }
+          onGenerateToken={
+            attendanceModal.mode === "organizer" ? () => void openMyQr(attendanceModal.ticket) : undefined
+          }
+          onClose={() => setAttendanceModal(null)}
+        />
+      )}
     </div>
   );
 }

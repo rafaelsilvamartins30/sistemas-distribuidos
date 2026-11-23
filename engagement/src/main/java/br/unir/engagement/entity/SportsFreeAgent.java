@@ -126,4 +126,8 @@ public class SportsFreeAgent {
             this.status = "CANCELLED";
         }
     }
+
+    public void cancelByTournament() {
+        this.status = "CANCELLED";
+    }
 }

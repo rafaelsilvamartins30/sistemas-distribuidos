@@ -25,6 +25,7 @@ replay_pid*
 
 # Optional local Docker Compose overrides
 /.env
+/.cache/
 /config/local-demo-accounts.json
 /.pnpm-store/
 /node_modules/

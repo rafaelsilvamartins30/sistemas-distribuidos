@@ -1,76 +1,111 @@
-# UNIR — University Network for Integration and Relationships
+# UNIR — Plataforma Universitária Distribuída
 
-Plataforma universitária distribuída construída para a disciplina **GCC129 — Sistemas Distribuídos (UFLA)** em regime diferencial (desenvolvimento individual, sem módulo de blockchain conforme registrado no RD Form).
+Plataforma universitária baseada em arquitetura de microsserviços orquestrada em **Kubernetes (`kind`)**, reunindo estrutura institucional, perfis e publicações acadêmicas, eventos, oportunidades, esportes universitários, pagamentos simulados (Saga), credenciamento/presença (QR Code) e busca assistida por IA (RAG com Qdrant + Gemini).
 
-## 1. Problema, Motivação e Impacto Social
+---
 
-A comunicação institucional e a participação estudantil nas universidades públicas brasileiras sofrem com **fragmentação de canais** (e-mails dispersos, murais físicos, grupos informais de mensageria e sistemas legados isolados). Como consequência, estudantes perdem prazos de bolsas, iniciação científica, eventos acadêmicos e atividades esportivas, agravando o desengajamento e a evasão nos primeiros períodos:
+## Como rodar (Kubernetes local com `kind`)
 
-1. **Censo da Educação Superior (INEP/MEC, 2023):** aponta taxas acumuladas de desistência superiores a 50% em cursos de graduação presenciais no Brasil, correlacionadas à baixa integração acadêmica e social no campus.
-2. **Tinto, V. (1993, *Leaving College*):** demonstra que a integração acadêmica e social do estudante com departamentos, entidades estudantis e atividades extracurriculares é um dos principais fatores de permanência universitária.
-3. **Pascarella, E. T., & Terenzini, P. T. (2005, *How College Affects Students*):** evidencia que o envolvimento em atividades extracurriculares, pesquisa e esporte universitário eleva o desempenho acadêmico e o senso de pertencimento.
-4. **Fórum Nacional de Pró-Reitores de Assuntos Estudantis — FONAPRACE / ANDIFES (V Pesquisa Nacional de Perfil Socioeconômico e Cultural, 2019):** destaca a assimetria de acesso à informação sobre auxílios, bolsas e oportunidades acadêmicas entre estudantes ingressantes e veteranos.
-5. **UNESCO (2022, *Reimagining Our Futures Together*):** reforça o papel de infraestruturas digitais abertas e inclusivas para democratizar o acesso a oportunidades educacionais e comunitárias.
+### Pré-requisitos
+- **Docker Desktop** (ou engine Docker compatível) em execução — usado apenas para construir as imagens OCI locais e hospedar o nó `kind`;
+- `kubectl`, `make`, `python3` e `curl` no `PATH`;
+- Conexão com a internet no primeiro boot (para baixar imagens base, dependências e o modelo local de embeddings do FastEmbed).
+- O script de bootstrap instala `kind` automaticamente em `~/.local/bin` caso não esteja instalado. **Não** é necessário instalar Java, Ruby, Go, Rust ou Python tooling no host para rodar a aplicação.
 
-**Impacto social esperado:** centralizar a vida universitária em um ecossistema único — conectando universidade, unidades acadêmicas, departamentos, entidades estudantis, comunidades, eventos, oportunidades, esportes e descoberta assistida por IA (RAG). O impacto pode ser mensurado por: (i) taxa de participação em eventos e oportunidades por estudante, (ii) tempo médio para descoberta de editais via busca semântica/RAG e (iii) redução de ausência (*no-show*) com check-in digital via QR Code.
-
-## 2. Arquitetura e Serviços
-
-- **4 microsserviços de domínio independentes (poliglota + Database per Service):**
-  - **Campus** (Ruby on Rails + PostgreSQL `unir_campus`) — estrutura institucional (universidade, unidades acadêmicas, departamentos, cursos, entidades, comunidades), perfis, feed social, notificações, solicitações e autorização contextual.
-  - **Engagement** (Java 21 / Spring Boot + PostgreSQL `unir_engagement` + MongoDB `unir_engagement_read` para **CQRS** + Outbox) — eventos (com **HATEOAS `_links`**), inscrições, oportunidades e módulo completo de esportes (campeonatos, temporadas, equipes, free agents, partidas e presença).
-  - **Payment** (Go 1.27 + PostgreSQL `unir_payment` com **Event Sourcing + Outbox**) — ciclo de vida de cobranças PIX simuladas, confirmação e reembolsos compensatórios da **Saga coreografada**.
-  - **Access** (Rust / Axum + PostgreSQL `unir_access`) — credenciais de acesso, tickets QR, validação de presença e revogação automática na compensação da Saga.
-- **Serviço de IA/RAG (`ai-rag`):** Python / FastAPI + LangChain + Qdrant + FastEmbed local + Gemini remoto (com tool de consulta ao vivo, timeout/retry e fallback).
-- **2 BFFs distintos + API Gateway:** `web-bff` (para `web`) e `admin-bff` (agregação administrativa exclusiva para `admin-web`), protegidos pelo **Gateway** (Spring Cloud Gateway MVC) com validação JWT/OIDC via **Keycloak**.
-
-Documentação completa:
-- [Relatório Técnico Completo (GCC129)](docs/relatorio-tecnico-gcc129.md)
-- [Especificação OpenAPI 3.0](docs/api/openapi.yaml)
-- [Contratos de API e Mensageria](docs/contracts/)
-- [Guia de Kubernetes Local](infra/k8s/README.md)
-- [Guia de Qualidade](docs/QUALITY.md)
-
-## 3. Como Subir do Zero (Docker Compose)
-
-Pré-requisitos: Docker com Docker Compose v2, Python 3 (para provisionamento das contas locais).
-
+### 1. Clonar e configurar variáveis de ambiente (opcional)
 ```sh
-# 1. Copie o arquivo de variáveis locais (opcional: preencha GEMINI_API_KEY para geração LLM real no RAG)
+git clone --branch develop https://github.com/rafaelsilvamartins30/sistemas-distribuidos.git
+cd sistemas-distribuidos
+```
+
+Se quiser personalizar senhas locais ou ativar a geração com LLM no Assistente RAG, crie `.env` (ignorado pelo Git) a partir do modelo:
+```sh
 cp config/local.env.example .env
-
-# 2. Recrie os volumes locais, suba todos os serviços, migre bancos e popule dados e contas demo
-make local-reset
 ```
+Sem `.env`, o bootstrap usa automaticamente os valores locais padrão de [config/local.env.example](config/local.env.example).
 
-URLs no Docker Compose:
-- **Web:** http://localhost:15173
-- **Administration:** http://localhost:15175
-- **Gateway:** http://localhost:18084
-- **Keycloak:** http://localhost:18081 · **Mailpit:** http://localhost:18025
+### 2. Escolher o modo de inicialização
 
-As credenciais geradas para o administrador principal (`unir.admin`) e demais contas locais são salvas em `config/local-demo-accounts.json` (ignorado pelo Git).
+O projeto oferece **dois modos** limpos de inicialização no Kubernetes:
 
-## 4. Como Subir no Kubernetes Local (`kind`)
+| Modo | Comando (subir / atualizar) | Comando (zerar e subir do zero) | O que vem no banco |
+| --- | --- | --- | --- |
+| **Demo enxuta** (padrão) | `make k8s-demo` | `make k8s-reset-demo` | Universidade configurada (`UFLA`), **1 admin** (`admin@gmail.com`), **10 professores verificados** (`professor1..10@gmail.com`), **40 alunos** (`aluno1..40@gmail.com`), **1 unidade acadêmica** (`ICET`), **2 departamentos** (`DCC` e `DEG`), **2 cursos**, **3 comunidades** (1 da universidade + 1 por departamento) e **2 entidades** (1 por departamento). **Zero** eventos, oportunidades, esportes ou posts pré-populados. |
+| **Zerado (manual)** | `make k8s-clean` | `make k8s-reset-clean` | Apenas a Universidade configurada + **1 conta admin** (`admin@gmail.com` / `123`) para criar toda a estrutura manualmente. |
 
-```sh
-# Cria o cluster kind, constrói/carrega imagens, aplica ConfigMaps, Secrets, Deployments, Services e Ingress
-./scripts/k8s-up.sh
+### Outros comandos úteis
+| Comando | Descrição |
+| --- | --- |
+| `UNIR_K8S_REBUILD=true make k8s-demo` | Força reconstrução de todas as imagens locais antes de reaplicar os manifests no cluster. |
+| `make k8s-down` | Remove o cluster `kind` local (`unir-local`) e seus dados. |
+| `make k8s-verify` | Executa validação ponta a ponta no cluster (Ingress, OIDC, RAG, CQRS, inscrições e persistência). |
+| `make k8s-scale-demo` | Demonstra escalabilidade horizontal (`1 → 3 → 1` réplicas no `web-bff`). |
+| `make demo-saga` | Executa via CLI a Saga de pagamento simulado, projeção CQRS (MongoDB) e estorno por cancelamento. |
+| `make ci` | Executa a pipeline completa de qualidade, infraestrutura e segurança (veja [docs/QUALITY.md](docs/QUALITY.md)). |
 
-# Verifica saúde, autenticação OIDC, CQRS e fluxos principais
-./scripts/k8s-verify.sh
+---
 
-# Demonstra escalabilidade real (3 réplicas + distribuição de carga)
-./scripts/k8s-scale-demo.sh
+## Acessos e credenciais locais
 
-# Demonstra ao vivo a Saga paga (caminho feliz + compensação por cancelamento) + CQRS + HATEOAS
-./scripts/demo-saga-compensation.sh
-```
+| Interface / Recurso | Endereço |
+| --- | --- |
+| **UNIR Web** (estudantes, professores e gestão contextual) | <http://localhost:18080> |
+| **UNIR Administration** (painel `PLATFORM_ADMIN`) | <http://admin.localhost:18080> |
+| **API Gateway** | <http://localhost:18080/api/v1/...> |
+| **Keycloak OIDC Discovery** | <http://localhost:18080/realms/unir/.well-known/openid-configuration> |
+| **Painel RabbitMQ** (via port-forward) | `kubectl -n unir port-forward svc/rabbitmq 15673:15672` → <http://localhost:15673> |
 
-URLs no Kubernetes (`kind` via Traefik Ingress):
-- **Web + Gateway + Keycloak:** http://localhost:18080
-- **Administration:** http://admin.localhost:18080
+**Contas iniciais (senha padrão `123`, salvas em `config/local-demo-accounts.json` ignorado pelo Git):**
+- **Administrador:** `admin@gmail.com` (`USER` + `PLATFORM_ADMIN`)
+- **Professores verificados (modo `demo`):** `professor1@gmail.com` até `professor10@gmail.com` (5 no `DCC`, 5 no `DEG`)
+- **Alunos (modo `demo`):** `aluno1@gmail.com` até `aluno40@gmail.com` (20 no `DCC`, 20 no `DEG`)
 
-## 5. Verificações de Qualidade
+---
 
-Execute `make ci` na raiz para rodar os checks dos serviços (Spotless, Checkstyle, PMD, SpotBugs, ArchUnit, `go test`, `cargo test`, Ruff/Pytest, ESLint/Prettier e testes Node/TypeScript).
+## Variáveis de ambiente (`.env`)
+
+Todas as variáveis lidas pelo bootstrap (`scripts/k8s-up.sh`) estão declaradas em [config/local.env.example](config/local.env.example):
+
+| Variável | Padrão local | Obrigatória? | Finalidade |
+| --- | --- | --- | --- |
+| `UNIR_K8S_PORT` | `18080` | Não | Porta do host exposta pelo Ingress Traefik (definida na criação do cluster). |
+| `UNIR_KIND_CLUSTER` | `unir-local` | Não | Nome do cluster `kind`. |
+| `UNIR_SEED_MODE` | `demo` | Não | Modo de seed: `demo` ou `clean`. |
+| `UNIR_DEMO_PASSWORD` | `123` | Não | Senha padrão das contas provisionadas localmente no Keycloak. |
+| `DB_PASSWORD` | `unir-local-only` | Não | Senha dos bancos PostgreSQL internos (`campus`, `engagement`, `payment`, `access`). |
+| `KEYCLOAK_DB_PASSWORD` | `keycloak-local-only` | Não | Senha do banco PostgreSQL do Keycloak. |
+| `KEYCLOAK_ADMIN_USERNAME` / `KEYCLOAK_ADMIN_PASSWORD` | `admin` / `admin-local-only` | Não | Credenciais administrativas do Keycloak para provisionamento de contas e realm. |
+| `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD` | `unir` / `unir-local-only` | Não | Credenciais do broker RabbitMQ (também usadas no painel de management). |
+| `MONGODB_USERNAME` / `MONGODB_PASSWORD` | `unir` / `unir-local-only` | Não | Credenciais do MongoDB (read model CQRS do Engagement). |
+| `RAG_SYNC_TOKEN` | `unir-rag-sync-local-only` | Não | Segredo interno (`X-RAG-Sync-Token`) para acionar a reindexação do Qdrant. |
+| `RAG_SYNC_CLIENT_ID` / `RAG_SYNC_CLIENT_SECRET` | `unir-rag-sync` / `unir-rag-client-local-only` | Não | Client confidencial OIDC usado pelo `ai-rag` para ler eventos/oportunidades do Engagement. |
+| `EMBEDDING_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Não | Modelo ONNX local do FastEmbed (384 dimensões, multilíngue). |
+| `GEMINI_API_KEY` | *(vazio)* | **Opcional** | Chave do Google AI Studio para geração com `gemini-3.5-flash` no Assistente RAG. Sem ela, o RAG opera em fallback explícito (`FALLBACK_RETRIEVAL_ONLY`), retornando apenas os documentos recuperados do Qdrant. |
+
+---
+
+## Documentação de arquitetura, infraestrutura e qualidade
+
+- **[Arquitetura do Sistema (`docs/ARCHITECTURE.md`)](docs/ARCHITECTURE.md)** — diagramas de comunicação HTTP, mensageria (Outbox/Saga/CQRS), Assistente RAG e limites entre serviços.
+- **[Infraestrutura Kubernetes (`docs/KUBERNETES.md`)](docs/KUBERNETES.md)** — topologia do cluster `kind`, manifests `00`–`10`, PVCs, Secrets, o que está implementado e o que está fora de escopo (TLS, HPA, NetworkPolicy, limits).
+- **[Qualidade e Pipeline (`docs/QUALITY.md`)](docs/QUALITY.md)** — como rodar a pipeline de qualidade (`make ci`) e o que cada check valida em cada serviço.
+- **[Contratos HTTP e de Mensageria (`docs/contracts/`)](docs/contracts/)** e **[Especificação OpenAPI (`docs/api/openapi.yaml`)](docs/api/openapi.yaml)**.
+- **[Relatório Técnico GCC129 (`docs/relatorio-tecnico-gcc129.md`)](docs/relatorio-tecnico-gcc129.md)**.
+
+---
+
+## Sistemas da plataforma
+
+| Sistema | Stack | Responsabilidade principal | Documentação |
+| --- | --- | --- | --- |
+| **Campus** | Ruby on Rails + PostgreSQL | Estrutura institucional (universidade, unidades, departamentos, cursos, semestres), perfis de usuários, verificação docente, entidades, comunidades, feed/enquetes, notificações e autorização contextual. | [campus/README.md](campus/README.md) |
+| **Engagement** | Java 21 / Spring Boot + PostgreSQL + MongoDB + RabbitMQ | Eventos, oportunidades, inscrições, esportes universitários (Copa 32 / Liga 10, código 24h + Free Agents, mata-mata com agregado e pênaltis), Outbox transacional e **CQRS** em MongoDB. | [engagement/README.md](engagement/README.md) |
+| **Payment** | Go + PostgreSQL + RabbitMQ | Event Store + projeção de cobranças + Outbox para inscrições pagas e estornos (`REFUNDED`) via **provedor PIX simulado** (`SimulatedPixProvider`, sem dinheiro real). | [payment/README.md](payment/README.md) |
+| **Access** | Rust + PostgreSQL + RabbitMQ | Credenciamento de eventos, tickets, tokens QR com hash e registro/histórico de presença (`NO_SHOW`). | [access/README.md](access/README.md) |
+| **AI / RAG** | Python / FastAPI / LangChain + Qdrant + FastEmbed + Gemini | Indexação vetorial idempotente de eventos/oportunidades, tool de consulta ao vivo e geração via `gemini-3.5-flash` com fallback degradado explícito. | [ai-rag/README.md](ai-rag/README.md) |
+| **API Gateway** | Java 21 / Spring Cloud Gateway | Ponto único de entrada HTTP (`/api/v1/**`), validação JWT RS256 (Keycloak), controle de papéis (`USER` / `PLATFORM_ADMIN`) e CORS. | [gateway/README.md](gateway/README.md) |
+| **Web BFF** | Node.js / Fastify / TypeScript | Backend for Frontend do cliente `web` (sem banco próprio), composição de chamadas e sanitização de campos internos. | [web-bff/README.md](web-bff/README.md) |
+| **Admin BFF** | Node.js / Fastify / TypeScript | Backend for Frontend exclusivo do `admin-web` (`PLATFORM_ADMIN`), com agregação de visão geral administrativa. | [admin-bff/README.md](admin-bff/README.md) |
+| **Web** | React / TypeScript / Vite | Aplicação principal para alunos, professores e gestores contextuais, incluindo o widget flutuante do Assistente UNIR (RAG). | [web/README.md](web/README.md) |
+| **Administration** | React / TypeScript / Vite | Painel institucional (`PLATFORM_ADMIN`) para gerenciar universidade, unidades, departamentos, cursos, semestres, gestores e solicitações. | [admin-web/README.md](admin-web/README.md) |
+| **Keycloak Theme** | Keycloakify / React | Identidade visual UNIR para login, cadastro, recuperação de conta e Account v3 do Keycloak. | [keycloak-theme/README.md](keycloak-theme/README.md) |

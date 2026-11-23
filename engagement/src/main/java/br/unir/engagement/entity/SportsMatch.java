@@ -41,6 +41,12 @@ public class SportsMatch {
     @Column(name = "away_score")
     private Integer awayScore;
 
+    @Column(name = "home_penalty_score")
+    private Integer homePenaltyScore;
+
+    @Column(name = "away_penalty_score")
+    private Integer awayPenaltyScore;
+
     @Column(nullable = false, length = 32)
     private String status;
 
@@ -111,6 +117,14 @@ public class SportsMatch {
         return this.awayScore;
     }
 
+    public Integer getHomePenaltyScore() {
+        return this.homePenaltyScore;
+    }
+
+    public Integer getAwayPenaltyScore() {
+        return this.awayPenaltyScore;
+    }
+
     public String getStatus() {
         return this.status;
     }
@@ -124,12 +138,31 @@ public class SportsMatch {
     }
 
     public void recordScore(int home, int away) {
+        recordScore(home, away, null, null);
+    }
+
+    public void recordScore(int home, int away, Integer homePenalty, Integer awayPenalty) {
         this.homeScore = home;
         this.awayScore = away;
+        this.homePenaltyScore = homePenalty;
+        this.awayPenaltyScore = awayPenalty;
         this.status = "COMPLETED";
     }
 
     public void updateCheckinToken(String token) {
         this.checkinToken = token;
+    }
+
+    public boolean replaceTeam(UUID oldTeamId, UUID newTeamId) {
+        boolean changed = false;
+        if (this.homeTeamId.equals(oldTeamId)) {
+            this.homeTeamId = newTeamId;
+            changed = true;
+        }
+        if (this.awayTeamId.equals(oldTeamId)) {
+            this.awayTeamId = newTeamId;
+            changed = true;
+        }
+        return changed;
     }
 }

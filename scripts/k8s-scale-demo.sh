@@ -27,7 +27,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 ingress_url = sys.argv[2]
 accounts = json.loads((root / "config" / "local-demo-accounts.json").read_text(encoding="utf-8"))["accounts"]
-user = accounts["unir.aluno1"]
+user = accounts.get("aluno1") or accounts["admin"]
 
 data = urllib.parse.urlencode({
     "grant_type": "password",

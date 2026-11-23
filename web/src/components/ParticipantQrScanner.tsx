@@ -107,16 +107,50 @@ export function ParticipantQrScanner({
     if (token && !busy) onToken(token);
   }
 
+  async function pasteFromClipboard() {
+    setMessage(null);
+    if (!navigator.clipboard?.readText) {
+      setMessage("Cole o código manualmente no campo abaixo (Ctrl+V / Cmd+V).");
+      return;
+    }
+    try {
+      const text = (await navigator.clipboard.readText()).trim();
+      if (!text) {
+        setMessage("A área de transferência está vazia. Copie o código do QR primeiro.");
+        return;
+      }
+      setManualToken(text);
+      if (autoSubmitOnScan && !busy) {
+        setMessage("Código colado. Registrando presença…");
+        onToken(text);
+      } else {
+        setMessage("Código do QR colado. Clique no botão abaixo para confirmar.");
+      }
+    } catch {
+      setMessage("Permissão de área de transferência negada. Cole o código no campo abaixo (Ctrl+V / Cmd+V).");
+    }
+  }
+
   return (
     <div className="attendance-scanner">
-      <button
-        className="button button-secondary"
-        type="button"
-        disabled={busy}
-        onClick={() => (scanning ? stopCamera() : void startCamera())}
-      >
-        {scanning ? "Parar câmera" : autoSubmitOnScan ? "Ler QR do evento" : "Ler QR do participante"}
-      </button>
+      <div className="attendance-scanner-actions" style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <button
+          className="button button-secondary"
+          type="button"
+          disabled={busy}
+          onClick={() => (scanning ? stopCamera() : void startCamera())}
+        >
+          {scanning ? "Parar câmera" : autoSubmitOnScan ? "Ler QR pela câmera" : "Ler QR do participante"}
+        </button>
+        <button
+          className="button button-secondary"
+          type="button"
+          disabled={busy}
+          onClick={() => void pasteFromClipboard()}
+        >
+          Colar código copiado
+        </button>
+      </div>
       <video
         ref={videoRef}
         className="attendance-scanner-video"
@@ -126,13 +160,13 @@ export function ParticipantQrScanner({
         hidden={!scanning}
       />
       <form className="attendance-token-form" onSubmit={submitToken}>
-        <label htmlFor="attendance-qr-token">Código do QR</label>
+        <label htmlFor="attendance-qr-token">Código do QR / Presença</label>
         <input
           id="attendance-qr-token"
           autoComplete="off"
           value={manualToken}
           onChange={(event) => setManualToken(event.target.value)}
-          placeholder="Escaneie ou cole o token"
+          placeholder="Escaneie com a câmera ou cole o código aqui"
           disabled={busy}
         />
         <button className="button button-primary" type="submit" disabled={busy || !manualToken.trim()}>

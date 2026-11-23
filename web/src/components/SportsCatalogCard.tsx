@@ -5,12 +5,11 @@ function currency(value: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value / 100);
 }
 
-function levelLabel(value: string): string {
-  const labels: Record<string, string> = {
-    COMPETITIVE: "Competitivo",
-    RECREATIONAL: "Recreativo",
-  };
-  return labels[value] ?? value;
+function statusLabel(status: string | null): string {
+  if (status === "CANCELLED") return "Cancelado";
+  if (status === "ARCHIVED" || status === "COMPLETED") return "Finalizado";
+  if (status === "ACTIVE" || status === "IN_PROGRESS") return "Rolando";
+  return "Período de Inscrição";
 }
 
 function deadline(value: string): string {
@@ -31,8 +30,8 @@ function Facts({ item }: { item: Competition | Season }) {
         </dd>
       </div>
       <div>
-        <dt>Nível</dt>
-        <dd>{levelLabel(item.skillLevel)}</dd>
+        <dt>Categoria</dt>
+        <dd>Mista</dd>
       </div>
       <div>
         <dt>Inscrições até</dt>
@@ -42,7 +41,15 @@ function Facts({ item }: { item: Competition | Season }) {
   );
 }
 
-export function CompetitionCard({ competition, onOpen }: { competition: Competition; onOpen?: () => void }) {
+export function CompetitionCard({
+  competition,
+  onOpen,
+  actionLabel,
+}: {
+  competition: Competition;
+  onOpen?: () => void;
+  actionLabel?: string;
+}) {
   return (
     <article className="sports-catalog-card" data-competition-id={competition.id}>
       <div className="sports-catalog-card-heading">
@@ -50,8 +57,8 @@ export function CompetitionCard({ competition, onOpen }: { competition: Competit
           ⚽
         </span>
         <span className="sports-catalog-tags">
-          <span className="sports-catalog-type">Campeonato</span>
-          <span className="sports-catalog-level">{levelLabel(competition.skillLevel)}</span>
+          <span className="sports-catalog-type">Campeonato · Misto</span>
+          <span className="sports-catalog-level">{statusLabel(competition.status)}</span>
         </span>
       </div>
       <h3>{competition.title}</h3>
@@ -67,18 +74,26 @@ export function CompetitionCard({ competition, onOpen }: { competition: Competit
       </div>
       {onOpen ? (
         <button type="button" className="button button-primary" onClick={onOpen}>
-          Abrir campeonato
+          {actionLabel ?? "Abrir campeonato"}
         </button>
       ) : (
         <Link className="button button-primary" to={`/esportes/campeonatos/${competition.id}`}>
-          Ver campeonato
+          {actionLabel ?? "Ver campeonato"}
         </Link>
       )}
     </article>
   );
 }
 
-export function SeasonCard({ season, onOpen }: { season: Season; onOpen?: () => void }) {
+export function SeasonCard({
+  season,
+  onOpen,
+  actionLabel,
+}: {
+  season: Season;
+  onOpen?: () => void;
+  actionLabel?: string;
+}) {
   const roundLabel = season.roundRobinMode === "double round-robin" ? "Turno e returno" : "Turno único";
   return (
     <article className="sports-catalog-card" data-season-id={season.id}>
@@ -87,8 +102,8 @@ export function SeasonCard({ season, onOpen }: { season: Season; onOpen?: () => 
           🏐
         </span>
         <span className="sports-catalog-tags">
-          <span className="sports-catalog-type">Temporada</span>
-          <span className="sports-catalog-level">{levelLabel(season.skillLevel)}</span>
+          <span className="sports-catalog-type">Temporada · Misto</span>
+          <span className="sports-catalog-level">{statusLabel(season.status)}</span>
         </span>
       </div>
       <h3>{season.title}</h3>
@@ -106,11 +121,11 @@ export function SeasonCard({ season, onOpen }: { season: Season; onOpen?: () => 
       </div>
       {onOpen ? (
         <button type="button" className="button button-primary" onClick={onOpen}>
-          Abrir temporada
+          {actionLabel ?? "Abrir temporada"}
         </button>
       ) : (
         <Link className="button button-primary" to={`/esportes/temporadas/${season.id}`}>
-          Ver temporada
+          {actionLabel ?? "Ver temporada"}
         </Link>
       )}
     </article>

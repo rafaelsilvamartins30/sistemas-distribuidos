@@ -552,14 +552,17 @@ func (s *Store) ConfirmSimulatedPayment(ctx context.Context, registrationID stri
 	if requestEvent.Request.RegistrationID != registrationID {
 		return PaymentConfirmedEvent{}, fmt.Errorf("charge request registrationId does not match projection")
 	}
+	observedAt := s.now().UTC()
 	paidAt := requestedPaidAt.UTC()
 	if paidAt.IsZero() {
-		paidAt = s.now()
+		paidAt = observedAt
 	}
-	processedAt := s.now()
-	if paidAt.After(processedAt) {
+	if paidAt.After(observedAt) {
 		return PaymentConfirmedEvent{}, ErrInvalidPaidAt
 	}
+	// PostgreSQL timestamps retain microseconds. Round the envelope time up so
+	// its persisted value cannot precede a nanosecond-precision paidAt value.
+	processedAt := persistedConfirmationTime(observedAt, paidAt)
 	event.EventID = requestEvent.Request.EventID
 	event.PaidAt = paidAt
 	eventJSON, err := json.Marshal(event)
@@ -605,6 +608,14 @@ func (s *Store) ConfirmSimulatedPayment(ctx context.Context, registrationID stri
 		}
 	}
 	return event, nil
+}
+
+func persistedConfirmationTime(observedAt, paidAt time.Time) time.Time {
+	processedAt := observedAt.Truncate(time.Microsecond)
+	if paidAt.After(processedAt) {
+		processedAt = processedAt.Add(time.Microsecond)
+	}
+	return processedAt
 }
 
 func readExistingPaymentConfirmation(ctx context.Context, tx *sql.Tx, chargeID string,

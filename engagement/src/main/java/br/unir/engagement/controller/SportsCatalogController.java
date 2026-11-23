@@ -8,6 +8,7 @@ import br.unir.engagement.dto.CreateSportRequest;
 import br.unir.engagement.dto.CreateSportsTeamRequest;
 import br.unir.engagement.dto.EventOrganizerContextsResponse;
 import br.unir.engagement.dto.GenerateSportsMatchesRequest;
+import br.unir.engagement.dto.JoinSportsTeamRequest;
 import br.unir.engagement.dto.MySportsEnrollmentsResponse;
 import br.unir.engagement.dto.MySportsMatchesResponse;
 import br.unir.engagement.dto.RecordSportsMatchScoreRequest;
@@ -23,10 +24,12 @@ import br.unir.engagement.dto.SportsMatchCheckInResponse;
 import br.unir.engagement.dto.SportsMatchCheckInTokenResponse;
 import br.unir.engagement.dto.SportsMatchResponse;
 import br.unir.engagement.dto.SportsTeamResponse;
+import br.unir.engagement.dto.UpdateSportsEventRequest;
 import br.unir.engagement.service.SportsCatalogService;
 import br.unir.engagement.service.SportsParticipationService;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -126,11 +129,32 @@ public class SportsCatalogController {
         return this.participationService.getOverview(contextType, contextId, jwt.getSubject(), jwt.getTokenValue());
     }
 
+    @PatchMapping("/sports-events/{contextType}/{contextId}")
+    public Map<String, Object> updateSportsEventDeadline(@PathVariable String contextType, @PathVariable UUID contextId,
+            @RequestBody UpdateSportsEventRequest request, @AuthenticationPrincipal Jwt jwt) {
+        return this.participationService.updateSportsEventDeadline(contextType, contextId, request,
+                jwt.getTokenValue());
+    }
+
+    @PostMapping("/sports-events/{contextType}/{contextId}/cancel")
+    public Map<String, Object> cancelSportsEvent(@PathVariable String contextType, @PathVariable UUID contextId,
+            @AuthenticationPrincipal Jwt jwt) {
+        return this.participationService.cancelSportsEvent(contextType, contextId, jwt.getTokenValue());
+    }
+
     @PostMapping("/sports-events/{contextType}/{contextId}/teams")
     @ResponseStatus(HttpStatus.CREATED)
     public SportsTeamResponse registerTeam(@PathVariable String contextType, @PathVariable UUID contextId,
             @RequestBody CreateSportsTeamRequest request, @AuthenticationPrincipal Jwt jwt) {
         return this.participationService.registerTeam(contextType, contextId, request, jwt.getSubject(),
+                defaultDisplayName(jwt));
+    }
+
+    @PostMapping("/sports-events/{contextType}/{contextId}/teams/join")
+    @ResponseStatus(HttpStatus.CREATED)
+    public SportsTeamResponse joinTeamByInviteCode(@PathVariable String contextType, @PathVariable UUID contextId,
+            @RequestBody JoinSportsTeamRequest request, @AuthenticationPrincipal Jwt jwt) {
+        return this.participationService.joinTeamByInviteCode(contextType, contextId, request, jwt.getSubject(),
                 defaultDisplayName(jwt));
     }
 

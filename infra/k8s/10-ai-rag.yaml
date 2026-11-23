@@ -1,6 +1,21 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  name: ai-rag-model-cache
+  namespace: unir
+  labels:
+    app.kubernetes.io/name: ai-rag
+    app.kubernetes.io/part-of: unir-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
   name: qdrant-rag-data
   namespace: unir
   labels:
@@ -115,6 +130,8 @@ spec:
             - configMapRef:
                 name: unir-common-config
           env:
+            - name: FASTEMBED_CACHE_PATH
+              value: /var/cache/fastembed
             - name: RAG_SYNC_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -130,6 +147,9 @@ spec:
                 secretKeyRef:
                   name: unir-rag-credentials
                   key: GEMINI_API_KEY
+          volumeMounts:
+            - name: model-cache
+              mountPath: /var/cache/fastembed
           readinessProbe:
             httpGet:
               path: /health/ready
@@ -144,6 +164,10 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: ai-rag-model-cache
 ---
 apiVersion: v1
 kind: Service

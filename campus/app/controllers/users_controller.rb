@@ -9,10 +9,13 @@ class UsersController < ApplicationController
   before_action :authenticate_keycloak!
 
   def index
-    roles = Array(@token_claims.dig('realm_access', 'roles'))
-    return render_problem(:forbidden, 'Platform administrator role is required') unless roles.include?('PLATFORM_ADMIN')
-
-    profiles = UserProfile.order(:name).limit(200).map do |profile|
+    scope = UserProfile.order(:name)
+    query = params[:q].to_s.strip
+    if query.present?
+      pattern = "%#{ActiveRecord::Base.sanitize_sql_like(query)}%"
+      scope = scope.where('name ILIKE :q OR registration_code ILIKE :q', q: pattern)
+    end
+    profiles = scope.limit(200).map do |profile|
       { id: profile.id, keycloakUserId: profile.keycloak_user_id, name: profile.name,
         registrationCode: profile.registration_code, userType: profile.user_type }
     end
