@@ -4,28 +4,33 @@ require 'digest'
 require 'json'
 require 'pathname'
 require_relative 'seeders/local_demo_support'
-require_relative 'seeders/local_demo_catalog_seeder'
-require_relative 'seeders/local_demo_synthetic_seeder'
+require_relative 'seeders/local_demo_structure_seeder'
 require_relative 'seeders/local_demo_profiles_seeder'
 
-# Runs the repeatable, additive local demonstration seed in dependency order.
+# Runs the idempotent UNIR Campus seed in either 'clean' or 'demo' mode.
 module LocalDemoSeed
   module_function
 
   def run
-    catalog = LocalDemoSeedSupport.catalog
-    accounts = LocalDemoSeedSupport.accounts
-    LocalDemoCatalogSeeder.new(catalog).call
-    LocalDemoSyntheticSeeder.new.call
-    LocalDemoProfilesSeeder.new(accounts).call
-    Rails.logger.debug seed_summary
+    manifest = LocalDemoSeedSupport.manifest
+    mode = LocalDemoSeedSupport.seed_mode(manifest)
+    accounts = LocalDemoSeedSupport.accounts(manifest)
+    structure = LocalDemoStructureSeeder.new(accounts.fetch('admin').fetch('sub'))
+    structure.seed_base_university
+    seed_demo(structure, accounts) if mode == 'demo'
+    Rails.logger.info summary(mode, accounts.size)
   end
 
-  def seed_summary
-    [
-      'Seed UFLA local concluído: 9 unidades, 32 departamentos, 53 cursos,',
-      '112 entidades de referência, 5 comunidades e 8 perfis.'
-    ].join(' ')
+  def seed_demo(structure, accounts)
+    structure.seed_demo_structure
+    LocalDemoProfilesSeeder.new(accounts).call
+  end
+
+  def summary(mode, account_count)
+    return 'Seed Campus (modo clean) concluído: Universidade + 1 admin (admin@gmail.com).' if mode == 'clean'
+
+    'Seed Campus (modo demo) concluído: Universidade, 1 unidade, 2 departamentos, 2 cursos, ' \
+      "3 comunidades, 2 entidades e #{account_count} perfis."
   end
 end
 

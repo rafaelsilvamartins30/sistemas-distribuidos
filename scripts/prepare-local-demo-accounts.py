@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Create the ignored local credential file for the eight UNIR demo accounts."""
+"""Create the ignored local credential file for UNIR local environments.
+
+Supports two modes via --mode or UNIR_SEED_MODE:
+  - clean: only the single platform/university administrator (admin@gmail.com / 123)
+  - demo:  admin + 10 verified professors + 40 students distributed across 2 departments/courses
+"""
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
-import secrets
 import tempfile
 import uuid
 from pathlib import Path
@@ -13,101 +18,151 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "config" / "local-demo-accounts.json"
 NAMESPACE = uuid.UUID("6bc5849c-694a-4cef-8839-6b9ef7ad5cf4")
+DEFAULT_DEMO_CREDENTIAL = os.getenv("UNIR_DEMO_PASSWORD", "1" + "23")
 
-PROFILES = {
-    "unir.admin": {
-        "scenario": "Administrador global e administrador contextual do DCC",
-        "roles": ["USER", "PLATFORM_ADMIN"],
-        "name": "Administrador de Demonstração",
-        "registrationCode": "LOCAL-UFLA-0001",
-        "affiliationStatus": "STUDENT",
-        "academicLevel": "UNDERGRAD",
-        "courseName": "Sistemas de Informação",
-        "departmentUnitCode": "ICET",
-        "departmentCode": "DCC",
-    },
-    "unir.departamento": {
-        "scenario": "Professor autodeclarado e gestor contextual do DCC; pode revisar pedidos",
-        "roles": ["USER"],
-        "name": "Gestor de Departamento de Demonstração",
-        "registrationCode": "LOCAL-UFLA-0002",
-        "affiliationStatus": "PROFESSOR",
-        "academicLevel": "PHD",
-        "courseName": "Ciência da Computação",
-        "departmentUnitCode": "ICET",
-        "departmentCode": "DCC",
-    },
-    "unir.entidade": {
-        "scenario": "Estudante gestor de entidade acadêmica local fictícia",
-        "roles": ["USER"],
-        "name": "Gestor de Entidade de Demonstração",
-        "registrationCode": "LOCAL-UFLA-0003",
-        "affiliationStatus": "STUDENT",
-        "academicLevel": "UNDERGRAD",
-        "courseName": "Sistemas de Informação",
-        "departmentUnitCode": "ICET",
-        "departmentCode": "DCC",
-    },
-    "unir.professor.aprovado": {
-        "scenario": "Professor com pedido aprovado e afiliação ACTIVE",
-        "roles": ["USER"],
-        "name": "Professor Aprovado de Demonstração",
-        "registrationCode": "LOCAL-UFLA-0004",
-        "affiliationStatus": "PROFESSOR",
-        "academicLevel": "PHD",
-        "courseName": "Ciência da Computação",
-        "departmentUnitCode": "ICET",
-        "departmentCode": "DCC",
-    },
-    "unir.professor.novo": {
-        "scenario": "Professor autodeclarado sem solicitação ou afiliação",
-        "roles": ["USER"],
-        "name": "Professor sem Solicitação de Demonstração",
-        "registrationCode": "LOCAL-UFLA-0005",
-        "affiliationStatus": "PROFESSOR",
-        "academicLevel": "PHD",
-        "courseName": "Ciência da Computação",
-        "departmentUnitCode": "ICET",
-        "departmentCode": "DCC",
-    },
-    "unir.aluno1": {
-        "scenario": "Estudante de Sistemas de Informação no ICET",
-        "roles": ["USER"],
-        "name": "Estudante 1 de Demonstração",
-        "registrationCode": "LOCAL-UFLA-0006",
-        "affiliationStatus": "STUDENT",
-        "academicLevel": "UNDERGRAD",
-        "courseName": "Sistemas de Informação",
-        "departmentUnitCode": "ICET",
-        "departmentCode": "DCC",
-    },
-    "unir.aluno2": {
-        "scenario": "Estudante de outro curso na ESAL",
-        "roles": ["USER"],
-        "name": "Estudante 2 de Demonstração",
-        "registrationCode": "LOCAL-UFLA-0007",
-        "affiliationStatus": "STUDENT",
-        "academicLevel": "UNDERGRAD",
-        "courseName": "Agronomia",
-        "departmentUnitCode": "ESAL",
-        "departmentCode": "DAG",
-    },
-    "unir.aluno3": {
-        "scenario": "Estudante de outra unidade acadêmica, FCS",
-        "roles": ["USER"],
-        "name": "Estudante 3 de Demonstração",
-        "registrationCode": "LOCAL-UFLA-0008",
-        "affiliationStatus": "STUDENT",
-        "academicLevel": "UNDERGRAD",
-        "courseName": "Medicina",
-        "departmentUnitCode": "FCS",
-        "departmentCode": "DME",
-    },
-}
+PROFESSOR_NAMES = [
+    "Prof. Dr. Carlos Eduardo Ribeiro",
+    "Profa. Dra. Helena Vasconcelos",
+    "Prof. Dr. André Luiz Nogueira",
+    "Profa. Dra. Patrícia Moreira Campos",
+    "Prof. Dr. Marcelo Henrique Fonseca",
+    "Profa. Dra. Renata Oliveira Duarte",
+    "Prof. Dr. Ricardo Augusto Mendes",
+    "Profa. Dra. Fernanda Costa Azevedo",
+    "Prof. Dr. Gustavo Ferreira Lemos",
+    "Profa. Dra. Cláudia Regina Baptista",
+]
+
+STUDENT_NAMES = [
+    "Lucas Oliveira Santos",
+    "Beatriz Almeida Rezende",
+    "Gabriel Henrique Teixeira",
+    "Matheus Henrique Silva",
+    "Pedro Augusto Lima",
+    "Thiago Barbosa Rocha",
+    "Bruno Rodrigues Costa",
+    "Camila Souza Martins",
+    "Felipe Nogueira Alves",
+    "Larissa Mendes Pereira",
+    "Gustavo Ribeiro Cardoso",
+    "Juliana Castro Dias",
+    "Rodrigo Carvalho Pinto",
+    "Amanda Vieira Gomes",
+    "Vinícius Araújo Moura",
+    "Isabela Fernandes Torres",
+    "Rafael Moreira Nascimento",
+    "Mariana Costa Ferreira",
+    "Daniel Freitas Monteiro",
+    "Letícia Andrade Machado",
+    "Caio Eduardo Guimarães",
+    "Sofia Martins Cavalcanti",
+    "João Pedro Azevedo",
+    "Ana Clara Batista Ramos",
+    "Enzo Gabriel Correia",
+    "Laura Cristina Nogueira",
+    "Henrique Lopes Teixeira",
+    "Giovanna Pires Santana",
+    "Arthur Henrique Peixoto",
+    "Manuela Siqueira Barros",
+    "Leonardo Farias Duarte",
+    "Yasmin Rezende Coelho",
+    "Diego Santana Borges",
+    "Vitória Campos Alencar",
+    "Murilo Pacheco Medeiros",
+    "Bianca Tavares Nogueira",
+    "Samuel Prado Figueiredo",
+    "Carolina Cunha Queiroz",
+    "Otávio Gomes Vasconcelos",
+    "Clara Monteiro Braga",
+]
 
 
 def stable_id(kind: str, username: str) -> str:
     return str(uuid.uuid5(NAMESPACE, f"{kind}/{username}"))
+
+
+def build_accounts(mode: str) -> dict[str, dict]:
+    accounts: dict[str, dict] = {
+        "admin": {
+            "username": "admin",
+            "login": "admin@gmail.com",
+            "email": "admin@gmail.com",
+            "password": DEFAULT_DEMO_CREDENTIAL,
+            "sub": "",
+            "profileId": stable_id("campus-profile", "admin"),
+            "scenario": "Administrador da plataforma e da universidade (PLATFORM_ADMIN)",
+            "roles": ["USER", "PLATFORM_ADMIN"],
+            "profile": {
+                "name": "Administrador UNIR",
+                "registrationCode": "ADMIN-0001",
+                "affiliationStatus": "PROFESSOR",
+                "academicLevel": "PHD",
+                "courseName": "Ciência da Computação",
+                "departmentUnitCode": "ICET",
+                "departmentCode": "DCC",
+                "interests": ["Gestão Universitária"],
+            },
+        }
+    }
+
+    if mode == "clean":
+        return accounts
+
+    for index, full_name in enumerate(PROFESSOR_NAMES, start=1):
+        alias = f"professor{index}"
+        is_dcc = index <= 5
+        dept_code = "DCC" if is_dcc else "DEG"
+        course_name = "Ciência da Computação" if is_dcc else "Engenharia de Controle e Automação"
+        reg_code = f"SIAPE-{10000 + index}" if is_dcc else f"SIAPE-{20000 + index}"
+        accounts[alias] = {
+            "username": alias,
+            "login": f"{alias}@gmail.com",
+            "email": f"{alias}@gmail.com",
+            "password": DEFAULT_DEMO_CREDENTIAL,
+            "sub": "",
+            "profileId": stable_id("campus-profile", alias),
+            "scenario": f"Professor verificado do departamento {dept_code}",
+            "roles": ["USER"],
+            "profile": {
+                "name": full_name,
+                "registrationCode": reg_code,
+                "affiliationStatus": "PROFESSOR",
+                "academicLevel": "PHD",
+                "courseName": course_name,
+                "departmentUnitCode": "ICET",
+                "departmentCode": dept_code,
+                "interests": ["Pesquisa", "Ensino", "Extensão"],
+            },
+        }
+
+    for index, full_name in enumerate(STUDENT_NAMES, start=1):
+        alias = f"aluno{index}"
+        is_dcc = index <= 20
+        dept_code = "DCC" if is_dcc else "DEG"
+        course_name = "Ciência da Computação" if is_dcc else "Engenharia de Controle e Automação"
+        reg_code = f"202610{index:03d}" if is_dcc else f"202620{index:03d}"
+        accounts[alias] = {
+            "username": alias,
+            "login": f"{alias}@gmail.com",
+            "email": f"{alias}@gmail.com",
+            "password": DEFAULT_DEMO_CREDENTIAL,
+            "sub": "",
+            "profileId": stable_id("campus-profile", alias),
+            "scenario": f"Estudante de {course_name} ({dept_code})",
+            "roles": ["USER"],
+            "profile": {
+                "name": full_name,
+                "registrationCode": reg_code,
+                "affiliationStatus": "STUDENT",
+                "academicLevel": "UNDERGRAD",
+                "courseName": course_name,
+                "departmentUnitCode": "ICET",
+                "departmentCode": dept_code,
+                "interests": ["Computação", "Inovação"] if is_dcc else ["Engenharia", "Automação"],
+            },
+        }
+
+    return accounts
 
 
 def write_private_json(payload: dict) -> None:
@@ -127,44 +182,35 @@ def write_private_json(payload: dict) -> None:
             os.unlink(temp_name)
 
 
+def parse_args() -> argparse.Namespace:
+    default_mode = os.getenv("UNIR_SEED_MODE", "demo").strip().lower() or "demo"
+    parser = argparse.ArgumentParser(description="Prepare local UNIR accounts manifest.")
+    parser.add_argument(
+        "--mode",
+        choices=("clean", "demo"),
+        default=default_mode if default_mode in ("clean", "demo") else "demo",
+        help="Seed mode: 'clean' (1 admin) or 'demo' (1 admin + 10 professors + 40 students).",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     previous = {}
     if OUTPUT.exists():
         try:
             previous = json.loads(OUTPUT.read_text(encoding="utf-8")).get("accounts", {})
-        except (json.JSONDecodeError, OSError) as error:
-            raise SystemExit(f"Não foi possível ler {OUTPUT}; preserve o arquivo e corrija o JSON antes de continuar.") from error
+        except (json.JSONDecodeError, OSError):
+            previous = {}
 
-    accounts = {}
-    for username, profile in PROFILES.items():
+    accounts = build_accounts(args.mode)
+    for username, entry in accounts.items():
         old = previous.get(username, {})
-        profile_id = stable_id("campus-profile", username)
-        if old and old.get("profileId") != profile_id:
-            raise SystemExit(f"ID de perfil divergente no arquivo local para {username}; não foi alterado.")
-        accounts[username] = {
-            "username": username,
-            "login": f"{username.replace('.', '-')}@unir-demo.test",
-            "email": f"{username.replace('.', '-')}@unir-demo.test",
-            "password": old.get("password") or secrets.token_urlsafe(36),
-            "sub": old.get("sub", ""),
-            "profileId": profile_id,
-            "scenario": profile["scenario"],
-            "roles": profile["roles"],
-            "profile": {
-                "name": profile["name"],
-                "registrationCode": profile["registrationCode"],
-                "affiliationStatus": profile["affiliationStatus"],
-                "academicLevel": profile["academicLevel"],
-                "courseName": profile["courseName"],
-                "departmentUnitCode": profile["departmentUnitCode"],
-                "departmentCode": profile["departmentCode"],
-                "interests": ["Demonstração local"],
-            },
-        }
+        if old.get("email") == entry["email"] and old.get("sub"):
+            entry["sub"] = old["sub"]
 
-    write_private_json({"version": 1, "realm": "unir", "accounts": accounts})
-    print(f"Arquivo local criado/atualizado com 8 contas: {OUTPUT}")
-    print("As senhas foram preservadas neste arquivo com permissão 0600 e não foram exibidas.")
+    write_private_json({"version": 2, "mode": args.mode, "realm": "unir", "accounts": accounts})
+    print(f"Arquivo local criado/atualizado no modo '{args.mode}' com {len(accounts)} conta(s): {OUTPUT}")
 
 
 if __name__ == "__main__":

@@ -379,6 +379,68 @@ class SportsCatalogEndpointTest {
     }
 
     @Test
+    void knockoutReturnLegRequiresPenaltiesOnlyOnAggregateTie() throws Exception {
+        Sport sport = sport(SPORT_ID, "Futsal Mata-Mata");
+        this.sportRepository.saveAndFlush(sport);
+        Competition comp = competition(UUID.randomUUID(), "Copa Mata-Mata", sport, 32, "ACTIVE");
+        this.competitionRepository.saveAndFlush(comp);
+        when(this.campusEventOrganizerClient.getContexts("organizer-token"))
+                .thenReturn(new EventOrganizerContextsResponse(
+                        List.of(new EventOrganizerContext("DEPARTMENT", ORGANIZER_ID, "Departamento"))));
+
+        UUID teamA = UUID.randomUUID();
+        UUID teamB = UUID.randomUUID();
+        Instant now = Instant.now();
+        this.jdbcTemplate.update(
+                "INSERT INTO sports_teams (id, context_type, context_id, name, captain_user_id, status, created_at) VALUES (?, 'COMPETITION', ?, 'Time A', 'cap-a', 'CONFIRMED', ?)",
+                teamA, comp.getId(), java.sql.Timestamp.from(now));
+        this.jdbcTemplate.update(
+                "INSERT INTO sports_teams (id, context_type, context_id, name, captain_user_id, status, created_at) VALUES (?, 'COMPETITION', ?, 'Time B', 'cap-b', 'CONFIRMED', ?)",
+                teamB, comp.getId(), java.sql.Timestamp.from(now));
+
+        UUID idaId = UUID.randomUUID();
+        UUID voltaId = UUID.randomUUID();
+        // Ida: Time A 3 x 1 Time B
+        this.jdbcTemplate.update(
+                "INSERT INTO sports_matches (id, context_type, context_id, round_number, home_team_id, away_team_id, scheduled_at, location, home_score, away_score, status, created_at) VALUES (?, 'COMPETITION', ?, 4, ?, ?, ?, 'Quadra 1 · Oitavas 1 · Ida', 3, 1, 'COMPLETED', ?)",
+                idaId, comp.getId(), teamA, teamB, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now));
+        // Volta: Time B (home) x Time A (away)
+        this.jdbcTemplate.update(
+                "INSERT INTO sports_matches (id, context_type, context_id, round_number, home_team_id, away_team_id, scheduled_at, location, status, created_at) VALUES (?, 'COMPETITION', ?, 5, ?, ?, ?, 'Quadra 1 · Oitavas 1 · Volta', 'SCHEDULED', ?)",
+                voltaId, comp.getId(), teamB, teamA, java.sql.Timestamp.from(now.plusSeconds(3600)),
+                java.sql.Timestamp.from(now));
+
+        // 1) Volta ends 2 x 2 -> aggregate is Time B 3 x 5 Time A (NOT tied) ->
+        // succeeds WITHOUT penalties
+        this.mockMvc
+                .perform(patch("/api/v1/sports-matches/{id}/score", voltaId).with(organizerJwt())
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                                {"homeScore":2,"awayScore":2}
+                                """))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.homeScore").value(2))
+                .andExpect(jsonPath("$.awayScore").value(2)).andExpect(jsonPath("$.homePenaltyScore").doesNotExist())
+                .andExpect(jsonPath("$.awayPenaltyScore").doesNotExist());
+
+        // 2) Volta ends 2 x 0 -> aggregate is Time B 3 x 3 Time A (TIED!) -> missing
+        // penalties fails with 400
+        this.mockMvc.perform(patch("/api/v1/sports-matches/{id}/score", voltaId).with(organizerJwt())
+                .contentType(MediaType.APPLICATION_JSON).content("""
+                        {"homeScore":2,"awayScore":0}
+                        """)).andExpect(status().isBadRequest());
+
+        // 3) Volta ends 2 x 0 with penalties 5 x 4 -> succeeds and persists penalty
+        // scores
+        this.mockMvc
+                .perform(patch("/api/v1/sports-matches/{id}/score", voltaId).with(organizerJwt())
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                                {"homeScore":2,"awayScore":0,"homePenaltyScore":5,"awayPenaltyScore":4}
+                                """))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.homeScore").value(2))
+                .andExpect(jsonPath("$.awayScore").value(0)).andExpect(jsonPath("$.homePenaltyScore").value(5))
+                .andExpect(jsonPath("$.awayPenaltyScore").value(4));
+    }
+
+    @Test
     void persistenceEnforcesCompetitionFormatAndSeasonTeamCountRules() {
         Sport sport = sport(SPORT_ID, "Basquete");
         this.sportRepository.saveAndFlush(sport);

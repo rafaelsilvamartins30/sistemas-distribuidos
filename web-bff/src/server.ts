@@ -85,6 +85,11 @@ export function createServer(options: ServerOptions = {}) {
 
   server.patch("/api/v1/me", async (request, reply) => forwardToCampus(request, reply, "PATCH", "/users/me"));
 
+  server.get("/api/v1/web/users", async (request, reply) => {
+    const query = new URL(request.url, "http://localhost").search;
+    return forwardToCampus(request, reply, "GET", `/users${query}`, "Campus unavailable");
+  });
+
   server.get("/api/v1/web/university", async (request, reply) =>
     forwardToCampus(request, reply, "GET", "/university", "Campus unavailable", true),
   );
@@ -693,6 +698,28 @@ export function createServer(options: ServerOptions = {}) {
       ),
   );
 
+  server.patch<{ Params: { contextType: string; contextId: string } }>(
+    "/api/v1/web/sports-events/:contextType/:contextId",
+    async (request, reply) =>
+      forwardToEngagementService(
+        request,
+        reply,
+        `/api/v1/sports-events/${encodeURIComponent(request.params.contextType)}/${encodeURIComponent(request.params.contextId)}`,
+        "PATCH",
+      ),
+  );
+
+  server.post<{ Params: { contextType: string; contextId: string } }>(
+    "/api/v1/web/sports-events/:contextType/:contextId/cancel",
+    async (request, reply) =>
+      forwardToEngagementService(
+        request,
+        reply,
+        `/api/v1/sports-events/${encodeURIComponent(request.params.contextType)}/${encodeURIComponent(request.params.contextId)}/cancel`,
+        "POST",
+      ),
+  );
+
   server.post<{ Params: { contextType: string; contextId: string } }>(
     "/api/v1/web/sports-events/:contextType/:contextId/teams",
     async (request, reply) =>
@@ -700,6 +727,17 @@ export function createServer(options: ServerOptions = {}) {
         request,
         reply,
         `/api/v1/sports-events/${encodeURIComponent(request.params.contextType)}/${encodeURIComponent(request.params.contextId)}/teams`,
+        "POST",
+      ),
+  );
+
+  server.post<{ Params: { contextType: string; contextId: string } }>(
+    "/api/v1/web/sports-events/:contextType/:contextId/teams/join",
+    async (request, reply) =>
+      forwardToEngagementService(
+        request,
+        reply,
+        `/api/v1/sports-events/${encodeURIComponent(request.params.contextType)}/${encodeURIComponent(request.params.contextId)}/teams/join`,
         "POST",
       ),
   );
@@ -802,15 +840,13 @@ export function createServer(options: ServerOptions = {}) {
       ),
   );
 
-  server.post<{ Params: { matchId: string } }>(
-    "/api/v1/web/sports-matches/:matchId/checkins",
-    async (request, reply) =>
-      forwardToEngagementService(
-        request,
-        reply,
-        `/api/v1/sports-matches/${encodeURIComponent(request.params.matchId)}/checkins`,
-        "POST",
-      ),
+  server.post<{ Params: { matchId: string } }>("/api/v1/web/sports-matches/:matchId/checkins", async (request, reply) =>
+    forwardToEngagementService(
+      request,
+      reply,
+      `/api/v1/sports-matches/${encodeURIComponent(request.params.matchId)}/checkins`,
+      "POST",
+    ),
   );
 
   server.post<{ Params: { eventId: string } }>("/api/v1/web/events/:eventId/registrations", async (request, reply) => {

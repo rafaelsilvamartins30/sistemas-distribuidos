@@ -14,7 +14,7 @@ from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda
 
-from unir_rag.config import RagConfig, estimate_cost_usd
+from unir_rag.config import DEFAULT_GEMINI_MODEL, RagConfig, estimate_cost_usd
 from unir_rag.ingestion import KnowledgeBaseIndexer
 from unir_rag.tools import build_search_live_events_tool
 from unir_rag.unir_client import UnirEngagementClient
@@ -53,7 +53,7 @@ class LlmGenerator(Protocol):
 class GeminiLangChainGenerator:
     """Invokes Google Gemini through LangChain's official ChatGoogleGenerativeAI."""
 
-    def __init__(self, api_key: str | None, model_name: str = "gemini-2.5-flash") -> None:
+    def __init__(self, api_key: str | None, model_name: str = DEFAULT_GEMINI_MODEL) -> None:
         self._api_key = api_key
         self._model_name = model_name
 
@@ -124,7 +124,7 @@ class GeminiLangChainGenerator:
         else:
             executor.shutdown(wait=True)
 
-        content = str(getattr(response, "content", "")).strip()
+        content = extract_response_text(getattr(response, "content", ""))
         usage = getattr(response, "usage_metadata", None) or {}
         prompt_tokens = int(
             usage.get("input_tokens") or estimate_tokens(system_prompt + "\n" + user_prompt)
@@ -138,6 +138,30 @@ class GeminiLangChainGenerator:
             total_tokens=total_tokens,
             model_name=self._model_name,
         )
+
+
+def extract_response_text(raw_content: Any) -> str:
+    """Normalize LangChain AIMessage.content (plain string or Gemini 3.x list of parts) into clean text."""
+    if isinstance(raw_content, str):
+        return raw_content.strip()
+    if isinstance(raw_content, list):
+        parts: list[str] = []
+        for item in raw_content:
+            if isinstance(item, str):
+                text = item.strip()
+                if text:
+                    parts.append(text)
+            elif isinstance(item, dict):
+                block_type = item.get("type")
+                text_value = item.get("text")
+                if (
+                    block_type in (None, "text")
+                    and isinstance(text_value, str)
+                    and text_value.strip()
+                ):
+                    parts.append(text_value.strip())
+        return "\n".join(parts).strip()
+    return str(raw_content or "").strip()
 
 
 def estimate_tokens(text: str) -> int:

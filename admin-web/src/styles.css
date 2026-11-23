@@ -148,7 +148,7 @@ button:focus-visible { outline: 3px solid #9eafff; outline-offset: 3px; }
 
 .admin-hero-status { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 9px; flex: 0 0 auto; padding: 11px 15px; border: 1px solid rgb(255 255 255 / 28%); border-radius: 999px; color: #fff; background: rgb(255 255 255 / 12%); font-size: 13px; font-weight: 700; }
 .admin-hero-status .admin-status-dot { background: #68dfa2; }
-.admin-stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 20px; }
+.admin-stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 20px; }
 .admin-stat-card { display: grid; gap: 7px; min-height: 145px; align-content: center; }
 .admin-stat-card strong { color: var(--admin-text); font-size: 42px; letter-spacing: -.06em; line-height: 1; }
 .admin-stat-card > span:last-child { color: var(--admin-muted); font-size: 13px; }
@@ -174,10 +174,39 @@ button:focus-visible { outline: 3px solid #9eafff; outline-offset: 3px; }
 .admin-directory-copy small { overflow: hidden; color: var(--admin-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .admin-empty-note { margin: 20px 0 0; padding: 20px; border: 1px dashed var(--admin-border); border-radius: 13px; color: var(--admin-muted); font-size: 14px; }
 .admin-readonly-note { margin: 17px 3px 0; color: var(--admin-muted); font-size: 12px; line-height: 1.6; }
+.admin-requests-card { margin-top: 18px; }
+.admin-requests-card ul { display: grid; gap: 10px; margin: 20px 0 0; padding: 0; list-style: none; }
+.admin-requests-card li { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px; border: 1px solid var(--admin-border); border-radius: 14px; background: var(--admin-muted-surface); }
+.admin-request-copy { display: grid; gap: 5px; min-width: 0; }
+.admin-request-copy > span { color: var(--admin-blue); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.admin-request-copy strong { color: var(--admin-text); font-size: 15px; }
+.admin-request-copy small { color: var(--admin-muted); font-size: 12px; }
+.admin-request-actions { display: flex; flex: 0 0 auto; gap: 8px; }
+.admin-request-actions button:disabled { cursor: wait; opacity: .55; transform: none; }
+.admin-success-message { margin: 16px 0 0; padding: 12px 14px; border-radius: 12px; color: var(--admin-success); background: var(--admin-success-soft); font-size: 13px; font-weight: 650; }
 
 @media (max-width: 720px) {
-  .admin-stats-grid { grid-template-columns: 1fr; }
+  .admin-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-stat-card { min-height: 116px; }
   .admin-directory-grid { grid-template-columns: 1fr; }
   .admin-hero-status { margin-top: 12px; }
+  .admin-requests-card li { align-items: stretch; flex-direction: column; }
+  .admin-request-actions { width: 100%; }
+  .admin-request-actions button { flex: 1; }
 }
+
+@media (max-width: 480px) {
+  .admin-stats-grid { grid-template-columns: 1fr; }
+}
+
+.admin-manage-card { margin-top: 18px; display: grid; gap: 14px; }
+.admin-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.admin-tabs button { padding: 8px 14px; border: 1px solid var(--admin-border); border-radius: 10px; background: var(--admin-muted-surface); color: var(--admin-muted); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
+.admin-tabs button.is-active { border-color: var(--admin-blue); background: var(--admin-blue); color: #fff; }
+.admin-form { display: grid; gap: 12px; }
+.admin-form label { display: grid; gap: 6px; font-size: 12px; font-weight: 650; color: var(--admin-muted); }
+.admin-form input, .admin-form select { min-height: 40px; padding: 8px 12px; border: 1px solid var(--admin-border); border-radius: 10px; background: #fff; color: var(--admin-text); font: inherit; font-size: 14px; }
+.admin-form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
+.admin-form-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.admin-perm-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.admin-perm-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border: 1px solid var(--admin-border); border-radius: 11px; background: var(--admin-muted-surface); font-size: 13px; }

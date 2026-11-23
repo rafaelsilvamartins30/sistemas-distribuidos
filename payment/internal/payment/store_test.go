@@ -569,6 +569,17 @@ func TestSimulatedPaymentConfirmationPersistsEventProjectionAndOutboxAtomically(
 	}
 }
 
+func TestPersistedConfirmationTimeNeverPrecedesPaidAt(t *testing.T) {
+	observedAt := time.Date(2026, 11, 22, 1, 2, 25, 652990216, time.UTC)
+	got := persistedConfirmationTime(observedAt, observedAt)
+	if got.Before(observedAt) || got.Nanosecond()%1000 != 0 {
+		t.Fatalf("persisted envelope time %s precedes paidAt %s or exceeds database precision", got, observedAt)
+	}
+	if got != time.Date(2026, 11, 22, 1, 2, 25, 652991000, time.UTC) {
+		t.Fatalf("unexpected rounded time: %s", got)
+	}
+}
+
 func TestConfirmationOutboxFailureRollsBackPaidTransition(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

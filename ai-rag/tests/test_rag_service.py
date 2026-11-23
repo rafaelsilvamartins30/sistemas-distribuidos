@@ -501,3 +501,19 @@ def test_academic_evaluation_compares_five_questions_baseline_vs_rag() -> None:
         assert comp["rag"]["mode"] == "rag"
         assert len(comp["rag"]["retrieved_sources"]) > 0
         assert comp["rag"]["cited_source_ids_count"] >= 1
+
+
+def test_extract_response_text_handles_gemini_3_content_blocks() -> None:
+    from unir_rag.chain import extract_response_text
+
+    assert extract_response_text("  Resposta simples  ") == "Resposta simples"
+    assert (
+        extract_response_text(
+            [
+                {"type": "text", "text": "Linha 1", "extras": {"signature": "secret-sig"}},
+                {"type": "reasoning", "text": "pensamento interno"},
+                {"type": "text", "text": "Linha 2"},
+            ]
+        )
+        == "Linha 1\nLinha 2"
+    )

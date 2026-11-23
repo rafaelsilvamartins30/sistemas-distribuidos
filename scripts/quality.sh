@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+export PATH="$HOME/.local/bin:$HOME/.local/share/fnm/node-versions/v24.21.0/installation/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 future_components() {
   local entry
@@ -43,7 +44,6 @@ infrastructure() {
   pnpm run lint:tooling
   pnpm run format:check:tooling
   pnpm run architecture:check
-  docker compose --env-file config/local.env.example config --quiet
   actionlint
 
   local file

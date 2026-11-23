@@ -27,6 +27,7 @@ public class RouteConfiguration {
                 .route(RequestPredicates.PATCH("/api/v1/me"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/university"), HandlerFunctions.http())
                 .route(RequestPredicates.PATCH("/api/v1/web/university"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/users"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/semesters"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/semesters/{semesterId}"), HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/semesters"), HandlerFunctions.http())
@@ -111,7 +112,13 @@ public class RouteConfiguration {
                 .route(RequestPredicates.GET("/api/v1/web/sports-events/me"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/sports-events/{contextType}/{contextId}/overview"),
                         HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/web/sports-events/{contextType}/{contextId}"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/sports-events/{contextType}/{contextId}/cancel"),
+                        HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/sports-events/{contextType}/{contextId}/teams"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/sports-events/{contextType}/{contextId}/teams/join"),
                         HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/sports-events/{contextType}/{contextId}/free-agents"),
                         HandlerFunctions.http())
@@ -143,6 +150,24 @@ public class RouteConfiguration {
     public RouterFunction<ServerResponse> adminBffRoute() {
         return GatewayRouterFunctions.route("admin-bff")
                 .route(RequestPredicates.GET("/api/v1/admin/me"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/admin/overview"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/academic-units"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/departments"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/courses"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/semesters"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/admin/university"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/admin/academic-units/{unitId}"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/admin/departments/{departmentId}"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/admin/entities/{entityId}"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/admin/communities/{communityId}"), HandlerFunctions.http())
+                .route(RequestPredicates.DELETE("/api/v1/admin/academic-units/{unitId}"), HandlerFunctions.http())
+                .route(RequestPredicates.DELETE("/api/v1/admin/departments/{departmentId}"), HandlerFunctions.http())
+                .route(RequestPredicates.DELETE("/api/v1/admin/courses/{courseId}"), HandlerFunctions.http())
+                .route(RequestPredicates.DELETE("/api/v1/admin/semesters/{semesterId}"), HandlerFunctions.http())
+                .route(RequestPredicates.DELETE("/api/v1/admin/entities/{entityId}"), HandlerFunctions.http())
+                .route(RequestPredicates.DELETE("/api/v1/admin/communities/{communityId}"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/requests/{requestId}/approve"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/requests/{requestId}/reject"), HandlerFunctions.http())
                 .before(BeforeFilterFunctions.uri(this.adminBffUrl)).build();
     }
 }

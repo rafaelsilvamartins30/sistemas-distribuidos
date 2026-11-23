@@ -4,7 +4,9 @@ CURRENT := web keycloak-theme web-bff
 FUTURE := $(shell bash scripts/quality.sh future)
 COMPONENTS := $(CURRENT) $(FUTURE)
 
-.PHONY: quality test infra security secrets dependencies ci local-demo $(CURRENT) campus payment access ai-rag gateway engagement admin-bff admin-web
+.PHONY: quality test infra security secrets dependencies ci \
+	k8s-demo k8s-clean k8s-reset-demo k8s-reset-clean k8s-down k8s-verify k8s-scale-demo demo-saga \
+	$(CURRENT) campus payment access ai-rag gateway engagement admin-bff admin-web
 
 quality: $(COMPONENTS)
 
@@ -24,8 +26,32 @@ dependencies:
 
 ci: quality infra security
 
-local-demo:
-	./scripts/seed-local-demo.sh
+# --- Kubernetes local (kind) ---
+k8s-demo:
+	UNIR_SEED_MODE=demo ./scripts/k8s-up.sh
+
+k8s-clean:
+	UNIR_SEED_MODE=clean ./scripts/k8s-up.sh
+
+k8s-reset-demo:
+	./scripts/k8s-down.sh
+	UNIR_SEED_MODE=demo ./scripts/k8s-up.sh
+
+k8s-reset-clean:
+	./scripts/k8s-down.sh
+	UNIR_SEED_MODE=clean ./scripts/k8s-up.sh
+
+k8s-down:
+	./scripts/k8s-down.sh
+
+k8s-verify:
+	./scripts/k8s-verify.sh
+
+k8s-scale-demo:
+	./scripts/k8s-scale-demo.sh
+
+demo-saga:
+	GATEWAY_URL=http://localhost:$${UNIR_K8S_PORT:-18080} KEYCLOAK_URL=http://localhost:$${UNIR_K8S_PORT:-18080} ./scripts/demo-saga-compensation.sh
 
 $(CURRENT) campus payment access ai-rag gateway engagement admin-bff admin-web:
 	bash scripts/quality.sh component $@

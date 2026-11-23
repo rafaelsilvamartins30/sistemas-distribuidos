@@ -63,7 +63,13 @@ CREATE TABLE IF NOT EXISTS sports_teams (
     name VARCHAR(120) NOT NULL,
     captain_user_id VARCHAR(128) NOT NULL,
     status VARCHAR(32) NOT NULL CHECK (status IN ('PENDING_PAYMENT', 'CONFIRMED', 'CANCELLED')),
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    payment_amount_minor BIGINT,
+    payment_deadline_at TIMESTAMP WITH TIME ZONE,
+    reservation_expires_at TIMESTAMP WITH TIME ZONE,
+    invite_code VARCHAR(32),
+    invite_expires_at TIMESTAMP WITH TIME ZONE,
+    reserved_player_count INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS sports_team_members (
@@ -82,8 +88,11 @@ CREATE TABLE IF NOT EXISTS sports_free_agents (
     user_id VARCHAR(128) NOT NULL,
     display_name VARCHAR(160) NOT NULL,
     allocated_team_id UUID REFERENCES sports_teams(id) ON DELETE SET NULL,
-    status VARCHAR(32) NOT NULL CHECK (status IN ('PENDING_PAYMENT', 'QUEUED', 'ALLOCATED')),
-    registered_at TIMESTAMP WITH TIME ZONE NOT NULL
+    status VARCHAR(32) NOT NULL CHECK (status IN ('PENDING_PAYMENT', 'QUEUED', 'ALLOCATED', 'CANCELLED')),
+    registered_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    payment_amount_minor BIGINT,
+    payment_deadline_at TIMESTAMP WITH TIME ZONE,
+    reservation_expires_at TIMESTAMP WITH TIME ZONE
 );
 
 CREATE TABLE IF NOT EXISTS sports_matches (
@@ -97,6 +106,8 @@ CREATE TABLE IF NOT EXISTS sports_matches (
     location VARCHAR(200) NOT NULL,
     home_score INTEGER,
     away_score INTEGER,
+    home_penalty_score INTEGER,
+    away_penalty_score INTEGER,
     status VARCHAR(32) NOT NULL CHECK (status IN ('SCHEDULED', 'COMPLETED')),
     checkin_token VARCHAR(64),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL

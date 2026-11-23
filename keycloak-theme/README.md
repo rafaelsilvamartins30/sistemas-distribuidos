@@ -1,26 +1,22 @@
-# Tema UNIR para Keycloak
+# Tema UNIR para Keycloak (`keycloak-theme`)
 
-O login, cadastro, verificação de email e recuperação de acesso usam Keycloakify, com identidade visual em `src/login/main.css`. A tela de Account usa o Account v3 nativo do Keycloak, estendido em `account-theme/account` para aplicar a marca e as cores UNIR sem substituir o fluxo de conta.
+Identidade visual customizada da UNIR aplicada às telas de autenticação e conta do **Keycloak**, empacotada dentro da imagem `unir-keycloak:local` utilizada no Kubernetes.
 
-## Usar com a infraestrutura local
+- **Stack:** Keycloakify + React + Vite + Maven (empacotamento JAR).
 
-Na raiz do repositório:
+---
+
+## Como funciona
+
+- As telas de login, cadastro, verificação de e-mail e recuperação de acesso usam **Keycloakify** (`src/login/main.css`).
+- A tela de gerenciamento de conta estende o tema nativo **Account v3** (`account-theme/account`) aplicando cores e marca UNIR sem substituir o fluxo padrão do Keycloak.
+- O `Dockerfile` compila o JAR (`dist_keycloak/keycloak-theme-for-kc-all-other-versions.jar`) e o copia para `/opt/keycloak/providers/` na imagem `unir-keycloak:local`.
+- O realm `unir` (`config/keycloak/unir-realm.json` + `config/keycloak/apply-user-profile.sh`) ativa `loginTheme` e `accountTheme` automaticamente durante o bootstrap `scripts/k8s-up.sh`.
+
+---
+
+## Qualidade
 
 ```sh
-docker compose up --build -d
+make keycloak-theme   # ESLint, Prettier e build do JAR com Keycloakify
 ```
-
-As credenciais locais ficam no `.env` da raiz; em um clone novo, use `config/local.env.example` como modelo.
-
-Acesse http://localhost:18081/realms/unir/account ou inicie a autorização OIDC conforme o [README da raiz](../README.md). O `accountTheme` e o `loginTheme` são definidos em `config/keycloak/unir-realm.json` para instalações novas. Como o importador não sobrescreve um realm existente, `config/keycloak/apply-user-profile.sh` também aplica a configuração ao realm local existente.
-
-## Desenvolvimento
-
-Requer Node 22+, pnpm 11, JDK e Maven. Em `keycloak-theme/`:
-
-```sh
-pnpm install --frozen-lockfile
-pnpm build-keycloak-theme
-```
-
-O JAR gerado fica em `dist_keycloak/keycloak-theme-for-kc-all-other-versions.jar`. Para aplicar mudanças no Compose, rode `docker compose up --build -d keycloak` na raiz.

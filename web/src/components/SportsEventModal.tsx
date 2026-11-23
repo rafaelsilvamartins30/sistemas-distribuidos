@@ -4,7 +4,6 @@ import type Keycloak from "keycloak-js";
 import {
   checkInSportsMatch,
   generateSportsMatchCheckInToken,
-  generateSportsMatches,
   getSportsEventOverview,
   recordSportsMatchScore,
   registerSportsFreeAgent,
@@ -43,6 +42,127 @@ function roleLabel(role: string): string {
   return "Integrante";
 }
 
+interface StandingRow {
+  teamId: string;
+  teamName: string;
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  scored: number;
+  conceded: number;
+  diff: number;
+  points: number;
+}
+
+function computeStandings(overview: SportsEventOverview): StandingRow[] {
+  const map = new Map<string, StandingRow>();
+  for (const team of overview.teams) {
+    map.set(team.id, {
+      teamId: team.id,
+      teamName: team.name,
+      played: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
+      scored: 0,
+      conceded: 0,
+      diff: 0,
+      points: 0,
+    });
+  }
+  for (const match of overview.matches) {
+    if (match.status !== "COMPLETED" || match.homeScore === null || match.awayScore === null) continue;
+    const home = map.get(match.homeTeamId);
+    const away = map.get(match.awayTeamId);
+    if (!home || !away) continue;
+    home.played += 1;
+    away.played += 1;
+    home.scored += match.homeScore;
+    home.conceded += match.awayScore;
+    away.scored += match.awayScore;
+    away.conceded += match.homeScore;
+    if (match.homeScore > match.awayScore) {
+      home.wins += 1;
+      home.points += overview.sport.winPoints;
+      away.losses += 1;
+      away.points += overview.sport.lossPoints;
+    } else if (match.homeScore < match.awayScore) {
+      away.wins += 1;
+      away.points += overview.sport.winPoints;
+      home.losses += 1;
+      home.points += overview.sport.lossPoints;
+    } else {
+      home.draws += 1;
+      away.draws += 1;
+      home.points += overview.sport.drawPoints;
+      away.points += overview.sport.drawPoints;
+    }
+  }
+  const rows = Array.from(map.values()).map((row) => ({ ...row, diff: row.scored - row.conceded }));
+  rows.sort(
+    (a, b) =>
+      b.points - a.points ||
+      b.diff - a.diff ||
+      b.wins - a.wins ||
+      b.scored - a.scored ||
+      a.teamName.localeCompare(b.teamName, "pt-BR"),
+  );
+  return rows;
+}
+
+function StandingsTable({ overview }: { overview: SportsEventOverview }) {
+  const standings = computeStandings(overview);
+  if (standings.length === 0) return null;
+  return (
+    <section className="sports-modal-section" aria-label="Classificação e andamento do campeonato">
+      <h3>Andamento &amp; Classificação ({standings.length} equipes)</h3>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem", textAlign: "left" }}>
+          <thead>
+            <tr style={{ borderBottom: "1px solid var(--border-subtle, #334155)" }}>
+              <th style={{ padding: "0.45rem" }}>#</th>
+              <th style={{ padding: "0.45rem" }}>Equipe</th>
+              <th style={{ padding: "0.45rem" }}>Pts</th>
+              <th style={{ padding: "0.45rem" }}>J</th>
+              <th style={{ padding: "0.45rem" }}>V</th>
+              <th style={{ padding: "0.45rem" }}>E</th>
+              <th style={{ padding: "0.45rem" }}>D</th>
+              <th style={{ padding: "0.45rem" }}>GP</th>
+              <th style={{ padding: "0.45rem" }}>GC</th>
+              <th style={{ padding: "0.45rem" }}>SG</th>
+            </tr>
+          </thead>
+          <tbody>
+            {standings.map((row, index) => (
+              <tr
+                key={row.teamId}
+                style={{
+                  borderBottom: "1px solid var(--border-subtle, #1e293b)",
+                  fontWeight: row.teamId === overview.viewerTeamId ? 700 : 400,
+                }}
+              >
+                <td style={{ padding: "0.45rem" }}>{index + 1}º</td>
+                <td style={{ padding: "0.45rem" }}>
+                  {row.teamName} {row.teamId === overview.viewerTeamId ? "(Sua equipe)" : ""}
+                </td>
+                <td style={{ padding: "0.45rem", fontWeight: 700 }}>{row.points}</td>
+                <td style={{ padding: "0.45rem" }}>{row.played}</td>
+                <td style={{ padding: "0.45rem" }}>{row.wins}</td>
+                <td style={{ padding: "0.45rem" }}>{row.draws}</td>
+                <td style={{ padding: "0.45rem" }}>{row.losses}</td>
+                <td style={{ padding: "0.45rem" }}>{row.scored}</td>
+                <td style={{ padding: "0.45rem" }}>{row.conceded}</td>
+                <td style={{ padding: "0.45rem" }}>{row.diff > 0 ? `+${row.diff}` : row.diff}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 export function SportsEventModal({
   keycloak,
   contextType,
@@ -61,9 +181,6 @@ export function SportsEventModal({
   // Team enrollment form
   const [teamName, setTeamName] = useState("");
   const [memberNamesRaw, setMemberNamesRaw] = useState("");
-
-  // Match generation form
-  const [matchLocation, setMatchLocation] = useState("Ginásio Poliesportivo UFLA");
 
   // Score inputs per match
   const [scores, setScores] = useState<Record<string, { home: string; away: string }>>({});
@@ -165,26 +282,6 @@ export function SportsEventModal({
     }
   }
 
-  async function handleGenerateMatches() {
-    setBusy(true);
-    setError(null);
-    setFeedback(null);
-    try {
-      await keycloak.updateToken(30);
-      if (!keycloak.token) throw new Error("Sessão expirada.");
-      const matches = await generateSportsMatches(keycloak.token, contextType, contextId, {
-        location: matchLocation.trim() || undefined,
-      });
-      setFeedback(`${matches.length} partida(s) gerada(s) com sucesso!`);
-      await loadOverview();
-      onChanged();
-    } catch (err) {
-      setError(err instanceof SportsApiError ? err.message : "Não foi possível gerar as partidas.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function handleSaveScore(matchId: string) {
     const entry = scores[matchId];
     if (!entry || entry.home === "" || entry.away === "") return;
@@ -268,11 +365,7 @@ export function SportsEventModal({
         </header>
 
         <nav className="sports-modal-tabs" aria-label="Seções do campeonato">
-          <button
-            type="button"
-            className={tab === "overview" ? "is-active" : ""}
-            onClick={() => setTab("overview")}
-          >
+          <button type="button" className={tab === "overview" ? "is-active" : ""} onClick={() => setTab("overview")}>
             Resumo &amp; Regras
           </button>
           <button type="button" className={tab === "teams" ? "is-active" : ""} onClick={() => setTab("teams")}>
@@ -338,6 +431,8 @@ export function SportsEventModal({
                   </dd>
                 </div>
               </dl>
+
+              <StandingsTable overview={overview} />
 
               <div className="sports-rules-copy">
                 <h3>Regulamento da modalidade ({overview.sport.name})</h3>
@@ -464,30 +559,52 @@ export function SportsEventModal({
 
           {!loading && overview && tab === "matches" && (
             <div className="sports-modal-stack">
-              {overview.viewerCanManage && overview.matches.length === 0 && (
+              <StandingsTable overview={overview} />
+
+              {overview.viewerTeamId && (
+                <section className="sports-enroll-card" aria-label="Suas partidas no campeonato">
+                  <h3>Agenda da Sua Equipe no Semestre (Jogos realizados e próximos)</h3>
+                  {overview.matches.some(
+                    (m) => m.homeTeamId === overview.viewerTeamId || m.awayTeamId === overview.viewerTeamId,
+                  ) ? (
+                    <ul className="sports-member-list">
+                      {overview.matches
+                        .filter((m) => m.homeTeamId === overview.viewerTeamId || m.awayTeamId === overview.viewerTeamId)
+                        .map((m) => (
+                          <li key={`my-${m.id}`}>
+                            <span>
+                              <strong>
+                                [{m.status === "COMPLETED" ? "Já jogou" : "Vai jogar"} · Rodada {m.roundNumber}]
+                              </strong>{" "}
+                              {m.homeTeamName} {m.status === "COMPLETED" ? `${m.homeScore} × ${m.awayScore}` : "vs"}{" "}
+                              {m.awayTeamName} · {formatDateTime(m.scheduledAt)} ({m.location})
+                            </span>
+                            <small>
+                              {m.viewerCheckedIn
+                                ? "Presença confirmada ✓"
+                                : m.status === "COMPLETED"
+                                  ? "Presença não lida"
+                                  : m.hasCheckinToken
+                                    ? "Código aberto — leia/cole abaixo"
+                                    : "Aguardando dia do jogo"}
+                            </small>
+                          </li>
+                        ))}
+                    </ul>
+                  ) : (
+                    <p>Sua equipe está confirmada neste campeonato!</p>
+                  )}
+                </section>
+              )}
+
+              {overview.viewerCanManage && (
                 <div className="sports-enroll-card">
-                  <h3>Gerar partidas do campeonato</h3>
+                  <h3>Gerência Oficial do Campeonato (Universidade)</h3>
                   <p>
-                    Cria automaticamente os confrontos entre as equipes já inscritas ({overview.teams.length} equipe(s)
-                    confirmada(s)).
+                    O calendário semestral e as chaves já estão definidos. Conforme novas equipes confirmam inscrição,
+                    elas preenchem automaticamente as vagas abertas na tabela abaixo. Quando você salva um placar, a
+                    classificação e os resultados atualizam imediatamente para todos os participantes.
                   </p>
-                  <label className="sports-field">
-                    <span>Local das partidas</span>
-                    <input
-                      type="text"
-                      value={matchLocation}
-                      onChange={(e) => setMatchLocation(e.target.value)}
-                      placeholder="Ex: Ginásio Poliesportivo UFLA"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    className="button button-primary"
-                    disabled={busy || overview.teams.length < 2}
-                    onClick={() => void handleGenerateMatches()}
-                  >
-                    {busy ? "Gerando…" : "Gerar partidas agora"}
-                  </button>
                 </div>
               )}
 
@@ -501,7 +618,9 @@ export function SportsEventModal({
                     return (
                       <article key={match.id} className="sports-match-card">
                         <div className="sports-match-head">
-                          <span className="sports-catalog-type">Rodada {match.roundNumber}</span>
+                          <span className="sports-catalog-type">
+                            Rodada {match.roundNumber} {isPlayerMatch ? "· Sua equipe" : ""}
+                          </span>
                           <span className="sports-match-meta">
                             {formatDateTime(match.scheduledAt)} · {match.location}
                           </span>
@@ -566,12 +685,26 @@ export function SportsEventModal({
                                   disabled={busy}
                                   onClick={() => void handleGenerateCheckInToken(match.id)}
                                 >
-                                  {match.checkinToken ? "Novo código QR" : "Abrir presença (QR)"}
+                                  {match.checkinToken ? "Gerar novo código" : "Abrir presença (Código)"}
                                 </button>
                                 {match.checkinToken && (
-                                  <span className="sports-token-badge" title="Compartilhe este código na quadra">
-                                    Código: <strong>{match.checkinToken}</strong>
-                                  </span>
+                                  <>
+                                    <span className="sports-token-badge" title="Compartilhe este código na quadra">
+                                      Código: <strong>{match.checkinToken}</strong>
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="button button-secondary"
+                                      onClick={() => {
+                                        if (match.checkinToken) {
+                                          void navigator.clipboard?.writeText(match.checkinToken);
+                                          setFeedback(`Código ${match.checkinToken} copiado!`);
+                                        }
+                                      }}
+                                    >
+                                      Copiar código
+                                    </button>
+                                  </>
                                 )}
                               </div>
                             </div>
@@ -585,12 +718,27 @@ export function SportsEventModal({
                                 <div className="sports-checkin-form">
                                   <input
                                     type="text"
-                                    placeholder="Digite o código da partida (ex: UNIR-1A2B3C4D)"
+                                    placeholder="Digite ou cole o código da partida (ex: UNIR-UFLA2026)"
                                     value={checkinInputs[match.id] ?? ""}
                                     onChange={(e) =>
                                       setCheckinInputs((prev) => ({ ...prev, [match.id]: e.target.value }))
                                     }
                                   />
+                                  <button
+                                    type="button"
+                                    className="button button-secondary"
+                                    disabled={busy}
+                                    onClick={async () => {
+                                      try {
+                                        const text = (await navigator.clipboard.readText()).trim();
+                                        if (text) setCheckinInputs((prev) => ({ ...prev, [match.id]: text }));
+                                      } catch {
+                                        // User can still paste manually with Ctrl+V / Cmd+V.
+                                      }
+                                    }}
+                                  >
+                                    Colar código
+                                  </button>
                                   <button
                                     type="button"
                                     className="button button-primary"

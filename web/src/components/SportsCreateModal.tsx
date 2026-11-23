@@ -17,13 +17,7 @@ interface SportsCreateModalProps {
   onCreated: () => void;
 }
 
-export function SportsCreateModal({
-  keycloak,
-  sports,
-  organizerContexts,
-  onClose,
-  onCreated,
-}: SportsCreateModalProps) {
+export function SportsCreateModal({ keycloak, sports, organizerContexts, onClose, onCreated }: SportsCreateModalProps) {
   const [tab, setTab] = useState<"event" | "sport">(sports.length > 0 ? "event" : "sport");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,10 +30,8 @@ export function SportsCreateModal({
   const [eventKind, setEventKind] = useState<"COMPETITION" | "SEASON">("COMPETITION");
   const [title, setTitle] = useState("");
   const [sportId, setSportId] = useState(sports[0]?.id ?? "");
-  const [skillLevel, setSkillLevel] = useState<"COMPETITIVE" | "RECREATIONAL">("COMPETITIVE");
+  const skillLevel = "COMPETITIVE" as const;
   const [organizerKey, setOrganizerKey] = useState(defaultOrgKey);
-  const [competitionTeams, setCompetitionTeams] = useState<16 | 32>(16);
-  const [seasonTeams, setSeasonTeams] = useState<10 | 20>(10);
   const [teamPriceReais, setTeamPriceReais] = useState("0");
   const [freeAgentPriceReais, setFreeAgentPriceReais] = useState("0");
   const [deadlineDate, setDeadlineDate] = useState("2027-06-30");
@@ -83,7 +75,7 @@ export function SportsCreateModal({
           skillLevel,
           organizerType: org.organizerType,
           organizerId: org.organizerId,
-          targetTeamCount: competitionTeams,
+          targetTeamCount: 32,
           teamEntryPrice,
           freeAgentPrice,
           registrationDeadline,
@@ -95,7 +87,7 @@ export function SportsCreateModal({
           skillLevel,
           organizerType: org.organizerType,
           organizerId: org.organizerId,
-          targetTeamCount: seasonTeams,
+          targetTeamCount: 10,
           teamEntryPrice,
           freeAgentPrice,
           registrationDeadline,
@@ -180,10 +172,7 @@ export function SportsCreateModal({
               <div className="sports-form-row">
                 <label className="sports-field">
                   <span>Tipo</span>
-                  <select
-                    value={eventKind}
-                    onChange={(e) => setEventKind(e.target.value as "COMPETITION" | "SEASON")}
-                  >
+                  <select value={eventKind} onChange={(e) => setEventKind(e.target.value as "COMPETITION" | "SEASON")}>
                     <option value="COMPETITION">Campeonato (Grupos + Mata-mata)</option>
                     <option value="SEASON">Temporada (Pontos corridos)</option>
                   </select>
@@ -231,47 +220,28 @@ export function SportsCreateModal({
                 </label>
 
                 <label className="sports-field">
-                  <span>Nível</span>
-                  <select
-                    value={skillLevel}
-                    onChange={(e) => setSkillLevel(e.target.value as "COMPETITIVE" | "RECREATIONAL")}
-                  >
-                    <option value="COMPETITIVE">Competitivo</option>
-                    <option value="RECREATIONAL">Recreativo</option>
-                  </select>
+                  <span>Categoria</span>
+                  <input type="text" readOnly value="Misto · Competitivo Único" />
                 </label>
               </div>
 
               <div className="sports-form-row">
-                {eventKind === "COMPETITION" ? (
-                  <label className="sports-field">
-                    <span>Total de equipes</span>
-                    <select
-                      value={competitionTeams}
-                      onChange={(e) => setCompetitionTeams(Number(e.target.value) as 16 | 32)}
-                    >
-                      <option value={16}>16 equipes</option>
-                      <option value={32}>32 equipes</option>
-                    </select>
-                  </label>
-                ) : (
-                  <label className="sports-field">
-                    <span>Total de equipes</span>
-                    <select value={seasonTeams} onChange={(e) => setSeasonTeams(Number(e.target.value) as 10 | 20)}>
-                      <option value={10}>10 equipes (Turno e returno)</option>
-                      <option value={20}>20 equipes (Turno único)</option>
-                    </select>
-                  </label>
-                )}
+                <label className="sports-field">
+                  <span>Formato e Calendário Semestral (4 meses)</span>
+                  <input
+                    type="text"
+                    readOnly
+                    value={
+                      eventKind === "COMPETITION"
+                        ? "32 equipes · Mata-mata aos Finais de Semana (Sáb/Dom)"
+                        : "10 equipes · 18 rodadas em Dias de Semana (Ter/Qui, ≥ 2 dias descanso)"
+                    }
+                  />
+                </label>
 
                 <label className="sports-field">
                   <span>Prazo de inscrição</span>
-                  <input
-                    type="date"
-                    required
-                    value={deadlineDate}
-                    onChange={(e) => setDeadlineDate(e.target.value)}
-                  />
+                  <input type="date" required value={deadlineDate} onChange={(e) => setDeadlineDate(e.target.value)} />
                 </label>
               </div>
 

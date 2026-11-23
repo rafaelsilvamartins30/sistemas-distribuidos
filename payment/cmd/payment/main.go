@@ -47,6 +47,13 @@ func run() error {
 	if err := payment.Migrate(startupCtx, db); err != nil {
 		return fmt.Errorf("migrate Payment database: %w", err)
 	}
+	tokenVerifier, err := server.NewKeycloakTokenVerifier(
+		envOr("KEYCLOAK_ISSUER_URI", "http://localhost:18081/realms/unir"),
+		envOr("KEYCLOAK_JWK_SET_URI", "http://keycloak:8080/realms/unir/protocol/openid-connect/certs"),
+	)
+	if err != nil {
+		return fmt.Errorf("configure Payment token verification: %w", err)
+	}
 
 	processor := payment.NewStore(db, payment.SimulatedPixProvider{})
 	consumer := payment.NewConsumer(rabbitURL(), processor, logger)
@@ -63,7 +70,7 @@ func run() error {
 	port := envOr("PORT", "8080")
 	httpServer := &http.Server{
 		Addr:              ":" + port,
-		Handler:           server.NewHandlerWithStore(db, processor, simulatedConfirmer(processor)),
+		Handler:           server.NewHandlerWithStoreAndVerifier(db, processor, simulatedConfirmer(processor), tokenVerifier),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	serverErrors := make(chan error, 1)

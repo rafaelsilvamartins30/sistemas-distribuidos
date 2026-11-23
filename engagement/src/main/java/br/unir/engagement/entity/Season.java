@@ -144,4 +144,12 @@ public class Season {
     public String getRoundRobinMode() {
         return this.roundRobinMode;
     }
+
+    public void updateRegistrationDeadline(Instant registrationDeadline) {
+        this.registrationDeadline = registrationDeadline;
+    }
+
+    public void cancel() {
+        this.status = "CANCELLED";
+    }
 }

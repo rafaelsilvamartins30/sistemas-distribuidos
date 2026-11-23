@@ -155,13 +155,8 @@ func (s *stubUserStore) ConfirmSimulatedPaymentForUser(_ context.Context, regist
 	return s.result, s.err
 }
 
-func fakeJWT(sub string) string {
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256"}`))
-	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"` + sub + `"}`))
-	return header + "." + payload + ".sig"
-}
-
 func TestUserPaymentsListAndConfirmRoutes(t *testing.T) {
+	fixture := newJWTFixture(t)
 	store := &stubUserStore{
 		charges: []payment.ChargeSummary{{
 			ChargeID:    "c-1",
@@ -176,10 +171,10 @@ func TestUserPaymentsListAndConfirmRoutes(t *testing.T) {
 			UserID:         "user-42",
 		}},
 	}
-	handler := server.NewHandlerWithStore(stubPinger{}, store, store)
+	handler := server.NewHandlerWithStoreAndVerifier(stubPinger{}, store, store, fixture.verifier)
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/payments/me", nil)
-	listReq.Header.Set("Authorization", "Bearer "+fakeJWT("user-42"))
+	listReq.Header.Set("Authorization", "Bearer "+fixture.token(t, validClaims("user-42")))
 	listRec := httptest.NewRecorder()
 	handler.ServeHTTP(listRec, listReq)
 	if listRec.Code != http.StatusOK || store.userID != "user-42" {
@@ -187,21 +182,58 @@ func TestUserPaymentsListAndConfirmRoutes(t *testing.T) {
 	}
 
 	confirmReq := httptest.NewRequest(http.MethodPost,
-		"/api/v1/payments/550e8400-e29b-41d4-a716-446655440002/confirm", nil)
-	confirmReq.Header.Set("Authorization", "Bearer "+fakeJWT("user-42"))
+		"/api/v1/payments/550e8400-e29b-41d4-a716-446655440002/confirm",
+		strings.NewReader(`{"paidAt":"2000-01-01T00:00:00Z"}`))
+	confirmReq.Header.Set("Authorization", "Bearer "+fixture.token(t, validClaims("user-42")))
 	confirmRec := httptest.NewRecorder()
 	handler.ServeHTTP(confirmRec, confirmReq)
 	if confirmRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 on confirm, got %d: %s", confirmRec.Code, confirmRec.Body.String())
 	}
+	if !store.paidAt.IsZero() {
+		t.Fatalf("expected caller-supplied paidAt to be ignored, got %v", store.paidAt)
+	}
 
 	store.err = payment.ErrChargeForbidden
 	forbiddenReq := httptest.NewRequest(http.MethodPost,
 		"/api/v1/payments/550e8400-e29b-41d4-a716-446655440002/confirm", nil)
-	forbiddenReq.Header.Set("Authorization", "Bearer "+fakeJWT("other-user"))
+	forbiddenReq.Header.Set("Authorization", "Bearer "+fixture.token(t, validClaims("other-user")))
 	forbiddenRec := httptest.NewRecorder()
 	handler.ServeHTTP(forbiddenRec, forbiddenReq)
 	if forbiddenRec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for foreign charge, got %d", forbiddenRec.Code)
+	}
+}
+
+func TestUserPaymentRoutesRejectForgedJwt(t *testing.T) {
+	fixture := newJWTFixture(t)
+	store := &stubUserStore{}
+	handler := server.NewHandlerWithStoreAndVerifier(stubPinger{}, store, store, fixture.verifier)
+	valid := fixture.token(t, validClaims("user-42"))
+	parts := strings.Split(valid, ".")
+	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode test token: %v", err)
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
+		t.Fatalf("unmarshal test claims: %v", err)
+	}
+	claims["sub"] = "victim-user"
+	claimsJSON, err = json.Marshal(claims)
+	if err != nil {
+		t.Fatalf("marshal forged test claims: %v", err)
+	}
+	parts[1] = base64.RawURLEncoding.EncodeToString(claimsJSON)
+	forged := strings.Join(parts, ".")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/payments/me", nil)
+	req.Header.Set("Authorization", "Bearer "+forged)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected forged token to be rejected with 401, got %d", rec.Code)
+	}
+	if store.userID != "" {
+		t.Fatalf("forged token reached the payment store as user %q", store.userID)
 	}
 }

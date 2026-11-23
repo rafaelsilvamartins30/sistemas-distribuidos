@@ -7,6 +7,7 @@ import { PageHeader } from "../components/PageHeader";
 import { Section } from "../components/Section";
 import { ParticipantQrScanner } from "../components/ParticipantQrScanner";
 import { SearchField } from "../components/SearchField";
+import { UniversalAttendanceModal } from "../components/UniversalAttendanceModal";
 import {
   AttendanceApiError,
   checkInWithEventQr,
@@ -396,7 +397,10 @@ export function EventsPage() {
       {!workflowLoading && organizerContexts.length > 0 && (
         <section className="opportunity-publishing-tools" aria-labelledby="event-organizing-title">
           <div className="opportunity-publishing-heading">
-            <div>
+            <span className="opportunity-publishing-icon" aria-hidden="true">
+              <Icon name="calendar" width="22" height="22" />
+            </span>
+            <div className="opportunity-publishing-copy">
               <p className="eyebrow">Administração de eventos</p>
               <h2 id="event-organizing-title">Criar e gerenciar eventos</h2>
               <p>
@@ -405,273 +409,348 @@ export function EventsPage() {
                 <strong>Comunidade ou Entidade Acadêmica</strong> usam inscrição externa.
               </p>
             </div>
-            <button className="button button-primary" type="button" onClick={() => setCreateOpen((open) => !open)}>
-              {createOpen ? "Fechar formulário" : "Novo evento"}
-            </button>
+            <div className="opportunity-publishing-actions">
+              <button className="button button-primary" type="button" onClick={() => setCreateOpen(true)}>
+                + Novo evento
+              </button>
+            </div>
           </div>
 
           {feedback && (
-            <p className="notice" role="status">
+            <p className="notice" role="status" style={{ marginTop: "0.75rem" }}>
               {feedback}
             </p>
           )}
 
           {createOpen && selectedOrganizer && (
-            <form className="opportunity-publish-form" onSubmit={handleCreateEvent}>
-              <label>
-                Organizar em nome de
-                <select value={organizerKey} onChange={(e) => setOrganizerKey(e.target.value)} required>
-                  {organizerContexts.map((context) => {
-                    const key = `${context.organizerType}:${context.organizerId}`;
-                    return (
-                      <option key={key} value={key}>
-                        {organizerTypeLabel(context.organizerType)} · {context.name}
-                      </option>
-                    );
-                  })}
-                </select>
-              </label>
-
-              <div className="opportunity-publish-fields">
-                <label>
-                  Título do evento
-                  <input value={title} onChange={(e) => setTitle(e.target.value)} required />
-                </label>
-                <label>
-                  Categoria
-                  <input value={category} onChange={(e) => setCategory(e.target.value)} required />
-                </label>
-                <label className="opportunity-publish-wide">
-                  Descrição
-                  <textarea value={description} onChange={(e) => setDescription(e.target.value)} required rows={3} />
-                </label>
-                <label>
-                  Local
-                  <input value={location} onChange={(e) => setLocation(e.target.value)} required />
-                </label>
-                <label>
-                  Capacidade (opcional)
-                  <input
-                    type="number"
-                    min="1"
-                    value={capacity}
-                    onChange={(e) => setCapacity(e.target.value)}
-                    placeholder="Sem limite"
-                  />
-                </label>
-                <label>
-                  Início
-                  <input
-                    type="datetime-local"
-                    value={startsAt}
-                    onChange={(e) => setStartsAt(e.target.value)}
-                    required
-                  />
-                </label>
-                <label>
-                  Término
-                  <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} required />
-                </label>
-                <label>
-                  Data limite de inscrição
-                  <input
-                    type="datetime-local"
-                    value={registrationDeadline}
-                    onChange={(e) => setRegistrationDeadline(e.target.value)}
-                    required
-                  />
-                </label>
-                <label>
-                  Modalidade
-                  <select value={isPaid ? "PAID" : "FREE"} onChange={(e) => setIsPaid(e.target.value === "PAID")}>
-                    <option value="FREE">Gratuito (Inscrição interna UNIR)</option>
-                    <option value="PAID">
-                      {externalPaidMode
-                        ? "Pago externo (Link da comunidade/entidade)"
-                        : "Pago interno (Cobrança Pix pela UNIR — Saga)"}
-                    </option>
-                  </select>
-                </label>
-
-                {isPaid && !externalPaidMode && (
-                  <label>
-                    Valor da inscrição (R$)
-                    <input
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      value={priceBrl}
-                      onChange={(e) => setPriceBrl(e.target.value)}
-                      placeholder="Ex.: 25.00"
-                      required
-                    />
-                  </label>
-                )}
-
-                {isPaid && externalPaidMode && (
-                  <>
+            <div
+              className="sports-modal-backdrop"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="create-event-modal-title"
+              onClick={() => setCreateOpen(false)}
+            >
+              <div className="sports-modal" style={{ maxWidth: "740px" }} onClick={(e) => e.stopPropagation()}>
+                <header className="sports-modal-header">
+                  <div>
+                    <p className="sports-kicker">Administração de eventos</p>
+                    <h2 id="create-event-modal-title">Novo evento</h2>
+                  </div>
+                  <button
+                    type="button"
+                    className="sports-modal-close"
+                    aria-label="Fechar"
+                    onClick={() => setCreateOpen(false)}
+                  >
+                    ✕
+                  </button>
+                </header>
+                <div className="sports-modal-body">
+                  <form className="opportunity-publish-form" onSubmit={handleCreateEvent}>
                     <label>
-                      Link externo para pagamento e inscrição
-                      <input
-                        type="url"
-                        value={externalUrl}
-                        onChange={(e) => setExternalUrl(e.target.value)}
-                        placeholder="https://…"
-                        required
-                      />
-                    </label>
-                    <label>
-                      Valor informativo em R$ (opcional)
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={priceBrl}
-                        onChange={(e) => setPriceBrl(e.target.value)}
-                        placeholder="Ex.: 15.00"
-                      />
-                    </label>
-                  </>
-                )}
-
-                {(!isPaid || !externalPaidMode) && (
-                  <>
-                    <label>
-                      Lista de presença via QR
-                      <select
-                        value={attendanceEnabled ? "YES" : "NO"}
-                        onChange={(e) => setAttendanceEnabled(e.target.value === "YES")}
-                      >
-                        <option value="YES">Habilitada</option>
-                        <option value="NO">Desabilitada</option>
+                      Organizar em nome de
+                      <select value={organizerKey} onChange={(e) => setOrganizerKey(e.target.value)} required>
+                        {organizerContexts.map((context) => {
+                          const key = `${context.organizerType}:${context.organizerId}`;
+                          return (
+                            <option key={key} value={key}>
+                              {organizerTypeLabel(context.organizerType)} · {context.name}
+                            </option>
+                          );
+                        })}
                       </select>
                     </label>
-                    {attendanceEnabled && (
+
+                    <div className="opportunity-publish-fields">
                       <label>
-                        Modo de validação do QR
-                        <select
-                          value={attendanceMode}
-                          onChange={(e) => setAttendanceMode(e.target.value as AttendanceMode)}
-                        >
-                          <option value="PARTICIPANT_SCANS_EVENT">Participante escaneia QR do evento</option>
-                          <option value="ORGANIZER_SCANS_PARTICIPANT">Organizador escaneia QR do participante</option>
+                        Título do evento
+                        <input value={title} onChange={(e) => setTitle(e.target.value)} required />
+                      </label>
+                      <label>
+                        Categoria
+                        <input value={category} onChange={(e) => setCategory(e.target.value)} required />
+                      </label>
+                      <label className="opportunity-publish-wide">
+                        Descrição
+                        <textarea
+                          value={description}
+                          onChange={(e) => setDescription(e.target.value)}
+                          required
+                          rows={3}
+                        />
+                      </label>
+                      <label>
+                        Local
+                        <input value={location} onChange={(e) => setLocation(e.target.value)} required />
+                      </label>
+                      <label>
+                        Capacidade (opcional)
+                        <input
+                          type="number"
+                          min="1"
+                          value={capacity}
+                          onChange={(e) => setCapacity(e.target.value)}
+                          placeholder="Sem limite"
+                        />
+                      </label>
+                      <label>
+                        Início
+                        <input
+                          type="datetime-local"
+                          value={startsAt}
+                          onChange={(e) => setStartsAt(e.target.value)}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Término
+                        <input
+                          type="datetime-local"
+                          value={endsAt}
+                          onChange={(e) => setEndsAt(e.target.value)}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Data limite de inscrição
+                        <input
+                          type="datetime-local"
+                          value={registrationDeadline}
+                          onChange={(e) => setRegistrationDeadline(e.target.value)}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Modalidade
+                        <select value={isPaid ? "PAID" : "FREE"} onChange={(e) => setIsPaid(e.target.value === "PAID")}>
+                          <option value="FREE">Gratuito (Inscrição interna UNIR)</option>
+                          <option value="PAID">
+                            {externalPaidMode
+                              ? "Pago externo (Link da comunidade/entidade)"
+                              : "Pago interno (Cobrança Pix pela UNIR — Saga)"}
+                          </option>
                         </select>
                       </label>
-                    )}
-                  </>
-                )}
 
-                <label className="opportunity-publish-wide">
-                  Imagem (opcional)
-                  <input
-                    type="url"
-                    value={imageUrl}
-                    onChange={(e) => setImageUrl(e.target.value)}
-                    placeholder="https://…"
-                  />
-                </label>
+                      {isPaid && !externalPaidMode && (
+                        <label>
+                          Valor da inscrição (R$)
+                          <input
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            value={priceBrl}
+                            onChange={(e) => setPriceBrl(e.target.value)}
+                            placeholder="Ex.: 25.00"
+                            required
+                          />
+                        </label>
+                      )}
+
+                      {isPaid && externalPaidMode && (
+                        <>
+                          <label>
+                            Link externo para pagamento e inscrição
+                            <input
+                              type="url"
+                              value={externalUrl}
+                              onChange={(e) => setExternalUrl(e.target.value)}
+                              placeholder="https://…"
+                              required
+                            />
+                          </label>
+                          <label>
+                            Valor informativo em R$ (opcional)
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={priceBrl}
+                              onChange={(e) => setPriceBrl(e.target.value)}
+                              placeholder="Ex.: 15.00"
+                            />
+                          </label>
+                        </>
+                      )}
+
+                      {(!isPaid || !externalPaidMode) && (
+                        <>
+                          <label>
+                            Lista de presença via QR
+                            <select
+                              value={attendanceEnabled ? "YES" : "NO"}
+                              onChange={(e) => setAttendanceEnabled(e.target.value === "YES")}
+                            >
+                              <option value="YES">Habilitada</option>
+                              <option value="NO">Desabilitada</option>
+                            </select>
+                          </label>
+                          {attendanceEnabled && (
+                            <label>
+                              Modo de validação do QR
+                              <select
+                                value={attendanceMode}
+                                onChange={(e) => setAttendanceMode(e.target.value as AttendanceMode)}
+                              >
+                                <option value="PARTICIPANT_SCANS_EVENT">Participante escaneia QR do evento</option>
+                                <option value="ORGANIZER_SCANS_PARTICIPANT">
+                                  Organizador escaneia QR do participante
+                                </option>
+                              </select>
+                            </label>
+                          )}
+                        </>
+                      )}
+
+                      <label className="opportunity-publish-wide">
+                        Imagem (opcional)
+                        <input
+                          type="url"
+                          value={imageUrl}
+                          onChange={(e) => setImageUrl(e.target.value)}
+                          placeholder="https://…"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="sports-form-actions">
+                      <button className="button button-secondary" type="button" onClick={() => setCreateOpen(false)}>
+                        Cancelar
+                      </button>
+                      <button className="button button-primary" type="submit" disabled={submitting}>
+                        {submitting ? "Publicando…" : "Publicar evento"}
+                      </button>
+                    </div>
+                  </form>
+                </div>
               </div>
-
-              <button className="button button-primary" type="submit" disabled={submitting}>
-                {submitting ? "Publicando…" : "Publicar evento"}
-              </button>
-            </form>
+            </div>
           )}
 
           {editingEvent && (
-            <form className="opportunity-publish-form" onSubmit={handleSaveEdit}>
-              <h3>Editar evento: {editingEvent.title}</h3>
-              <div className="opportunity-publish-fields">
-                <label>
-                  Título
-                  <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} required />
-                </label>
-                <label>
-                  Categoria
-                  <input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} required />
-                </label>
-                <label className="opportunity-publish-wide">
-                  Descrição
-                  <textarea
-                    value={editDescription}
-                    onChange={(e) => setEditDescription(e.target.value)}
-                    required
-                    rows={3}
-                  />
-                </label>
-                <label>
-                  Local
-                  <input value={editLocation} onChange={(e) => setEditLocation(e.target.value)} required />
-                </label>
-                <label>
-                  Capacidade (vazio = sem limite)
-                  <input type="number" min="1" value={editCapacity} onChange={(e) => setEditCapacity(e.target.value)} />
-                </label>
-                <label>
-                  Início
-                  <input
-                    type="datetime-local"
-                    value={editStartsAt}
-                    onChange={(e) => setEditStartsAt(e.target.value)}
-                    required
-                  />
-                </label>
-                <label>
-                  Término
-                  <input
-                    type="datetime-local"
-                    value={editEndsAt}
-                    onChange={(e) => setEditEndsAt(e.target.value)}
-                    required
-                  />
-                </label>
-                <label>
-                  Data limite de inscrição
-                  <input
-                    type="datetime-local"
-                    value={editDeadline}
-                    onChange={(e) => setEditDeadline(e.target.value)}
-                    required
-                  />
-                </label>
-                {editingEvent.registrationMode !== "INTERNAL_FREE" && (
-                  <label>
-                    Valor em R$
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={editPriceBrl}
-                      onChange={(e) => setEditPriceBrl(e.target.value)}
-                      required={editingEvent.registrationMode === "INTERNAL_PAID"}
-                    />
-                  </label>
-                )}
-                {editingEvent.registrationMode === "EXTERNAL_PAID" && (
-                  <label className="opportunity-publish-wide">
-                    Link externo de inscrição
-                    <input
-                      type="url"
-                      value={editExternalUrl}
-                      onChange={(e) => setEditExternalUrl(e.target.value)}
-                      required
-                    />
-                  </label>
-                )}
-                <label className="opportunity-publish-wide">
-                  Imagem (opcional)
-                  <input type="url" value={editImageUrl} onChange={(e) => setEditImageUrl(e.target.value)} />
-                </label>
+            <div
+              className="sports-modal-backdrop"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="edit-event-modal-title"
+              onClick={() => setEditingEvent(null)}
+            >
+              <div className="sports-modal" style={{ maxWidth: "740px" }} onClick={(e) => e.stopPropagation()}>
+                <header className="sports-modal-header">
+                  <div>
+                    <p className="sports-kicker">Administração de eventos</p>
+                    <h2 id="edit-event-modal-title">Editar evento: {editingEvent.title}</h2>
+                  </div>
+                  <button
+                    type="button"
+                    className="sports-modal-close"
+                    aria-label="Fechar"
+                    onClick={() => setEditingEvent(null)}
+                  >
+                    ✕
+                  </button>
+                </header>
+                <div className="sports-modal-body">
+                  <form className="opportunity-publish-form" onSubmit={handleSaveEdit}>
+                    <div className="opportunity-publish-fields">
+                      <label>
+                        Título
+                        <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} required />
+                      </label>
+                      <label>
+                        Categoria
+                        <input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} required />
+                      </label>
+                      <label className="opportunity-publish-wide">
+                        Descrição
+                        <textarea
+                          value={editDescription}
+                          onChange={(e) => setEditDescription(e.target.value)}
+                          required
+                          rows={3}
+                        />
+                      </label>
+                      <label>
+                        Local
+                        <input value={editLocation} onChange={(e) => setEditLocation(e.target.value)} required />
+                      </label>
+                      <label>
+                        Capacidade (vazio = sem limite)
+                        <input
+                          type="number"
+                          min="1"
+                          value={editCapacity}
+                          onChange={(e) => setEditCapacity(e.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Início
+                        <input
+                          type="datetime-local"
+                          value={editStartsAt}
+                          onChange={(e) => setEditStartsAt(e.target.value)}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Término
+                        <input
+                          type="datetime-local"
+                          value={editEndsAt}
+                          onChange={(e) => setEditEndsAt(e.target.value)}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Data limite de inscrição
+                        <input
+                          type="datetime-local"
+                          value={editDeadline}
+                          onChange={(e) => setEditDeadline(e.target.value)}
+                          required
+                        />
+                      </label>
+                      {editingEvent.registrationMode !== "INTERNAL_FREE" && (
+                        <label>
+                          Valor em R$
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={editPriceBrl}
+                            onChange={(e) => setEditPriceBrl(e.target.value)}
+                            required={editingEvent.registrationMode === "INTERNAL_PAID"}
+                          />
+                        </label>
+                      )}
+                      {editingEvent.registrationMode === "EXTERNAL_PAID" && (
+                        <label className="opportunity-publish-wide">
+                          Link externo de inscrição
+                          <input
+                            type="url"
+                            value={editExternalUrl}
+                            onChange={(e) => setEditExternalUrl(e.target.value)}
+                            required
+                          />
+                        </label>
+                      )}
+                      <label className="opportunity-publish-wide">
+                        Imagem (opcional)
+                        <input type="url" value={editImageUrl} onChange={(e) => setEditImageUrl(e.target.value)} />
+                      </label>
+                    </div>
+                    <div className="sports-form-actions">
+                      <button className="button button-secondary" type="button" onClick={() => setEditingEvent(null)}>
+                        Cancelar
+                      </button>
+                      <button className="button button-primary" type="submit" disabled={submitting}>
+                        {submitting ? "Salvando…" : "Salvar alterações"}
+                      </button>
+                    </div>
+                  </form>
+                </div>
               </div>
-              <div className="opportunity-review-actions">
-                <button className="button button-primary" type="submit" disabled={submitting}>
-                  {submitting ? "Salvando…" : "Salvar alterações"}
-                </button>
-                <button className="button button-secondary" type="button" onClick={() => setEditingEvent(null)}>
-                  Cancelar edição
-                </button>
-              </div>
-            </form>
+            </div>
           )}
 
           {managedEvents.length > 0 && (
@@ -792,6 +871,7 @@ export function EventDetailPage() {
   const [organizerBusy, setOrganizerBusy] = useState(false);
   const [organizerError, setOrganizerError] = useState<string | null>(null);
   const [organizerQr, setOrganizerQr] = useState<QrArtifact | null>(null);
+  const [attendanceModalMode, setAttendanceModalMode] = useState<"participant" | "organizer" | null>(null);
   const [scannedTicketToken, setScannedTicketToken] = useState("");
   const [scannedTicket, setScannedTicket] = useState<OrganizerCheckInPreview | null>(null);
 
@@ -951,6 +1031,7 @@ export function EventDetailPage() {
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
       const result = await checkInWithEventQr(keycloak.token, qrToken);
       setAttendance((current) => (current ? { ...current, status: "ATTENDED", checkedAt: result.checkedAt } : current));
+      setAttendanceModalMode(null);
     } catch (error) {
       const detail = error instanceof AttendanceApiError ? error.detail : "Tente novamente mais tarde.";
       setAttendanceError(`Não foi possível registrar sua presença: ${detail}`);
@@ -1235,15 +1316,23 @@ export function EventDetailPage() {
                 </p>
               ) : attendance?.status === "ELIGIBLE" ? (
                 <>
-                  <p>Escaneie o QR compartilhado do evento durante a atividade para registrar sua presença.</p>
+                  <p>
+                    Leia o QR compartilhado ou informe o código do evento durante a atividade para registrar presença.
+                  </p>
                   <p className="attendance-window">
                     Janela: {dateTime(event.startsAt)} a {dateTime(event.endsAt)}.
                   </p>
-                  <ParticipantQrScanner
-                    busy={attendanceBusy}
-                    autoSubmitOnScan
-                    onToken={(token) => void handleCheckIn(token)}
-                  />
+                  <button
+                    className="button button-primary"
+                    type="button"
+                    disabled={attendanceBusy}
+                    onClick={() => {
+                      setAttendanceError(null);
+                      setAttendanceModalMode("participant");
+                    }}
+                  >
+                    Confirmar Presença
+                  </button>
                 </>
               ) : attendance?.status === "CANCELLED" ? (
                 <p role="status">Sua elegibilidade para presença foi cancelada.</p>
@@ -1279,22 +1368,18 @@ export function EventDetailPage() {
                 <>
                   <p>Gere o QR compartilhado para os participantes registrarem a presença.</p>
                   <button
-                    className="button button-secondary"
+                    className="button button-primary"
                     type="button"
                     disabled={organizerBusy}
-                    onClick={() => void handleIssueEventQr()}
+                    onClick={() => {
+                      setAttendanceModalMode("organizer");
+                      if (!organizerQr) {
+                        void handleIssueEventQr();
+                      }
+                    }}
                   >
-                    {organizerBusy ? "Gerando QR…" : organizerQr ? "Gerar novo QR" : "Gerar QR do evento"}
+                    {organizerBusy ? "Gerando QR…" : organizerQr ? "Ver / Gerar QR do Evento" : "Gerar QR do Evento"}
                   </button>
-                  {organizerQr && (
-                    <div className="my-ticket-qr">
-                      <img
-                        src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(organizerQr.qrSvg)}`}
-                        alt={`QR de presença para ${event.title}`}
-                      />
-                      <span>Mostre este QR durante o evento. Gerar outro invalida o anterior.</span>
-                    </div>
-                  )}
                 </>
               ) : (
                 <>
@@ -1338,6 +1423,24 @@ export function EventDetailPage() {
           <p>Organizador: {organizerTypeLabel(event.organizerType)}</p>
         </aside>
       </div>
+
+      {attendanceModalMode && (
+        <UniversalAttendanceModal
+          mode={attendanceModalMode}
+          busy={attendanceModalMode === "participant" ? attendanceBusy : organizerBusy}
+          title={
+            attendanceModalMode === "participant" ? "Confirmar Presença no Evento" : "QR e Código de Presença do Evento"
+          }
+          subtitle={`${event.title} · ${dateTime(event.startsAt)}`}
+          token={organizerQr?.token ?? null}
+          qrSvg={organizerQr?.qrSvg ?? null}
+          checkedIn={attendance?.status === "ATTENDED"}
+          error={attendanceModalMode === "participant" ? attendanceError : organizerError}
+          onSubmitToken={attendanceModalMode === "participant" ? (code) => void handleCheckIn(code) : undefined}
+          onGenerateToken={attendanceModalMode === "organizer" ? () => void handleIssueEventQr() : undefined}
+          onClose={() => setAttendanceModalMode(null)}
+        />
+      )}
     </div>
   );
 }

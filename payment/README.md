@@ -1,26 +1,45 @@
-# Payment
+# Payment (`payment`)
 
-Serviço de domínio responsável pelo ciclo de vida de pagamentos das atividades pagas da UNIR. Stack: Go 1.27 e PostgreSQL.
+Serviço de domínio responsável pelo **ciclo de vida de cobranças e estornos** de inscrições pagas (eventos e campeonatos esportivos) da UNIR.
 
-## Endpoints
+- **Stack:** Go 1.27 + PostgreSQL próprio (`payment-db` / `unir_payment`) + RabbitMQ (`unir.events`).
+- **Acesso:** interno no Kubernetes (`ClusterIP` `payment:8080`), acessado pelo `Web BFF` e por filas RabbitMQ.
 
-- `GET /health` verifica a conectividade com o banco PostgreSQL próprio (`unir_payment`) e retorna `200` (`503` se indisponível).
-- Demais rotas exigem bearer token e permanecem fechadas (`404`) até a definição dos contratos de pagamento.
+---
 
-O Payment consome a fila durável `payment.registration-requests`, ligada pelo Engagement à exchange `unir.events` e à routing key `engagement.registration.payment-requested.v1`. O contrato recebido é [`RegistrationPaymentRequested` v1](../docs/contracts/registration-payment-requested-v1.md).
+## Como funciona e singularidades
 
-Cada mensagem válida cria `ChargeCreated` no Event Store e, na mesma transação PostgreSQL, atualiza `charge_projections`, grava a saída local em `payment_outbox` e registra `messageId` em `processed_messages`. A deduplicação também usa `registrationId`, portanto uma segunda mensagem para a mesma tentativa não cria outra cobrança. Mensagens inválidas são rejeitadas sem requeue; falhas temporárias de persistência são re-enfileiradas. O ACK só ocorre após o commit.
+1. **PIX simulado — NÃO há integração bancária real:**
+   - O serviço define a interface `PixProvider`, mas a única implementação conectada é **`SimulatedPixProvider`**.
+   - Ele gera códigos e recibos fictícios de forma determinística (chave de idempotência = `registrationId`), **não chama nenhum banco ou PSP externo** e **não movimenta dinheiro real**.
+   - A confirmação do pagamento ocorre por ação explícita do usuário em `POST /api/v1/payments/{registrationId}/confirm` (habilitada somente quando `PAYMENT_ENV=local|test` e `PAYMENT_SIMULATED_CONFIRMATION_ENABLED=true`).
+2. **Event Sourcing + Projeção + Outbox na mesma transação:**
+   - Toda mudança de estado (`ChargeCreated`, `PaymentConfirmed`, `PaymentExpired`, `RefundRequested`, `RefundSucceeded`, `RefundFailed`) é gravada de forma *append-only* no Event Store PostgreSQL.
+   - Na mesma transação ACID, atualiza a tabela de leitura `charge_projections`, grava a mensagem de saída em `payment_outbox` e registra `messageId` em `processed_messages` (garantindo idempotência contra redelivery).
+3. **Participação na Saga Coreografada (pagamento e estorno):**
+   - Consome `RegistrationPaymentRequested` v1 da fila `payment.registration-requests` (criando cobrança `PENDING` ou `EXPIRED` se `paymentDeadlineAt` já venceu).
+   - Publica `PaymentConfirmed` v1 (`payment.charge.confirmed.v1`) quando confirmado.
+   - Consome `RefundRequested` v1 da fila `payment.refund-requests` (acionado por cancelamento de evento, cancelamento de campeonato ou pagamento fora da janela), processa estorno idempotente (`unir-full-refund:<chargeId>`) até `REFUNDED` e publica `RefundSucceeded` / `RefundFailed`.
 
-O `SimulatedPixProvider` gera dados claramente fictícios e não movimenta dinheiro. A chave de idempotência do provedor é o `registrationId`, e o identificador interno da cobrança é determinístico para essa mesma tentativa. Se `paymentDeadlineAt` já tiver vencido ao processar a solicitação, Payment persiste `PaymentExpired` e a projeção `EXPIRED` sem chamar o provedor. O registro terminal também é idempotente para redelivery.
+---
 
-O pagamento simulado só pode ser confirmado explicitamente em `PAYMENT_ENV=local|test` com `PAYMENT_SIMULATED_CONFIRMATION_ENABLED=true`. Essa configuração está habilitada apenas no Compose local. A rota de controle é `POST /local/simulated-payments/{registrationId}/confirm`; o campo opcional `paidAt` serve para reproduzir horários efetivos em testes. Sem ambas as condições, a rota não é registrada. A confirmação persiste `PaymentConfirmed`, atualiza a projeção para `PAID` e grava a Outbox na mesma transação. O publicador encaminha a Outbox para `payment.charge.confirmed.v1` com publisher-confirm e retry. O contrato está em [`PaymentConfirmed` v1](../docs/contracts/payment-confirmed-v1.md).
+## Endpoints e contratos
 
-Payment consome também `RefundRequested` v1 da fila durável `payment.refund-requests`. Só reembolsa cobranças capturadas; valor e moeda vêm da projeção persistida, e a chave estável `unir-full-refund:<chargeId>` protege chamadas repetidas ao provedor. O `SimulatedPixProvider` devolve um recibo fictício e não movimenta dinheiro. Cada tentativa, falha ou sucesso é registrada como evento append-only; a projeção passa por `REFUND_PENDING`, `REFUND_FAILED` e `REFUNDED`, e os resultados são publicados pela Outbox. Uma falha do provedor permanece visível e retorna erro para reentrega/retry. O contrato das duas direções está em [`Refund flow v1`](../docs/contracts/refund-flow-v1.md).
+- `GET /health` — conectividade com `payment-db`.
+- `GET /api/v1/payments/me` — lista as cobranças do titular do JWT (validação RS256 completa).
+- `POST /api/v1/payments/{registrationId}/confirm` — confirma cobrança PIX simulada do próprio usuário (usa o relógio do servidor para `paidAt`).
+- **Contratos detalhados:**
+  - [Saga Coreografada (Pagamentos, Confirmação e Estorno)](../docs/SAGA.md)
+  - [RegistrationPaymentRequested v1](../docs/contracts/registration-payment-requested-v1.md)
+  - [PaymentConfirmed v1](../docs/contracts/payment-confirmed-v1.md)
+  - [Fluxo de Estorno v1](../docs/contracts/refund-flow-v1.md)
 
-## Ambiente local
-
-No `compose.yaml`, `payment` expõe a porta `18086` (`PAYMENT_PORT`) e conecta ao banco `payment-db` (`unir_payment`, porta `15435`).
+---
 
 ## Qualidade
 
-Na pasta `payment`: `make quality` (`gofmt`, `go vet`, `golangci-lint`, `go test` e `go build`) ou `make test`, ou pela raiz com `make payment`.
+```sh
+make payment
+# ou dentro de payment/:
+make quality   # gofmt, go vet, golangci-lint, go test e go build
+```

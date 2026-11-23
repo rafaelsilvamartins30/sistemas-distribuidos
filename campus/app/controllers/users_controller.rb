@@ -8,6 +8,20 @@ class UsersController < ApplicationController
 
   before_action :authenticate_keycloak!
 
+  def index
+    scope = UserProfile.order(:name)
+    query = params[:q].to_s.strip
+    if query.present?
+      pattern = "%#{ActiveRecord::Base.sanitize_sql_like(query)}%"
+      scope = scope.where('name ILIKE :q OR registration_code ILIKE :q', q: pattern)
+    end
+    profiles = scope.limit(200).map do |profile|
+      { id: profile.id, keycloakUserId: profile.keycloak_user_id, name: profile.name,
+        registrationCode: profile.registration_code, userType: profile.user_type }
+    end
+    render json: { items: profiles }
+  end
+
   def create
     payload = load_payload(CREATE_FIELDS)
     return unless payload

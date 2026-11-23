@@ -1,0 +1,367 @@
+openapi: 3.0.3
+info:
+  title: UNIR — Plataforma Universitária Distribuída (API v1)
+  version: 1.0.0
+  description: |
+    Especificação REST da plataforma UNIR (University Network for Integration and Relationships),
+    exposta pelo API Gateway com versionamento por URI (`/api/v1`), autenticação OIDC/JWT (Keycloak)
+    e dois BFFs dedicados (`/api/v1/web/*` para o cliente Web e `/api/v1/admin/*` para o painel Administration).
+    O recurso `EventResponse` implementa HATEOAS (`_links`) com transições de estado contextuais.
+
+servers:
+  - url: http://localhost:18084
+    description: API Gateway (Docker Compose local)
+  - url: http://localhost:18080
+    description: Traefik Ingress → API Gateway (Kubernetes kind local)
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT emitido pelo realm `unir` do Keycloak com papéis `USER` ou `PLATFORM_ADMIN`.
+
+  schemas:
+    HateoasLink:
+      type: object
+      required: [href, method]
+      properties:
+        href:
+          type: string
+          example: /api/v1/events/10000000-0000-4000-8000-000000000001/registrations
+        method:
+          type: string
+          enum: [GET, POST, PATCH, DELETE]
+
+    EventResponse:
+      type: object
+      description: Evento universitário servido pelo read model CQRS (MongoDB) com links HATEOAS.
+      required: [id, title, organizerType, organizerId, startsAt, registrationMode, status, _links]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        organizerType:
+          type: string
+          enum: [UNIVERSITY, ACADEMIC_UNIT, DEPARTMENT, ACADEMIC_ENTITY, COMMUNITY, PROFESSOR]
+        organizerId:
+          type: string
+          format: uuid
+        location:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        registrationMode:
+          type: string
+          enum: [INTERNAL_FREE, INTERNAL_PAID, EXTERNAL_PAID]
+        price:
+          type: integer
+          nullable: true
+          description: Valor em centavos (BRL).
+        attendanceEnabled:
+          type: boolean
+        status:
+          type: string
+          enum: [ACTIVE, CANCELLED]
+        _links:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/HateoasLink'
+          example:
+            self:
+              href: /api/v1/events/10000000-0000-4000-8000-000000000001
+              method: GET
+            collection:
+              href: /api/v1/events
+              method: GET
+            register:
+              href: /api/v1/events/10000000-0000-4000-8000-000000000001/registrations
+              method: POST
+            cancel:
+              href: /api/v1/events/10000000-0000-4000-8000-000000000001
+              method: DELETE
+
+    PaymentCharge:
+      type: object
+      properties:
+        chargeId:
+          type: string
+          format: uuid
+        referenceType:
+          type: string
+          example: REGISTRATION
+        referenceId:
+          type: string
+          format: uuid
+        amountMinor:
+          type: integer
+          example: 2500
+        currency:
+          type: string
+          example: BRL
+        status:
+          type: string
+          enum: [PENDING, PAID, EXPIRED, CANCELLED, REFUND_PENDING, REFUNDED, REFUND_FAILED]
+        provider:
+          type: string
+          example: SIMULATED_PIX
+        pixCopyPaste:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+        refundedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    AdminOverviewResponse:
+      type: object
+      description: Resposta agregada exclusiva do Admin BFF (diferente dos endpoints granulares do Web BFF).
+      properties:
+        admin:
+          type: object
+        university:
+          type: object
+        summary:
+          type: object
+          properties:
+            departments: { type: integer }
+            academicUnits: { type: integer }
+            entities: { type: integer }
+            communities: { type: integer }
+            pendingRequests: { type: integer }
+        pendingRequests:
+          type: array
+          items: { type: object }
+
+    RagQueryRequest:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+          example: Quais eventos gratuitos de tecnologia estão disponíveis?
+        use_live_tool:
+          type: boolean
+          default: false
+
+    RagQueryResponse:
+      type: object
+      properties:
+        answer: { type: string }
+        mode: { type: string, enum: [rag, fallback] }
+        latency_ms: { type: number }
+        estimated_cost_usd: { type: number }
+        sources:
+          type: array
+          items: { type: object }
+
+paths:
+  /api/v1/web/events:
+    get:
+      tags: [Web BFF — Engagement (CQRS Read Model)]
+      summary: Lista eventos ativos a partir da projeção MongoDB com links HATEOAS
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: Página de eventos com `_links` HATEOAS
+        '401':
+          description: JWT ausente ou inválido
+    post:
+      tags: [Web BFF — Engagement (Write Model)]
+      summary: Cria um novo evento no PostgreSQL e publica projeção via Outbox
+      responses:
+        '201':
+          description: Evento criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '400':
+          description: Dados inválidos
+        '403':
+          description: Usuário sem permissão contextual de organizador no Campus
+
+  /api/v1/web/events/{eventId}:
+    get:
+      tags: [Web BFF — Engagement (CQRS Read Model)]
+      summary: Obtém detalhes de um evento com links HATEOAS contextuais
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Evento encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '404':
+          description: Evento não encontrado
+    delete:
+      tags: [Web BFF — Engagement (Saga Compensation)]
+      summary: Cancela evento ativo e dispara compensação (reembolso no Payment + revogação no Access)
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Evento cancelado e compensação iniciada
+        '403':
+          description: Sem permissão para cancelar o evento
+
+  /api/v1/web/events/{eventId}/registrations:
+    post:
+      tags: [Web BFF — Engagement (Saga Start)]
+      summary: Inscreve o usuário autenticado em um evento (grátis confirma na hora; pago inicia Saga)
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Inscrição criada (`CONFIRMED` ou `PENDING_PAYMENT`)
+        '409':
+          description: Conflito de capacidade ou inscrição duplicada
+
+  /api/v1/web/payments/me:
+    get:
+      tags: [Web BFF — Payment]
+      summary: Lista cobranças (eventos e esportes) do usuário autenticado
+      responses:
+        '200':
+          description: Lista de projeções de cobrança do Payment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PaymentCharge'
+
+  /api/v1/web/payments/{registrationId}/confirm:
+    post:
+      tags: [Web BFF — Payment (Saga Step)]
+      summary: Confirma pagamento PIX simulado (ambiente local/test) e publica PaymentConfirmed
+      parameters:
+        - name: registrationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Pagamento confirmado e evento gravado na Outbox do Payment
+        '403':
+          description: Cobrança não pertence ao usuário autenticado
+        '409':
+          description: Cobrança não está pendente
+
+  /api/v1/web/me/tickets:
+    get:
+      tags: [Web BFF — Access + Engagement]
+      summary: Agregação do Web BFF combinando inscrições do Engagement com tickets QR do Access
+      responses:
+        '200':
+          description: Lista de tickets e elegibilidade de check-in
+
+  /api/v1/web/sports-events/me:
+    get:
+      tags: [Web BFF — Engagement Sports]
+      summary: Lista campeonatos e temporadas confirmados do usuário autenticado
+      responses:
+        '200':
+          description: Inscrições esportivas confirmadas
+
+  /api/v1/web/sports-events/{contextType}/{contextId}/overview:
+    get:
+      tags: [Web BFF — Engagement Sports]
+      summary: Visão centralizada de campeonato/temporada (regras da modalidade, equipes, free agents e partidas)
+      parameters:
+        - name: contextType
+          in: path
+          required: true
+          schema: { type: string, enum: [COMPETITION, SEASON] }
+        - name: contextId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Payload completo do hub esportivo
+
+  /api/v1/web/rag/query:
+    post:
+      tags: [Web BFF — AI/RAG]
+      summary: Consulta em linguagem natural sobre eventos e oportunidades reais da UNIR via LangChain + Qdrant + Gemini
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RagQueryRequest'
+      responses:
+        '200':
+          description: Resposta fundamentada com fontes, latência e estimativa de custo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RagQueryResponse'
+
+  /api/v1/admin/overview:
+    get:
+      tags: [Admin BFF — Campus]
+      summary: Visão administrativa agregada exclusiva para PLATFORM_ADMIN
+      responses:
+        '200':
+          description: Resumo institucional e fila de solicitações pendentes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOverviewResponse'
+        '403':
+          description: Requer papel global PLATFORM_ADMIN
+
+  /api/v1/admin/requests/{requestId}/approve:
+    post:
+      tags: [Admin BFF — Campus]
+      summary: Aprova solicitação institucional pendente
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Solicitação aprovada
+        '403':
+          description: Requer papel PLATFORM_ADMIN

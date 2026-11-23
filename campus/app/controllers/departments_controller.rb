@@ -63,6 +63,18 @@ class DepartmentsController < ApplicationController
     render_profile_validation_error(department)
   end
 
+  def destroy
+    return unless require_university_admin
+
+    department = Department.find_by(id: params[:id])
+    return render_problem(:not_found, 'Department not found') unless department
+
+    department.destroy!
+    head :no_content
+  rescue ActiveRecord::InvalidForeignKey
+    render_problem(:conflict, 'Department has linked courses or profiles and cannot be deleted')
+  end
+
   private
 
   def pagination_parameters(fields)

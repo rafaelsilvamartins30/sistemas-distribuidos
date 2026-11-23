@@ -8,7 +8,13 @@ export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 CLUSTER_NAME="${UNIR_KIND_CLUSTER:-unir-local}"
 NAMESPACE="unir"
 INGRESS_PORT="${UNIR_K8S_PORT:-18080}"
+SEED_MODE="${UNIR_SEED_MODE:-demo}"
+if [[ "$SEED_MODE" != "clean" && "$SEED_MODE" != "demo" ]]; then
+  echo "UNIR_SEED_MODE inválido: '$SEED_MODE' (use 'clean' ou 'demo')." >&2
+  exit 1
+fi
 LOCAL_IMAGES_REBUILT=()
+EXISTING_DEPLOYMENTS=()
 
 ensure_kind() {
   if command -v kind >/dev/null 2>&1; then
@@ -59,7 +65,7 @@ create_cluster_if_needed() {
 
   local kind_cfg
   kind_cfg="$(mktemp)"
-  trap 'rm -f "$kind_cfg"' RETURN
+  trap 'rm -f "${kind_cfg:-}"' RETURN
   cat > "$kind_cfg" <<EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -105,7 +111,7 @@ build_and_load_images() {
   local third_party_images=(
     "postgres:16-alpine"
     "mongo:7.0"
-    "rabbitmq:4.4.0-alpine"
+    "rabbitmq:4.4.0-management-alpine"
     "axllent/mailpit:v1.29.5"
     "traefik:v3.2"
     "qdrant/qdrant:v1.12.5"
@@ -139,7 +145,7 @@ build_and_load_images() {
     "unir-admin-web:local"
     "postgres:16-alpine"
     "mongo:7.0"
-    "rabbitmq:4.4.0-alpine"
+    "rabbitmq:4.4.0-management-alpine"
     "axllent/mailpit:v1.29.5"
     "traefik:v3.2"
     "qdrant/qdrant:v1.12.5"
@@ -148,7 +154,8 @@ build_and_load_images() {
   for image in "${all_images[@]}"; do
     local image_was_rebuilt=false
     local rebuilt_image
-    for rebuilt_image in "${LOCAL_IMAGES_REBUILT[@]}"; do
+    # Bash 3.2 (macOS) treats an empty array expansion as unbound with `set -u`.
+    for rebuilt_image in "${LOCAL_IMAGES_REBUILT[@]+"${LOCAL_IMAGES_REBUILT[@]}"}"; do
       if [[ "$rebuilt_image" == "$image" ]]; then
         image_was_rebuilt=true
         break
@@ -184,17 +191,73 @@ restart_rebuilt_deployments() {
     image="${entry%%=*}"
     deployment="${entry#*=}"
     image_was_rebuilt=false
-    for rebuilt_image in "${LOCAL_IMAGES_REBUILT[@]}"; do
+    for rebuilt_image in "${LOCAL_IMAGES_REBUILT[@]+"${LOCAL_IMAGES_REBUILT[@]}"}"; do
       if [[ "$rebuilt_image" == "$image" ]]; then
         image_was_rebuilt=true
         break
       fi
     done
     if [[ "$image_was_rebuilt" == "true" || "$deployment" == "ai-rag" ]]; then
+      if ! deployment_existed_before_apply "$deployment"; then
+        echo "Skipping restart for $deployment: it was created during this run."
+        continue
+      fi
       echo "Restarting $deployment to load rebuilt image/configuration..."
       kubectl -n "$NAMESPACE" rollout restart "deployment/$deployment"
     fi
   done
+}
+
+snapshot_existing_deployments() {
+  EXISTING_DEPLOYMENTS=()
+  local deployment
+  while IFS= read -r deployment; do
+    [[ -n "$deployment" ]] && EXISTING_DEPLOYMENTS+=("$deployment")
+  done < <(kubectl -n "$NAMESPACE" get deployments -o name 2>/dev/null | sed 's|^deployment.apps/||')
+}
+
+deployment_existed_before_apply() {
+  local expected="$1"
+  local deployment
+  for deployment in "${EXISTING_DEPLOYMENTS[@]+"${EXISTING_DEPLOYMENTS[@]}"}"; do
+    if [[ "$deployment" == "$expected" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+diagnose_rollout_failure() {
+  local deployment="$1"
+  local pod
+  local -a pods=()
+
+  echo ""
+  echo "=== Diagnostics for failed deployment/$deployment ===" >&2
+  kubectl -n "$NAMESPACE" get deployment "$deployment" -o wide >&2 || true
+  kubectl -n "$NAMESPACE" get pods -l "app.kubernetes.io/name=$deployment" -o wide >&2 || true
+  kubectl -n "$NAMESPACE" describe deployment "$deployment" >&2 || true
+
+  read -r -a pods <<< "$(kubectl -n "$NAMESPACE" get pods -l "app.kubernetes.io/name=$deployment" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)"
+  for pod in "${pods[@]+"${pods[@]}"}"; do
+    kubectl -n "$NAMESPACE" describe pod "$pod" >&2 || true
+    kubectl -n "$NAMESPACE" logs "$pod" --all-containers=true --tail=80 >&2 || true
+    kubectl -n "$NAMESPACE" logs "$pod" --all-containers=true --previous --tail=80 >&2 || true
+  done
+  kubectl -n "$NAMESPACE" get events --sort-by=.lastTimestamp >&2 || true
+}
+
+wait_for_rollout() {
+  local deployment="$1"
+  local timeout="${2:-240s}"
+  local status
+  if kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout="$timeout"; then
+    return 0
+  else
+    status=$?
+  fi
+  diagnose_rollout_failure "$deployment"
+  return "$status"
 }
 
 apply_namespace_config_and_secrets() {
@@ -296,11 +359,14 @@ provision_keycloak_and_accounts() {
       --uusername "service-account-$RAG_SYNC_CLIENT_ID" --rolename USER
   '
 
-  python3 "$ROOT/scripts/prepare-local-demo-accounts.py"
-  echo "Provisioning the 8 local demo accounts in Kubernetes Keycloak..."
-  python3 - "$ROOT" "$NAMESPACE" <<'PY'
+  python3 "$ROOT/scripts/prepare-local-demo-accounts.py" --mode "$SEED_MODE"
+  echo "Provisioning UNIR accounts (mode: ${SEED_MODE}) in Kubernetes Keycloak..."
+  RAG_SYNC_CLIENT_ID="$RAG_SYNC_CLIENT_ID" \
+    RAG_SYNC_CLIENT_SECRET="$RAG_SYNC_CLIENT_SECRET" \
+    python3 - "$ROOT" "$NAMESPACE" <<'PY'
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -313,7 +379,9 @@ spec.loader.exec_module(prov)
 
 accounts_path = root / "config" / "local-demo-accounts.json"
 data = json.loads(accounts_path.read_text(encoding="utf-8"))
-script = prov.provision_script(data["accounts"])
+rag_client_id = os.environ["RAG_SYNC_CLIENT_ID"]
+rag_client_secret = os.environ["RAG_SYNC_CLIENT_SECRET"]
+script = prov.provision_script(data["accounts"], rag_client_id, rag_client_secret)
 result = subprocess.run(
     ["kubectl", "-n", namespace, "exec", "-i", "deploy/keycloak", "--", "sh", "-s"],
     input=script,
@@ -325,20 +393,16 @@ assigned = dict(line.split("\t", 1) for line in result.stdout.splitlines() if "\
 for username, sub in assigned.items():
     data["accounts"][username]["sub"] = sub
 prov.write_private_json(data)
-print("Keycloak (K8s): 8 local demo accounts provisioned and synchronized.")
+print(f"Keycloak (K8s): {len(assigned)} account(s) provisioned and synchronized.")
 PY
 }
 
 seed_databases() {
-  echo "Seeding Campus database in Kubernetes..."
-  kubectl -n "$NAMESPACE" exec -i deploy/campus -- sh -ec \
+  echo "Seeding Campus database in Kubernetes (mode: ${SEED_MODE})..."
+  tar -C "$ROOT/campus" -cf - db/seeds.rb db/seeders | kubectl -n "$NAMESPACE" exec -i deploy/campus -- tar -C /app -xf -
+  kubectl -n "$NAMESPACE" exec -i deploy/campus -- env "UNIR_SEED_MODE=$SEED_MODE" sh -ec \
     'cat > /tmp/local-demo-accounts.json && chmod 600 /tmp/local-demo-accounts.json && LOCAL_DEMO_ACCOUNTS_FILE=/tmp/local-demo-accounts.json bin/rails db:seed' \
     < "$ROOT/config/local-demo-accounts.json"
-
-  echo "Seeding Engagement database in Kubernetes..."
-  kubectl -n "$NAMESPACE" exec -i deploy/engagement-db -- psql -v ON_ERROR_STOP=1 -U unir -d unir_engagement < "$ROOT/engagement/seed/local-events.sql"
-  kubectl -n "$NAMESPACE" exec -i deploy/engagement-db -- psql -v ON_ERROR_STOP=1 -U unir -d unir_engagement < "$ROOT/engagement/seed/local-opportunities.sql"
-  kubectl -n "$NAMESPACE" exec -i deploy/engagement-db -- psql -v ON_ERROR_STOP=1 -U unir -d unir_engagement < "$ROOT/engagement/seed/local-sports.sql"
 }
 
 rebuild_event_projection() {
@@ -372,18 +436,19 @@ main() {
   create_cluster_if_needed
   build_and_load_images
   apply_namespace_config_and_secrets
+  snapshot_existing_deployments
 
   echo "Applying stateful databases and message broker manifests..."
   kubectl apply -f "$ROOT/infra/k8s/03-databases.yaml"
   kubectl apply -f "$ROOT/infra/k8s/04-rabbitmq-mailpit.yaml"
 
   for deploy in campus-db engagement-db payment-db access-db keycloak-db engagement-read-db rabbitmq mailpit; do
-    kubectl -n "$NAMESPACE" rollout status "deployment/$deploy" --timeout=180s
+    wait_for_rollout "$deploy" 180s
   done
 
   echo "Applying Keycloak manifest..."
   kubectl apply -f "$ROOT/infra/k8s/05-keycloak.yaml"
-  kubectl -n "$NAMESPACE" rollout status deployment/keycloak --timeout=240s
+  wait_for_rollout keycloak 240s
 
   provision_keycloak_and_accounts
 
@@ -396,7 +461,11 @@ main() {
   restart_rebuilt_deployments
 
   for deploy in campus engagement payment access web-bff admin-bff gateway web admin-web traefik-ingress qdrant ai-rag; do
-    kubectl -n "$NAMESPACE" rollout status "deployment/$deploy" --timeout=240s
+    if [[ "$deploy" == "ai-rag" ]]; then
+      wait_for_rollout "$deploy" 600s
+    else
+      wait_for_rollout "$deploy" 240s
+    fi
   done
 
   seed_databases
@@ -404,7 +473,7 @@ main() {
   sync_rag_index
 
   echo ""
-  echo "=== UNIR Kubernetes Cluster Ready ==="
+  echo "=== UNIR Kubernetes Cluster Ready (mode: ${SEED_MODE}) ==="
   kubectl -n "$NAMESPACE" get pods,svc,pvc,ingress
   echo ""
   echo "Endpoints via Ingress:"
@@ -412,6 +481,13 @@ main() {
   echo "  - UNIR Administration: http://admin.localhost:${INGRESS_PORT}"
   echo "  - API Gateway:         http://localhost:${INGRESS_PORT}/api/v1/..."
   echo "  - Keycloak OIDC:       http://localhost:${INGRESS_PORT}/realms/unir/.well-known/openid-configuration"
+  echo ""
+  echo "Contas iniciais (senha padrão: 123):"
+  echo "  - Admin:       admin@gmail.com"
+  if [[ "$SEED_MODE" == "demo" ]]; then
+    echo "  - Professores: professor1@gmail.com .. professor10@gmail.com (10 verificados)"
+    echo "  - Alunos:      aluno1@gmail.com .. aluno40@gmail.com (40 alunos em DCC e DEG)"
+  fi
   echo "Rebuild changed local service images with UNIR_K8S_REBUILD=true before rerunning this script."
 }
 

@@ -56,6 +56,16 @@ class AcademicEntitiesController < ApplicationController
     render_problem(:unprocessable_entity, "Invalid fields: #{entity.errors.attribute_names.uniq.sort.join(', ')}")
   end
 
+  def destroy
+    return unless require_university_admin
+
+    entity = AcademicEntity.find_by(id: params[:id])
+    return render_problem(:not_found, 'Academic entity not found') unless entity
+
+    entity.destroy!
+    head :no_content
+  end
+
   def pagination_parameters
     page = Integer(params.fetch(:page, '0'), 10)
     size = Integer(params.fetch(:size, '20'), 10)

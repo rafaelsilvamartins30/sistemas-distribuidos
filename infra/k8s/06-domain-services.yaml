@@ -291,6 +291,16 @@ spec:
                 configMapKeyRef:
                   name: unir-common-config
                   key: PAYMENT_SIMULATED_CONFIRMATION_ENABLED
+            - name: KEYCLOAK_ISSUER_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: KEYCLOAK_ISSUER_URI
+            - name: KEYCLOAK_JWK_SET_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: KEYCLOAK_JWK_SET_URI
             - name: DB_URL
               valueFrom:
                 secretKeyRef:

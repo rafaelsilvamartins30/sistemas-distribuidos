@@ -41,11 +41,11 @@ public class SecurityConfiguration {
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/me")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/web/university", "/api/v1/web/semesters",
-                                "/api/v1/web/semesters/*", "/api/v1/web/departments", "/api/v1/web/academic-units",
-                                "/api/v1/web/academic-units/*", "/api/v1/web/courses", "/api/v1/web/courses/*",
-                                "/api/v1/web/departments/*", "/api/v1/web/entities", "/api/v1/web/entities/*",
-                                "/api/v1/web/communities", "/api/v1/web/communities/*")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/web/university", "/api/v1/web/users",
+                                "/api/v1/web/semesters", "/api/v1/web/semesters/*", "/api/v1/web/departments",
+                                "/api/v1/web/academic-units", "/api/v1/web/academic-units/*", "/api/v1/web/courses",
+                                "/api/v1/web/courses/*", "/api/v1/web/departments/*", "/api/v1/web/entities",
+                                "/api/v1/web/entities/*", "/api/v1/web/communities", "/api/v1/web/communities/*")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/web/university", "/api/v1/web/academic-units/*",
                                 "/api/v1/web/courses/*", "/api/v1/web/departments/*", "/api/v1/web/entities/*",
@@ -101,13 +101,15 @@ public class SecurityConfiguration {
                                 "/api/v1/web/payments/me")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/web/sports", "/api/v1/web/competitions",
-                                "/api/v1/web/seasons", "/api/v1/web/sports-events/*/*/teams",
+                                "/api/v1/web/seasons", "/api/v1/web/sports-events/*/*/cancel",
+                                "/api/v1/web/sports-events/*/*/teams", "/api/v1/web/sports-events/*/*/teams/join",
                                 "/api/v1/web/sports-events/*/*/free-agents",
                                 "/api/v1/web/sports-events/*/*/matches/generate",
                                 "/api/v1/web/sports-matches/*/checkin-token", "/api/v1/web/sports-matches/*/checkins",
                                 "/api/v1/web/payments/*/confirm")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                        .requestMatchers(HttpMethod.PATCH, "/api/v1/web/sports-matches/*/score")
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/web/sports-matches/*/score",
+                                "/api/v1/web/sports-events/*/*")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/web/events/*/registrations")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
@@ -126,8 +128,20 @@ public class SecurityConfiguration {
                                 "/api/v1/web/attendance/organizer-check-ins/preview",
                                 "/api/v1/web/attendance/organizer-check-ins/confirm")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/me").hasRole(GlobalRoles.PLATFORM_ADMIN)
-                        .anyRequest().denyAll())
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/me", "/api/v1/admin/overview")
+                        .hasRole(GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/admin/academic-units", "/api/v1/admin/departments",
+                                "/api/v1/admin/courses", "/api/v1/admin/semesters", "/api/v1/admin/requests/*/approve",
+                                "/api/v1/admin/requests/*/reject")
+                        .hasRole(GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/admin/university", "/api/v1/admin/academic-units/*",
+                                "/api/v1/admin/departments/*", "/api/v1/admin/entities/*",
+                                "/api/v1/admin/communities/*")
+                        .hasRole(GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/admin/academic-units/*",
+                                "/api/v1/admin/departments/*", "/api/v1/admin/courses/*", "/api/v1/admin/semesters/*",
+                                "/api/v1/admin/entities/*", "/api/v1/admin/communities/*")
+                        .hasRole(GlobalRoles.PLATFORM_ADMIN).anyRequest().denyAll())
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(this.jwtAuthenticationConverter())))
                 .build();
@@ -142,7 +156,7 @@ public class SecurityConfiguration {
 
         CorsConfiguration adminConfiguration = new CorsConfiguration();
         adminConfiguration.setAllowedOrigins(List.of(this.adminWebOrigin));
-        adminConfiguration.setAllowedMethods(List.of("GET", "OPTIONS"));
+        adminConfiguration.setAllowedMethods(List.of("GET", "POST", "PATCH", "DELETE", "OPTIONS"));
         adminConfiguration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
 
         CorsConfiguration adminOverviewConfiguration = new CorsConfiguration();
@@ -161,6 +175,7 @@ public class SecurityConfiguration {
         source.registerCorsConfiguration("/api/v1/users", webConfiguration);
         source.registerCorsConfiguration("/api/v1/web/**", webConfiguration);
         source.registerCorsConfiguration("/api/v1/admin/me", adminConfiguration);
+        source.registerCorsConfiguration("/api/v1/admin/**", adminConfiguration);
         return source;
     }
 

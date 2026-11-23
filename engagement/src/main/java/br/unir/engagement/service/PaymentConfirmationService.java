@@ -83,8 +83,14 @@ public class PaymentConfirmationService {
             return;
         }
         if (registration == null) {
-            if (this.sportsParticipationService != null && this.sportsParticipationService
-                    .confirmSportsPayment(payload.registrationId(), payload.userId())) {
+            if (this.sportsParticipationService != null) {
+                String compensationReason = this.sportsParticipationService.confirmSportsPayment(
+                        payload.registrationId(), payload.eventId(), payload.userId(), payload.amountMinor(),
+                        payload.paidAt());
+                if (compensationReason == null) {
+                    return;
+                }
+                this.recordCompensation(payload, envelope.messageId(), compensationReason);
                 return;
             }
             this.recordCompensation(payload, envelope.messageId(), "REGISTRATION_NOT_FOUND");

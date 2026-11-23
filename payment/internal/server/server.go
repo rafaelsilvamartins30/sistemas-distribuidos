@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -50,6 +49,12 @@ func NewHandlerWithSimulation(db DatabasePinger, confirmer SimulatedPaymentConfi
 
 // NewHandlerWithStore wires user charge listing and optional local/test simulated confirmation.
 func NewHandlerWithStore(db DatabasePinger, reader ChargeReader, confirmer SimulatedPaymentConfirmer) http.Handler {
+	return NewHandlerWithStoreAndVerifier(db, reader, confirmer, nil)
+}
+
+// NewHandlerWithStoreAndVerifier wires user endpoints to an explicit token verifier.
+func NewHandlerWithStoreAndVerifier(db DatabasePinger, reader ChargeReader, confirmer SimulatedPaymentConfirmer,
+	verifier SubjectVerifier) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -75,9 +80,8 @@ func NewHandlerWithStore(db DatabasePinger, reader ChargeReader, confirmer Simul
 
 	if reader != nil {
 		mux.HandleFunc("GET /api/v1/payments/me", func(w http.ResponseWriter, r *http.Request) {
-			userID, ok := extractSubject(r.Header.Get("Authorization"))
+			userID, ok := authenticatedSubject(w, r, verifier)
 			if !ok {
-				writeError(w, http.StatusUnauthorized, "Invalid bearer token")
 				return
 			}
 			items, err := reader.ListChargesForUser(r.Context(), userID)
@@ -100,13 +104,13 @@ func NewHandlerWithStore(db DatabasePinger, reader ChargeReader, confirmer Simul
 
 		if userConfirmer, ok := confirmer.(UserSimulatedPaymentConfirmer); ok {
 			mux.HandleFunc("POST /api/v1/payments/{registrationId}/confirm", func(w http.ResponseWriter, r *http.Request) {
-				userID, ok := extractSubject(r.Header.Get("Authorization"))
+				userID, ok := authenticatedSubject(w, r, verifier)
 				if !ok {
-					writeError(w, http.StatusUnauthorized, "Invalid bearer token")
 					return
 				}
 				handleConfirm(w, r, func(ctx context.Context, regID string, paidAt time.Time) (payment.PaymentConfirmedEvent, error) {
-					return userConfirmer.ConfirmSimulatedPaymentForUser(ctx, regID, userID, paidAt)
+					// PaidAt is set by Payment's clock; callers must not backdate a simulated payment.
+					return userConfirmer.ConfirmSimulatedPaymentForUser(ctx, regID, userID, time.Time{})
 				})
 			})
 		}
@@ -182,24 +186,24 @@ func hasBearerToken(authorization string) bool {
 	return len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") && parts[1] != ""
 }
 
-func extractSubject(authorization string) (string, bool) {
-	parts := strings.Fields(authorization)
+func authenticatedSubject(w http.ResponseWriter, r *http.Request, verifier SubjectVerifier) (string, bool) {
+	if verifier == nil {
+		writeError(w, http.StatusServiceUnavailable, "Token verification is not configured")
+		return "", false
+	}
+	parts := strings.Fields(r.Header.Get("Authorization"))
 	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		writeError(w, http.StatusUnauthorized, "Invalid bearer token")
 		return "", false
 	}
-	segments := strings.Split(parts[1], ".")
-	if len(segments) != 3 {
+	userID, err := verifier.VerifySubject(r.Context(), parts[1])
+	if err == nil {
+		return userID, true
+	}
+	if errors.Is(err, ErrIdentityProviderUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "Token verification is unavailable")
 		return "", false
 	}
-	payloadBytes, err := base64.RawURLEncoding.DecodeString(segments[1])
-	if err != nil {
-		return "", false
-	}
-	var claims struct {
-		Sub string `json:"sub"`
-	}
-	if err := json.Unmarshal(payloadBytes, &claims); err != nil || strings.TrimSpace(claims.Sub) == "" {
-		return "", false
-	}
-	return claims.Sub, true
+	writeError(w, http.StatusUnauthorized, "Invalid bearer token")
+	return "", false
 }

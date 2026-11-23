@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { BrandMark } from "../components/BrandMark";
 import { Icon, type IconName } from "../components/Icon";
+import { RagAssistantWidget } from "../components/RagAssistantWidget";
 import { getUniversity } from "../services/campus";
 import { getNotifications } from "../services/campusSocial";
 
@@ -156,6 +157,7 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
           <Outlet context={{ keycloak }} />
         </main>
       </div>
+      <RagAssistantWidget keycloak={keycloak} />
     </div>
   );
 }

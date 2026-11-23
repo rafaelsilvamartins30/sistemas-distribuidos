@@ -7,9 +7,9 @@ from dataclasses import dataclass
 
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 
-# Reference pricing for Gemini 2.5 Flash (USD per 1,000,000 tokens).
+# Reference pricing for Gemini Flash (USD per 1,000,000 tokens).
 GEMINI_FLASH_INPUT_USD_PER_1M = 0.15
 GEMINI_FLASH_OUTPUT_USD_PER_1M = 0.60
 
@@ -25,7 +25,7 @@ class RagConfig:
     embedding_dimension: int = DEFAULT_EMBEDDING_DIMENSION
     gemini_api_key: str | None = None
     gemini_model: str = DEFAULT_GEMINI_MODEL
-    gemini_timeout_seconds: float = 8.0
+    gemini_timeout_seconds: float = 20.0
     gemini_max_retries: int = 2
     gemini_retry_base_delay_seconds: float = 0.25
     top_k: int = 5
@@ -59,7 +59,7 @@ class RagConfig:
             ),
             gemini_api_key=gemini_key,
             gemini_model=os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip(),
-            gemini_timeout_seconds=float(os.getenv("GEMINI_TIMEOUT_SECONDS", "8.0")),
+            gemini_timeout_seconds=float(os.getenv("GEMINI_TIMEOUT_SECONDS", "20.0")),
             gemini_max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "2")),
             gemini_retry_base_delay_seconds=float(
                 os.getenv("GEMINI_RETRY_BASE_DELAY_SECONDS", "0.25")
