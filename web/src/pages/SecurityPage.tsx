@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { Icon } from "../components/Icon";
@@ -35,7 +35,7 @@ export function SecurityPage() {
   const [sessionsError, setSessionsError] = useState("");
   const [revoking, setRevoking] = useState("");
 
-  async function loadSecurityData() {
+  const loadSecurityData = useCallback(async () => {
     setTotpStatus("loading");
     setTotpError("");
     setSessionsLoading(true);
@@ -54,11 +54,11 @@ export function SecurityPage() {
     if (sessionsResult.status === "fulfilled") setSessions(sessionsResult.value);
     else setSessionsError(accountError(sessionsResult.reason));
     setSessionsLoading(false);
-  }
+  }, [keycloak]);
 
   useEffect(() => {
     void loadSecurityData();
-  }, [keycloak]);
+  }, [loadSecurityData]);
 
   function startAction(action: "CONFIGURE_TOTP" | "UPDATE_PASSWORD" | "UPDATE_EMAIL") {
     const redirectUri = `${window.location.origin}/seguranca`;

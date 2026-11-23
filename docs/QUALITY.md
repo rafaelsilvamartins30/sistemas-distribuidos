@@ -45,17 +45,17 @@ make security
 
 | Alvo / Componente | Ferramentas executadas | O que pega |
 | --- | --- | --- |
-| **`web`** | ESLint, Prettier, `tsc`, `node --test`, `vite build` | Erros de lint/React hooks, formatação, tipagem TypeScript, testes unitários de serviços/componentes e empacotamento de produção. |
+| **`web`** | ESLint (`typescript-eslint` + `eslint-plugin-react-hooks`), Prettier, `tsc`, `node --test`, `vite build` | Erros de lint, regras de Hooks do React (`rules-of-hooks` / `exhaustive-deps`), formatação, tipagem TypeScript, testes unitários e empacotamento. |
 | **`web-bff`** | ESLint, Prettier, `tsc`, `node --test` | Lint, formatação, tipagem e testes das rotas de composição/proxy do BFF Web. |
-| **`admin-web`** | ESLint, Prettier, `tsc`, `node --test`, `vite build` | Lint, formatação, tipagem, testes e build do painel administrativo. |
+| **`admin-web`** | ESLint (`typescript-eslint` + `eslint-plugin-react-hooks`), Prettier, `tsc`, `node --test`, `vite build` | Lint, regras de Hooks do React, formatação, tipagem, testes e build do painel administrativo. |
 | **`admin-bff`** | ESLint, Prettier, `tsc`, `node --test` | Lint, formatação, tipagem e testes de agregação/encaminhamento administrativo. |
-| **`keycloak-theme`** | ESLint, Prettier, `keycloakify` (`build-keycloak-theme`) | Lint, formatação e empacotamento do JAR do tema UNIR para Keycloak. |
+| **`keycloak-theme`** | ESLint (`typescript-eslint` + `eslint-plugin-react-hooks`), Prettier, `keycloakify` (`build-keycloak-theme`) | Lint, regras de Hooks do React, formatação e empacotamento do JAR do tema UNIR para Keycloak. |
 | **`gateway`** | Maven `verify`: Spotless, Checkstyle, JUnit/MockMvc, ArchUnit, PMD, SpotBugs | Formatação Java, estilo, testes de roteamento/JWT/CORS/RBAC, regras arquiteturais e análise estática de bugs. |
 | **`engagement`** | Maven `verify`: Spotless, Checkstyle, JUnit/SpringBootTest (H2), ArchUnit, PMD, SpotBugs | Formatação, estilo, testes de domínio (eventos, oportunidades, esportes, Outbox, Saga/compensação, projeção CQRS), limites de camadas e análise estática. |
-| **`campus`** | RuboCop (`rubocop-rails`), Brakeman, `rails zeitwerk:check`, `rails test` | Estilo/métricas Ruby, vulnerabilidades de segurança Rails, autoloading e suíte completa de modelos/controllers/seeders. |
-| **`payment`** | `gofmt`, `go vet`, `golangci-lint`, `go test`, `go build` | Formatação Go, bugs estáticos, lint, testes de Event Store/projeção/Outbox/estorno e compilação. |
-| **`access`** | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --locked` | Formatação Rust, warnings/idiomas Clippy e testes de tickets, QR hash, presença e consumidores RabbitMQ. |
-| **`ai-rag`** | `uv sync`, `ruff check`, `ruff format --check`, `pytest` | Lint e formatação Python, validação JWT/auth, ingestão idempotente no Qdrant, timeout/retry/fallback degradado do Gemini e avaliação acadêmica. |
+| **`campus`** | RuboCop (`plugins: rubocop-rails`), Brakeman, `rails zeitwerk:check`, `rails test` | Estilo/métricas Ruby, vulnerabilidades de segurança Rails, autoloading e suíte completa de modelos/controllers/seeders. |
+| **`payment`** | `gofmt`, `go vet`, `golangci-lint`, `go test -race`, `go build` | Formatação Go, bugs estáticos, lint, detecção de *data races* em concorrência, testes de Event Store/projeção/Outbox/estorno e compilação. |
+| **`access`** | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --locked` (+ integração PostgreSQL no CI) | Formatação Rust, warnings/idiomas Clippy e testes de tickets, QR hash, presença, persistência e rollback em PostgreSQL. |
+| **`ai-rag`** | `uv sync`, `ruff check` (com regras de segurança `S`/Bandit), `ruff format --check`, `mypy src`, `pytest` | Lint, segurança estática, formatação, checagem estrita de tipos Python (`mypy`), validação JWT/auth, ingestão Qdrant e fallback degradado do Gemini. |
 
 ---
 

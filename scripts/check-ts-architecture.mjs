@@ -21,7 +21,7 @@ const projectRoots = [
   path: path.join(repositoryRoot, name),
 }));
 const sourceProjects = [
-  { name: "web", paths: ["web/src", "web/vite.config.ts"] },
+  { name: "web", paths: ["web/src", "web/test", "web/vite.config.ts"] },
   { name: "keycloak-theme", paths: ["keycloak-theme/src", "keycloak-theme/vite.config.ts"] },
   { name: "web-bff", paths: ["web-bff/src", "web-bff/test"] },
 ];
@@ -33,7 +33,7 @@ for (const name of ["admin-bff", "admin-web"]) {
       throw error;
     })
   ) {
-    sourceProjects.push({ name, paths: [`${name}/src`] });
+    sourceProjects.push({ name, paths: [`${name}/src`, `${name}/test`] });
     if (name === "admin-bff") bffProjects.push(name);
   }
 }

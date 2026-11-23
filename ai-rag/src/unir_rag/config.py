@@ -33,7 +33,7 @@ class RagConfig:
     sync_token: str | None = None
     keycloak_issuer: str = "http://localhost:18080/realms/unir"
     keycloak_jwks_url: str = "http://localhost:18080/realms/unir/protocol/openid-connect/certs"
-    keycloak_token_url: str = "http://localhost:18080/realms/unir/protocol/openid-connect/token"
+    keycloak_token_url: str = "http://localhost:18080/realms/unir/protocol/openid-connect/token"  # noqa: S105
     user_client_ids: frozenset[str] = frozenset({"unir-web"})
     sync_client_id: str = "unir-rag-sync"
     sync_client_secret: str | None = None

@@ -5,6 +5,8 @@ class SemestersController < ApplicationController
   include KeycloakAuthenticated
   include InstitutionalProfileAuthorization
 
+  SEMESTER_FIELDS = %w[name startOn endOn].freeze
+
   wrap_parameters false
 
   def index
@@ -14,8 +16,7 @@ class SemestersController < ApplicationController
     semesters = Semester.where(university_id: University::SINGLETON_ID).order(starts_on: :desc, name: :desc)
     total = semesters.count
     items = semesters.offset(page * size).limit(size).map { |semester| semester_response(semester) }
-    render json: { items: items, page: page, size: size, totalElements: total,
-                   totalPages: (total.to_f / size).ceil }
+    render json: { items: items, page: page, size: size, totalElements: total, totalPages: (total.to_f / size).ceil }
   end
 
   def show
@@ -27,30 +28,31 @@ class SemestersController < ApplicationController
 
   def create
     university = university_for_admin
-    return unless university
-
-    payload = semester_payload
-    return unless payload
+    return unless university && (payload = semester_payload)
 
     semester = university.semesters.new(id: SecureRandom.uuid, name: payload['name'],
                                         starts_on: payload['startOn'], ends_on: payload['endOn'])
-    return render(json: semester_response(semester), status: :created) if semester.save
-
-    render_validation_error(semester)
+    save_semester(semester, status: :created)
   end
 
   def update
     university = university_for_admin
-    return unless university
+    return unless university && (semester = find_semester(university)) && (payload = semester_payload)
 
-    semester = find_semester(university)
-    return unless semester
-
-    payload = semester_payload
-    return unless payload
-
-    assign_semester_attributes(semester, payload)
+    semester.assign_attributes(name: payload.fetch('name', semester.name),
+                               starts_on: payload.fetch('startOn', semester.starts_on),
+                               ends_on: payload.fetch('endOn', semester.ends_on))
     save_semester(semester)
+  end
+
+  def destroy
+    return unless university_for_admin
+
+    semester = Semester.find_by(id: params[:id])
+    return render_problem(:not_found, 'Semester not found') unless semester
+
+    semester.destroy!
+    head :no_content
   end
 
   private
@@ -67,29 +69,21 @@ class SemestersController < ApplicationController
 
   def semester_payload
     payload = request.request_parameters
-    return invalid_semester_body unless payload.is_a?(Hash)
+    unless payload.is_a?(Hash)
+      render_problem(:bad_request, 'Invalid request body')
+      return nil
+    end
 
     invalid = invalid_semester_payload_fields(payload)
-    return invalid_semester_fields(invalid) unless invalid.empty?
+    return payload if invalid.empty?
 
-    payload
-  end
-
-  def invalid_semester_body
-    render_problem(:bad_request, 'Invalid request body')
-  end
-
-  def invalid_semester_fields(fields)
-    render_problem(:bad_request, "Invalid fields: #{fields.uniq.sort.join(', ')}")
+    render_problem(:bad_request, "Invalid fields: #{invalid.uniq.sort.join(', ')}")
+    nil
   end
 
   def invalid_semester_payload_fields(payload)
-    invalid = payload.keys - %w[name startOn endOn]
-    invalid.concat(payload.filter_map { |key, value| key if semester_field?(key) && !value.is_a?(String) })
-  end
-
-  def semester_field?(key)
-    %w[name startOn endOn].include?(key)
+    invalid = payload.keys - SEMESTER_FIELDS
+    invalid.concat(payload.filter_map { |key, value| key if SEMESTER_FIELDS.include?(key) && !value.is_a?(String) })
   end
 
   def find_semester(university)
@@ -100,33 +94,17 @@ class SemestersController < ApplicationController
     nil
   end
 
-  def assign_semester_attributes(semester, payload)
-    semester.assign_attributes(name: payload.fetch('name', semester.name),
-                               starts_on: payload.fetch('startOn', semester.starts_on),
-                               ends_on: payload.fetch('endOn', semester.ends_on))
-  end
+  def save_semester(semester, status: :ok)
+    return render(json: semester_response(semester), status: status) if semester.save
 
-  def save_semester(semester)
-    return render(json: semester_response(semester)) if semester.save
-
-    render_validation_error(semester)
-  end
-
-  def destroy
-    return unless university_for_admin
-
-    semester = Semester.find_by(id: params[:id])
-    return render_problem(:not_found, 'Semester not found') unless semester
-
-    semester.destroy!
-    head :no_content
+    render_problem(:unprocessable_entity, "Invalid fields: #{semester.errors.attribute_names.uniq.sort.join(', ')}")
   end
 
   def university_for_admin
     university = University.current
     unless university
       render_problem(:not_found, 'University not found')
-      return
+      return nil
     end
     return university if university.administrator_user_ids.include?(current_subject)
 
@@ -136,9 +114,5 @@ class SemestersController < ApplicationController
 
   def semester_response(semester)
     { id: semester.id, name: semester.name, startOn: semester.starts_on, endOn: semester.ends_on }
-  end
-
-  def render_validation_error(semester)
-    render_problem(:unprocessable_entity, "Invalid fields: #{semester.errors.attribute_names.uniq.sort.join(', ')}")
   end
 end
