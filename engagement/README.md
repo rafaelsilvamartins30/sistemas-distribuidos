@@ -31,6 +31,7 @@ Serviço de domínio responsável por **Eventos**, **Inscrições**, **Oportunid
 - **Oportunidades:** `GET/POST /api/v1/opportunities`, `GET/PATCH/DELETE /api/v1/opportunities/{opportunityId}`, `GET /api/v1/opportunities/publisher-contexts`, `GET /api/v1/opportunities/managed`
 - **Esportes:** `/api/v1/sports`, `/api/v1/competitions`, `/api/v1/seasons`, `/api/v1/sports-events/{contextType}/{contextId}/overview|teams|teams/join|free-agents|matches/generate|cancel`, `PATCH /api/v1/sports-events/{contextType}/{contextId}`, `PATCH /api/v1/sports-matches/{matchId}/score`, `POST /api/v1/sports-matches/{matchId}/checkin-token|checkins`
 - **Contratos detalhados:**
+  - [Saga Coreografada (Pagamentos, Confirmação e Estorno)](../docs/SAGA.md)
   - [Projeção CQRS de Eventos](../docs/contracts/event-projection-v1.md)
   - [Esportes v1](../docs/contracts/sports-v1.md)
   - [Oportunidades v1](../docs/contracts/opportunities-v1.md)

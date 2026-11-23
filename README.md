@@ -87,6 +87,7 @@ Todas as variáveis lidas pelo bootstrap (`scripts/k8s-up.sh`) estão declaradas
 ## Documentação de arquitetura, infraestrutura e qualidade
 
 - **[Arquitetura do Sistema (`docs/ARCHITECTURE.md`)](docs/ARCHITECTURE.md)** — diagramas de comunicação HTTP, mensageria (Outbox/Saga/CQRS), Assistente RAG e limites entre serviços.
+- **[Saga Coreografada (`docs/SAGA.md`)](docs/SAGA.md)** — fluxo completo de inscrições pagas, pagamento PIX simulado, emissão de tickets e compensações de estorno (`REFUNDED`) via Outbox + RabbitMQ.
 - **[Infraestrutura Kubernetes (`docs/KUBERNETES.md`)](docs/KUBERNETES.md)** — topologia do cluster `kind`, manifests `00`–`10`, PVCs, Secrets, o que está implementado e o que está fora de escopo (TLS, HPA, NetworkPolicy, limits).
 - **[Qualidade e Pipeline (`docs/QUALITY.md`)](docs/QUALITY.md)** — como rodar a pipeline de qualidade (`make ci`) e o que cada check valida em cada serviço.
 - **[Contratos HTTP e de Mensageria (`docs/contracts/`)](docs/contracts/)** e **[Especificação OpenAPI (`docs/api/openapi.yaml`)](docs/api/openapi.yaml)**.

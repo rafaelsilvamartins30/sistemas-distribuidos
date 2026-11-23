@@ -25,6 +25,7 @@ Serviço de domínio responsável por **credenciamento, emissão de tickets, QR 
 
 - Consulta do ticket do participante, emissão de QR individual, leitura/confirmação de presença pelo organizador ou por código do participante e histórico de tickets (expostos ao navegador via `Gateway → Web BFF`).
 - **Contratos detalhados:**
+  - [Saga Coreografada (Pagamentos, Confirmação e Estorno)](../docs/SAGA.md)
   - [Attendance & Check-in v1](../docs/contracts/attendance-check-in-v1.md)
   - [RegistrationConfirmed v1](../docs/contracts/registration-confirmed-v1.md)
   - [RegistrationCancelled v1](../docs/contracts/registration-cancelled-v1.md)

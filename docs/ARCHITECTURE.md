@@ -41,7 +41,7 @@ flowchart LR
 
 ## 2. Comunicação assíncrona: Outbox, Saga de Pagamento/Estorno, CQRS e Tickets
 
-Toda mudança crítica que cruza fronteiras de serviço grava o estado de negócio e o evento de integração **na mesma transação PostgreSQL** (padrão *Transactional Outbox*). Publicadores dedicados enviam as mensagens ao exchange `unir.events` no **RabbitMQ** com confirmação de roteamento, e cada consumidor faz deduplicação idempotente antes de confirmar o ACK.
+Toda mudança crítica que cruza fronteiras de serviço grava o estado de negócio e o evento de integração **na mesma transação PostgreSQL** (padrão *Transactional Outbox*). Publicadores dedicados enviam as mensagens ao exchange `unir.events` no **RabbitMQ** com confirmação de roteamento, e cada consumidor faz deduplicação idempotente antes de confirmar o ACK. Veja o detalhamento completo dos fluxos felizes, falhas e compensações em **[docs/SAGA.md](SAGA.md)**.
 
 ```mermaid
 sequenceDiagram

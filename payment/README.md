@@ -29,6 +29,7 @@ Serviço de domínio responsável pelo **ciclo de vida de cobranças e estornos*
 - `GET /api/v1/payments/me` — lista as cobranças do titular do JWT (validação RS256 completa).
 - `POST /api/v1/payments/{registrationId}/confirm` — confirma cobrança PIX simulada do próprio usuário (usa o relógio do servidor para `paidAt`).
 - **Contratos detalhados:**
+  - [Saga Coreografada (Pagamentos, Confirmação e Estorno)](../docs/SAGA.md)
   - [RegistrationPaymentRequested v1](../docs/contracts/registration-payment-requested-v1.md)
   - [PaymentConfirmed v1](../docs/contracts/payment-confirmed-v1.md)
   - [Fluxo de Estorno v1](../docs/contracts/refund-flow-v1.md)
