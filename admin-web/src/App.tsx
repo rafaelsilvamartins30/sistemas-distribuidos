@@ -274,7 +274,9 @@ export function App({ keycloak, keycloakReady }: AppProps) {
       await updateProfileAdministrators(env.gatewayUrl, token, activeTarget.kind, activeTarget.id, nextIds);
       setSelectedUserId("");
       setManualUserId("");
-      setActionMessage(`Permissão concedida em "${activeTarget.label}". Os botões de gestão já estão ativos para esse usuário no Web.`);
+      setActionMessage(
+        `Permissão concedida em "${activeTarget.label}". Os botões de gestão já estão ativos para esse usuário no Web.`,
+      );
       await reloadOverview(token);
     } catch (error) {
       setOverviewError(error instanceof Error ? error.message : "Não foi possível atualizar as permissões.");
@@ -342,12 +344,7 @@ export function App({ keycloak, keycloakReady }: AppProps) {
     setActionMessage("");
     setOverviewError("");
     try {
-      await deleteCampusStructure(
-        env.gatewayUrl,
-        token,
-        activeTarget.kind as DeletableStructureKind,
-        activeTarget.id,
-      );
+      await deleteCampusStructure(env.gatewayUrl, token, activeTarget.kind as DeletableStructureKind, activeTarget.id);
       setPermTargetKey("university:root");
       setActionMessage(`Estrutura "${activeTarget.label}" apagada com sucesso.`);
       await reloadOverview(token);
@@ -489,12 +486,7 @@ export function App({ keycloak, keycloakReady }: AppProps) {
                       <div className="admin-form-row">
                         <label>
                           <span>Nome da universidade</span>
-                          <input
-                            type="text"
-                            required
-                            value={uniName}
-                            onChange={(e) => setUniName(e.target.value)}
-                          />
+                          <input type="text" required value={uniName} onChange={(e) => setUniName(e.target.value)} />
                         </label>
                         <label>
                           <span>Sigla</span>
@@ -517,11 +509,7 @@ export function App({ keycloak, keycloakReady }: AppProps) {
                       </div>
                       <label>
                         <span>Descrição institucional</span>
-                        <input
-                          type="text"
-                          value={uniDescription}
-                          onChange={(e) => setUniDescription(e.target.value)}
-                        />
+                        <input type="text" value={uniDescription} onChange={(e) => setUniDescription(e.target.value)} />
                       </label>
                       <div className="admin-form-actions">
                         <button type="button" className="btn-secondary" onClick={() => setEditingUniversity(false)}>

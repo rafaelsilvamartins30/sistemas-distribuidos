@@ -809,8 +809,10 @@ export function CommunitySpacePanel({
     } finally {
       setLoading(false);
     }
-  }, [communityId, reload, token]);
-  useEffect(() => void load(), [load]);
+  }, [communityId, token]);
+  useEffect(() => {
+    if (reload >= 0) void load();
+  }, [load, reload]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

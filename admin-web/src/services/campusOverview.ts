@@ -90,12 +90,7 @@ export interface CampusOverview {
 
 export type PermissionTargetKind = "university" | "academic-units" | "departments" | "entities" | "communities";
 export type DeletableStructureKind =
-  | "academic-units"
-  | "departments"
-  | "courses"
-  | "semesters"
-  | "entities"
-  | "communities";
+  "academic-units" | "departments" | "courses" | "semesters" | "entities" | "communities";
 
 export class CampusOverviewError extends Error {
   constructor(

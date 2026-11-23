@@ -132,8 +132,10 @@ export function createServer(options: ServerOptions = {}) {
   server.patch<{ Params: { unitId: string } }>("/api/v1/admin/academic-units/:unitId", async (request, reply) =>
     forwardToCampus(request, reply, `/academic-units/${encodeURIComponent(request.params.unitId)}`, "PATCH"),
   );
-  server.patch<{ Params: { departmentId: string } }>("/api/v1/admin/departments/:departmentId", async (request, reply) =>
-    forwardToCampus(request, reply, `/departments/${encodeURIComponent(request.params.departmentId)}`, "PATCH"),
+  server.patch<{ Params: { departmentId: string } }>(
+    "/api/v1/admin/departments/:departmentId",
+    async (request, reply) =>
+      forwardToCampus(request, reply, `/departments/${encodeURIComponent(request.params.departmentId)}`, "PATCH"),
   );
   server.patch<{ Params: { entityId: string } }>("/api/v1/admin/entities/:entityId", async (request, reply) =>
     forwardToCampus(request, reply, `/entities/${encodeURIComponent(request.params.entityId)}`, "PATCH"),
@@ -159,10 +161,8 @@ export function createServer(options: ServerOptions = {}) {
   server.delete<{ Params: { entityId: string } }>("/api/v1/admin/entities/:entityId", async (request, reply) =>
     forwardToCampus(request, reply, `/entities/${encodeURIComponent(request.params.entityId)}`, "DELETE"),
   );
-  server.delete<{ Params: { communityId: string } }>(
-    "/api/v1/admin/communities/:communityId",
-    async (request, reply) =>
-      forwardToCampus(request, reply, `/communities/${encodeURIComponent(request.params.communityId)}`, "DELETE"),
+  server.delete<{ Params: { communityId: string } }>("/api/v1/admin/communities/:communityId", async (request, reply) =>
+    forwardToCampus(request, reply, `/communities/${encodeURIComponent(request.params.communityId)}`, "DELETE"),
   );
 
   server.post<{ Params: { requestId: string } }>("/api/v1/admin/requests/:requestId/approve", async (request, reply) =>

@@ -9,17 +9,8 @@ class UsersController < ApplicationController
   before_action :authenticate_keycloak!
 
   def index
-    scope = UserProfile.order(:name)
-    query = params[:q].to_s.strip
-    if query.present?
-      pattern = "%#{ActiveRecord::Base.sanitize_sql_like(query)}%"
-      scope = scope.where('name ILIKE :q OR registration_code ILIKE :q', q: pattern)
-    end
-    profiles = scope.limit(200).map do |profile|
-      { id: profile.id, keycloakUserId: profile.keycloak_user_id, name: profile.name,
-        registrationCode: profile.registration_code, userType: profile.user_type }
-    end
-    render json: { items: profiles }
+    items = directory_scope.limit(200).map { |profile| directory_item(profile) }
+    render json: { items: items }
   end
 
   def create
@@ -111,6 +102,20 @@ class UsersController < ApplicationController
     end
 
     render_invalid_profile(profile)
+  end
+
+  def directory_scope
+    scope = UserProfile.order(:name)
+    query = params[:q].to_s.strip
+    return scope if query.blank?
+
+    pattern = "%#{ActiveRecord::Base.sanitize_sql_like(query)}%"
+    scope.where('name ILIKE :q OR registration_code ILIKE :q', q: pattern)
+  end
+
+  def directory_item(profile)
+    { id: profile.id, keycloakUserId: profile.keycloak_user_id, name: profile.name,
+      registrationCode: profile.registration_code, userType: profile.user_type }
   end
 
   def render_create_conflict

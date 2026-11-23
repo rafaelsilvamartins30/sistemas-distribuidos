@@ -207,6 +207,15 @@ jobs:
       - name: Install Rust toolchain
         if: matrix.component == 'access'
         run: rustup toolchain install 1.94.0 --profile minimal --component rustfmt,clippy
+      - uses: actions/setup-python@v5
+        if: matrix.component == 'ai-rag'
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+        if: matrix.component == 'ai-rag'
+        with:
+          version: "0.13.9"
+          enable-cache: true
       - name: Start isolated PostgreSQL for Access integration tests
         if: matrix.component == 'access'
         run: |

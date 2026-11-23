@@ -462,7 +462,7 @@ export function SportsDetailPage({ kind }: SportsDetailPageProps) {
       setSelectedRound(defaultRnd);
       setAdminRound(defaultRnd);
     }
-  }, [item, overview, phase, matches.length]);
+  }, [item, overview, phase, matches]);
 
   const myTeam = useMemo(
     () =>
