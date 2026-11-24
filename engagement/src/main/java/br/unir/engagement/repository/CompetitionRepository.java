@@ -33,6 +33,10 @@ public interface CompetitionRepository extends JpaRepository<Competition, UUID> 
             @Param("organizerId") UUID organizerId, @Param("targetTeamCount") Integer targetTeamCount,
             Pageable pageable);
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select event from Competition event where event.id = :id")
+    Optional<Competition> lockById(@Param("id") UUID id);
+
     @EntityGraph(attributePaths = "sport")
     Optional<Competition> findById(UUID id);
 }

@@ -14,7 +14,7 @@ class InstitutionalProfilePostsController < ApplicationController
 
     term = profile_post_term
     return unless term
-    return unless valid_profile_post_filters?(term)
+    return unless valid_profile_post_term?(term)
 
     render_paginated(profile_post_scope(type, profile, term)) do |post|
       profile_post_response(post)
@@ -56,29 +56,17 @@ class InstitutionalProfilePostsController < ApplicationController
     term.presence
   end
 
-  def valid_profile_post_filters?(term)
+  def valid_profile_post_term?(term)
     unless term.is_a?(String) && term.length <= 32
       render_problem(:bad_request, 'Invalid term')
       return false
     end
-    return true unless params.key?(:includeExpired)
-    return true if %w[true false].include?(params[:includeExpired])
-
-    render_problem(:bad_request, 'includeExpired must be true or false')
-    false
+    true
   end
 
   def profile_post_scope(type, profile, term)
     scope = FeedPost.where(owner_type: type, owner_id: profile.id, term: term, archived_at: nil)
-    scope = visible_current_term_posts(scope, term)
     scope.includes(:poll).order(created_at: :desc, id: :desc)
-  end
-
-  def visible_current_term_posts(scope, term)
-    current_term = University.current&.current_term
-    return scope unless term == current_term && params[:includeExpired] != 'true'
-
-    scope.where('available_until IS NULL OR available_until >= ?', Time.current)
   end
 
   def profile_post_response(post)

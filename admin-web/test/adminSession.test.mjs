@@ -61,6 +61,8 @@ test("fetchAdminProfile throws AdminApiError with status 403 when Gateway denies
     (error) => {
       assert.equal(error instanceof AdminApiError, true);
       assert.equal(error.status, 403);
+      assert.equal(error.message, "Você não tem permissão para acessar este painel.");
+      assert.equal(error.message.includes("PLATFORM_ADMIN"), false);
       return true;
     },
   );

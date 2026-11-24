@@ -15,6 +15,7 @@ import br.unir.engagement.dto.MySportsEnrollmentResponse;
 import br.unir.engagement.dto.MySportsEnrollmentsResponse;
 import br.unir.engagement.dto.MySportsMatchResponse;
 import br.unir.engagement.dto.MySportsMatchesResponse;
+import br.unir.engagement.dto.PaymentReferenceResponse;
 import br.unir.engagement.dto.RecordSportsMatchScoreRequest;
 import br.unir.engagement.dto.RegisterFreeAgentRequest;
 import br.unir.engagement.dto.RegistrationCancelledByEventPayload;
@@ -22,6 +23,7 @@ import br.unir.engagement.dto.RegistrationPaymentRequestedPayload;
 import br.unir.engagement.dto.SeasonResponse;
 import br.unir.engagement.dto.SportResponse;
 import br.unir.engagement.dto.SportsEventOverviewResponse;
+import br.unir.engagement.dto.SportsStandingsResponse;
 import br.unir.engagement.dto.SportsFreeAgentRegistrationResponse;
 import br.unir.engagement.dto.SportsFreeAgentResponse;
 import br.unir.engagement.dto.SportsMatchCheckInRequest;
@@ -53,12 +55,13 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Clock;
+import java.time.DayOfWeek;
+import java.time.ZoneId;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -78,7 +81,6 @@ public class SportsParticipationService {
     private static final Set<String> ALLOWED_SPORTS_ORGANIZERS = Set.of("UNIVERSITY", "ACADEMIC_UNIT", "DEPARTMENT",
             "ACADEMIC_ENTITY", "PROFESSOR");
     private static final Set<String> ALLOWED_SKILL_LEVELS = Set.of("COMPETITIVE", "RECREATIONAL");
-    private static final Set<String> ALLOWED_TIE_BREAKERS = Set.of("SCORE_DIFFERENCE", "WINS", "HEAD_TO_HEAD");
     private static final String CONTEXT_COMPETITION = "COMPETITION";
     private static final String CONTEXT_SEASON = "SEASON";
     private static final String STATUS_PENDING_PAYMENT = "PENDING_PAYMENT";
@@ -89,7 +91,6 @@ public class SportsParticipationService {
     private static final Duration SPORTS_PAYMENT_WINDOW = Duration.ofMinutes(15);
     private static final Duration SPORTS_RESERVATION_WINDOW = Duration.ofMinutes(20);
     private static final Duration TEAM_INVITE_WINDOW = Duration.ofHours(24);
-    private static final String DEFAULT_LOCATION = "Ginásio Poliesportivo UFLA";
 
     private final SportRepository sportRepository;
     private final CompetitionRepository competitionRepository;
@@ -183,21 +184,20 @@ public class SportsParticipationService {
         String skillLevel = validateSkillLevel(request.skillLevel());
         EventOrganizerContext organizer = requireAuthorizedOrganizer(request.organizerType(), request.organizerId(),
                 bearerToken);
-        int targetTeamCount = request.targetTeamCount() == null ? 16 : request.targetTeamCount();
-        if (targetTeamCount != 16 && targetTeamCount != 32) {
-            throw badRequest("targetTeamCount must be 16 or 32 for competitions");
+        int targetTeamCount = request.targetTeamCount() == null ? 32 : request.targetTeamCount();
+        if (targetTeamCount != 32) {
+            throw badRequest("targetTeamCount must be 32 for competitions");
         }
         int rosterMin = request.rosterMin() == null ? sport.getMinimumRoster() : request.rosterMin();
         int rosterMax = request.rosterMax() == null ? sport.getMaximumRoster() : request.rosterMax();
         validateRosterRange(rosterMin, rosterMax);
-        String[] tieBreakers = validateTieBreakers(request.tieBreakers());
         long teamPrice = validatePrice(request.teamEntryPrice(), "teamEntryPrice");
         long freeAgentPrice = validatePrice(request.freeAgentPrice(), "freeAgentPrice");
         Instant deadline = requireDeadline(request.registrationDeadline());
 
         Competition competition = this.competitionRepository.save(new Competition(UUID.randomUUID(), title, sport,
-                skillLevel, organizer.organizerType(), organizer.organizerId(), new UUID[0], targetTeamCount, rosterMin,
-                rosterMax, tieBreakers, teamPrice, freeAgentPrice, deadline, null, "OPEN", "GROUPS_KNOCKOUT"));
+                skillLevel, organizer.organizerType(), organizer.organizerId(), targetTeamCount, rosterMin, rosterMax,
+                teamPrice, freeAgentPrice, deadline, "OPEN", "GROUPS_KNOCKOUT"));
         return CompetitionResponse.from(competition);
     }
 
@@ -212,34 +212,55 @@ public class SportsParticipationService {
         EventOrganizerContext organizer = requireAuthorizedOrganizer(request.organizerType(), request.organizerId(),
                 bearerToken);
         int targetTeamCount = request.targetTeamCount() == null ? 10 : request.targetTeamCount();
-        if (targetTeamCount != 10 && targetTeamCount != 20) {
-            throw badRequest("targetTeamCount must be 10 or 20 for seasons");
+        if (targetTeamCount != 10) {
+            throw badRequest("targetTeamCount must be 10 for seasons");
         }
-        String roundRobinMode = targetTeamCount == 10 ? "double round-robin" : "single round-robin";
+        String roundRobinMode = "double round-robin";
         int rosterMin = request.rosterMin() == null ? sport.getMinimumRoster() : request.rosterMin();
         int rosterMax = request.rosterMax() == null ? sport.getMaximumRoster() : request.rosterMax();
         validateRosterRange(rosterMin, rosterMax);
-        String[] tieBreakers = validateTieBreakers(request.tieBreakers());
         long teamPrice = validatePrice(request.teamEntryPrice(), "teamEntryPrice");
         long freeAgentPrice = validatePrice(request.freeAgentPrice(), "freeAgentPrice");
         Instant deadline = requireDeadline(request.registrationDeadline());
 
         Season season = this.seasonRepository.save(new Season(UUID.randomUUID(), title, sport, skillLevel,
-                organizer.organizerType(), organizer.organizerId(), new UUID[0], targetTeamCount, rosterMin, rosterMax,
-                tieBreakers, teamPrice, freeAgentPrice, deadline, "OPEN", roundRobinMode));
+                organizer.organizerType(), organizer.organizerId(), targetTeamCount, rosterMin, rosterMax, teamPrice,
+                freeAgentPrice, deadline, "OPEN", roundRobinMode));
         return SeasonResponse.from(season);
     }
 
     @Transactional
-    public Map<String, Object> updateSportsEventDeadline(String rawContextType, UUID contextId,
+    public Map<String, Object> updateSportsEvent(String rawContextType, UUID contextId,
             UpdateSportsEventRequest request, String bearerToken) {
-        if (request == null || request.registrationDeadline() == null) {
-            throw badRequest("registrationDeadline is required");
+        if (request == null || (request.registrationDeadline() == null) == (request.championTeamId() == null)) {
+            throw badRequest("Informe o prazo de inscrição ou a equipe campeã, um por vez.");
         }
+        lockSchedule(normalizeUpper(rawContextType), contextId);
         EventMeta meta = resolveEventMeta(rawContextType, contextId);
         requireAuthorizedOrganizer(meta.organizerType(), meta.organizerId(), bearerToken);
         if ("CANCELLED".equalsIgnoreCase(meta.status())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Cannot update a cancelled championship");
+        }
+
+        if (request.championTeamId() != null) {
+            if (!CONTEXT_SEASON.equals(meta.contextType())) {
+                throw badRequest("A escolha manual de campeão só está disponível em temporadas.");
+            }
+            Season season = this.seasonRepository.findById(contextId).orElseThrow();
+            UUID selected = request.championTeamId();
+            if (!selected.equals(season.getManualChampionTeamId())) {
+                List<SportsMatch> matches = this.matchRepository
+                        .findByContextTypeAndContextIdOrderByRoundNumberAscScheduledAtAsc(meta.contextType(),
+                                contextId);
+                var standings = SportsStandings.calculate(true, meta.sport(), Map.of(), matches);
+                if (!manualChampionCandidates(meta, matches, standings).contains(selected)) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "Selecione uma das equipes empatadas em primeiro lugar após o fim dos jogos.");
+                }
+                season.selectChampion(selected);
+            }
+            return Map.of("contextType", meta.contextType(), "contextId", contextId, "championTeamId", selected,
+                    "status", season.getStatus());
         }
 
         Instant newDeadline = request.registrationDeadline().truncatedTo(ChronoUnit.MICROS);
@@ -265,6 +286,7 @@ public class SportsParticipationService {
 
     @Transactional
     public Map<String, Object> cancelSportsEvent(String rawContextType, UUID contextId, String bearerToken) {
+        lockSchedule(normalizeUpper(rawContextType), contextId);
         EventMeta meta = resolveEventMeta(rawContextType, contextId);
         requireAuthorizedOrganizer(meta.organizerType(), meta.organizerId(), bearerToken);
 
@@ -367,7 +389,8 @@ public class SportsParticipationService {
             List<SportsTeamMemberResponse> members = membersByTeam.getOrDefault(team.getId(), List.of());
             boolean showInviteCode = viewerCanManage || userId.equals(team.getCaptainUserId())
                     || members.stream().anyMatch(m -> userId.equals(m.userId()));
-            return SportsTeamResponse.from(team, members, showInviteCode, now);
+            return SportsTeamResponse.from(team, members, showInviteCode, now,
+                    rosterComplete(meta, team, members.size()));
         }).toList();
 
         List<SportsFreeAgent> queuedFreeAgents = this.freeAgentRepository
@@ -379,7 +402,8 @@ public class SportsParticipationService {
 
         List<SportsMatch> matches = this.matchRepository
                 .findByContextTypeAndContextIdOrderByRoundNumberAscScheduledAtAsc(meta.contextType(), contextId);
-        List<SportsMatchResponse> matchResponses = toMatchResponses(matches, teamNames, userId, viewerCanManage);
+        List<SportsMatchResponse> matchResponses = toMatchResponses(matches, teamNames, userId, viewerCanManage, meta,
+                viewerTeamId);
 
         boolean viewerPendingTeam = this.teamRepository
                 .findByContextTypeAndContextIdAndStatusOrderByCreatedAtAsc(meta.contextType(), contextId,
@@ -388,12 +412,28 @@ public class SportsParticipationService {
         boolean viewerPendingFreeAgent = this.freeAgentRepository.existsByContextTypeAndContextIdAndUserIdAndStatus(
                 meta.contextType(), contextId, userId, STATUS_PENDING_PAYMENT);
 
+        boolean season = CONTEXT_SEASON.equals(meta.contextType());
+        var standings = SportsStandings.calculate(season, meta.sport(), teamNames, matches);
+        List<UUID> leaders = seasonLeaders(meta, matches, standings);
+        UUID champion = "CANCELLED".equals(meta.status()) ? null : meta.manualChampionTeamId();
+        if (champion == null && leaders.size() == 1) {
+            champion = leaders.getFirst();
+        }
+
+        String phase = sportsPhase(meta, matches, champion);
+        boolean viewerPendingPayment = viewerPendingTeam || viewerPendingFreeAgent;
         return new SportsEventOverviewResponse(meta.contextType(), contextId, meta.title(), meta.skillLevel(),
                 meta.organizerType(), meta.organizerId(), meta.targetTeamCount(), meta.rosterMin(), meta.rosterMax(),
                 meta.teamEntryPrice(), meta.freeAgentPrice(), meta.registrationDeadline(), meta.formatOrMode(),
-                meta.tieBreakers(), meta.status(), SportResponse.from(meta.sport()), teamResponses, freeAgentResponses,
-                matchResponses, viewerCanManage, viewerTeamId, viewerFreeAgentQueued,
-                viewerPendingTeam || viewerPendingFreeAgent);
+                meta.status(), SportResponse.from(meta.sport()), teamResponses, freeAgentResponses, matchResponses,
+                standings.tables(), season ? List.of() : knockoutTies(matches),
+                viewerCanManage && matches.isEmpty() && !"CANCELLED".equals(meta.status())
+                        && teamResponses.stream().filter(team -> !team.placeholder()).count() == meta.targetTeamCount()
+                        && teamResponses.stream().filter(team -> !team.placeholder())
+                                .allMatch(SportsTeamResponse::rosterComplete),
+                phase, champion, viewerCanManage ? manualChampionCandidates(meta, matches, standings) : List.of(),
+                viewerCanManage, viewerTeamId, viewerFreeAgentQueued, viewerPendingPayment,
+                "INSCRICAO".equals(phase) && viewerTeamId == null && !viewerFreeAgentQueued && !viewerPendingPayment);
     }
 
     @Transactional
@@ -403,6 +443,12 @@ public class SportsParticipationService {
             throw badRequest("Request body is required");
         }
         EventMeta meta = resolveEventMeta(rawContextType, contextId);
+        lockSchedule(meta, contextId);
+        Instant now = Instant.now(this.clock).truncatedTo(ChronoUnit.MICROS);
+        ensureEnrollmentOpen(meta, now);
+        if (this.matchRepository.existsByContextTypeAndContextId(meta.contextType(), contextId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "As equipes estão fechadas para a tabela.");
+        }
         expirePendingSportsPayments(meta.contextType(), contextId);
         String teamName = requireNonBlank(request.name(), "name", 120);
         String captainName = normalizeDisplayName(request.captainName(), defaultDisplayName, userId);
@@ -426,7 +472,6 @@ public class SportsParticipationService {
             throw badRequest("reservedPlayerCount must be between " + initialCount + " and " + meta.rosterMax());
         }
 
-        Instant now = Instant.now(this.clock).truncatedTo(ChronoUnit.MICROS);
         boolean requiresPayment = meta.teamEntryPrice() > 0L;
         String initialStatus = requiresPayment ? STATUS_PENDING_PAYMENT : STATUS_CONFIRMED;
         Instant paymentDeadlineAt = requiresPayment ? now.plus(SPORTS_PAYMENT_WINDOW) : null;
@@ -465,7 +510,7 @@ public class SportsParticipationService {
         }
 
         return SportsTeamResponse.from(team, savedMembers.stream().map(SportsTeamMemberResponse::from).toList(), true,
-                now);
+                now, STATUS_CONFIRMED.equals(team.getStatus()) && rosterComplete(meta, team, savedMembers.size()));
     }
 
     @Transactional
@@ -475,8 +520,13 @@ public class SportsParticipationService {
             throw badRequest("Código de convite do time é obrigatório");
         }
         EventMeta meta = resolveEventMeta(rawContextType, contextId);
-        expirePendingSportsPayments(meta.contextType(), contextId);
+        lockSchedule(meta, contextId);
         Instant now = Instant.now(this.clock).truncatedTo(ChronoUnit.MICROS);
+        ensureEnrollmentOpen(meta, now);
+        if (this.matchRepository.existsByContextTypeAndContextId(meta.contextType(), contextId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "As equipes estão fechadas para a tabela.");
+        }
+        expirePendingSportsPayments(meta.contextType(), contextId);
 
         String code = request.inviteCode().trim().toUpperCase(Locale.ROOT);
         SportsTeam team = this.teamRepository
@@ -513,13 +563,20 @@ public class SportsParticipationService {
         List<SportsTeamMemberResponse> allMembers = new ArrayList<>(
                 currentMembers.stream().map(SportsTeamMemberResponse::from).toList());
         allMembers.add(SportsTeamMemberResponse.from(added));
-        return SportsTeamResponse.from(team, allMembers, true, now);
+        return SportsTeamResponse.from(team, allMembers, true, now,
+                STATUS_CONFIRMED.equals(team.getStatus()) && rosterComplete(meta, team, allMembers.size()));
     }
 
     @Transactional
     public SportsFreeAgentRegistrationResponse registerFreeAgent(String rawContextType, UUID contextId,
             RegisterFreeAgentRequest request, String userId, String defaultDisplayName) {
         EventMeta meta = resolveEventMeta(rawContextType, contextId);
+        lockSchedule(meta, contextId);
+        Instant now = Instant.now(this.clock).truncatedTo(ChronoUnit.MICROS);
+        ensureEnrollmentOpen(meta, now);
+        if (this.matchRepository.existsByContextTypeAndContextId(meta.contextType(), contextId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "As equipes estão fechadas para a tabela.");
+        }
         expirePendingSportsPayments(meta.contextType(), contextId);
         String displayName = normalizeDisplayName(request == null ? null : request.displayName(), defaultDisplayName,
                 userId);
@@ -528,7 +585,6 @@ public class SportsParticipationService {
                 meta.contextType(), contextId, List.of(STATUS_CONFIRMED, STATUS_PENDING_PAYMENT));
         ensureUserNotAlreadyEnrolled(meta.contextType(), contextId, activeTeams, userId);
 
-        Instant now = Instant.now(this.clock).truncatedTo(ChronoUnit.MICROS);
         if (meta.freeAgentPrice() > 0L) {
             Instant paymentDeadlineAt = now.plus(SPORTS_PAYMENT_WINDOW);
             Instant reservationExpiresAt = now.plus(SPORTS_RESERVATION_WINDOW);
@@ -543,6 +599,18 @@ public class SportsParticipationService {
         SportsFreeAgent freeAgent = this.freeAgentRepository.save(new SportsFreeAgent(UUID.randomUUID(),
                 meta.contextType(), contextId, userId, displayName, null, STATUS_QUEUED, now));
         return allocateOrQueueFreeAgent(meta, freeAgent, now);
+    }
+
+    private static void ensureEnrollmentOpen(EventMeta meta, Instant now) {
+        if ("CANCELLED".equalsIgnoreCase(meta.status()) || "COMPLETED".equalsIgnoreCase(meta.status())
+                || "CLOSED".equalsIgnoreCase(meta.status()) || "ARCHIVED".equalsIgnoreCase(meta.status())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "As inscrições para este evento esportivo estão encerradas.");
+        }
+        if (meta.registrationDeadline() != null && now.isAfter(meta.registrationDeadline())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "O prazo de inscrição para este evento esportivo já terminou.");
+        }
     }
 
     @Transactional
@@ -592,6 +660,36 @@ public class SportsParticipationService {
     }
 
     @Transactional(readOnly = true)
+    public Map<UUID, String> getMySportsPaymentOrigins(String userId) {
+        Map<UUID, String> origins = new HashMap<>();
+        this.teamRepository.findByCaptainUserId(userId).forEach(team -> origins.put(team.getId(), "SPORTS_TEAM"));
+        this.freeAgentRepository.findByUserId(userId).forEach(agent -> origins.put(agent.getId(), "SPORTS_FREE_AGENT"));
+        return origins;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<UUID, PaymentReferenceResponse> getMySportsPaymentReferences(String userId) {
+        Map<UUID, PaymentReferenceResponse> references = new HashMap<>();
+        for (SportsTeam team : this.teamRepository.findByCaptainUserId(userId)) {
+            EventMeta meta = resolveEventMeta(team.getContextType(), team.getContextId());
+            String pathPrefix = CONTEXT_COMPETITION.equals(meta.contextType())
+                    ? "/esportes/campeonatos/"
+                    : "/esportes/temporadas/";
+            references.put(team.getId(), new PaymentReferenceResponse("SPORTS_TEAM", meta.title(),
+                    "Equipe · " + team.getName(), pathPrefix + meta.contextId()));
+        }
+        for (SportsFreeAgent agent : this.freeAgentRepository.findByUserId(userId)) {
+            EventMeta meta = resolveEventMeta(agent.getContextType(), agent.getContextId());
+            String pathPrefix = CONTEXT_COMPETITION.equals(meta.contextType())
+                    ? "/esportes/campeonatos/"
+                    : "/esportes/temporadas/";
+            references.put(agent.getId(), new PaymentReferenceResponse("SPORTS_FREE_AGENT", meta.title(),
+                    "Inscrição individual (Free Agent)", pathPrefix + meta.contextId()));
+        }
+        return references;
+    }
+
+    @Transactional(readOnly = true)
     public MySportsEnrollmentsResponse getMyEnrollments(String userId) {
         Map<String, MySportsEnrollmentResponse> byEvent = new LinkedHashMap<>();
 
@@ -607,7 +705,7 @@ public class SportsParticipationService {
                 byEvent.put(key,
                         new MySportsEnrollmentResponse(meta.contextType(), meta.contextId(), meta.title(),
                                 meta.sport().getName(), meta.skillLevel(), "TEAM", team.getName(),
-                                meta.registrationDeadline()));
+                                meta.registrationDeadline(), firstMatchDate(meta)));
             }
         }
 
@@ -619,7 +717,7 @@ public class SportsParticipationService {
                 byEvent.put(key,
                         new MySportsEnrollmentResponse(meta.contextType(), meta.contextId(), meta.title(),
                                 meta.sport().getName(), meta.skillLevel(), "FREE_AGENT_QUEUED", null,
-                                meta.registrationDeadline()));
+                                meta.registrationDeadline(), firstMatchDate(meta)));
             }
         }
 
@@ -675,6 +773,12 @@ public class SportsParticipationService {
         }
 
         return new SportsFreeAgentRegistrationResponse(STATUS_QUEUED, null, null);
+    }
+
+    private Instant firstMatchDate(EventMeta meta) {
+        return this.matchRepository
+                .findFirstByContextTypeAndContextIdOrderByScheduledAtAsc(meta.contextType(), meta.contextId())
+                .map(SportsMatch::getScheduledAt).orElse(null);
     }
 
     private static boolean hasAvailableFreeAgentSlot(SportsTeam team, int currentMemberCount, int rosterMax,
@@ -787,18 +891,126 @@ public class SportsParticipationService {
         EventMeta meta = resolveEventMeta(rawContextType, contextId);
         requireAuthorizedOrganizer(meta.organizerType(), meta.organizerId(), bearerToken);
 
-        List<SportsTeam> teams = this.teamRepository.findByContextTypeAndContextIdAndStatusOrderByCreatedAtAsc(
-                meta.contextType(), contextId, STATUS_CONFIRMED);
-        if (teams.size() < 2) {
-            throw badRequest("At least 2 confirmed teams are required to generate matches");
+        lockSchedule(meta, contextId);
+        if ("CANCELLED".equals(meta.status())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "O campeonato foi cancelado.");
         }
-
-        Instant firstMatchAt = request != null ? request.firstMatchAt() : null;
-        String requestedLocation = request != null ? request.location() : null;
-        List<SportsMatch> allMatches = generateMissingMatchups(meta.contextType(), contextId, teams, firstMatchAt,
-                requestedLocation);
+        List<SportsTeam> teams = this.teamRepository
+                .findByContextTypeAndContextIdAndStatusOrderByCreatedAtAsc(meta.contextType(), contextId,
+                        STATUS_CONFIRMED)
+                .stream().filter(team -> !team.isPlaceholderSlot()).toList();
+        List<SportsMatch> matches = this.matchRepository
+                .findByContextTypeAndContextIdOrderByRoundNumberAscScheduledAtAsc(meta.contextType(), contextId);
+        if (matches.isEmpty()) {
+            if (teams.size() != meta.targetTeamCount()) {
+                throw badRequest("Confirme todas as equipes antes de gerar a tabela.");
+            }
+            Map<UUID, List<SportsTeamMember>> members = this.teamMemberRepository
+                    .findByTeamIdInOrderByJoinedAtAsc(teams.stream().map(SportsTeam::getId).toList()).stream()
+                    .collect(Collectors.groupingBy(SportsTeamMember::getTeamId));
+            for (SportsTeam team : teams) {
+                if (!rosterComplete(meta, team, members.getOrDefault(team.getId(), List.of()).size())) {
+                    throw badRequest("Complete o elenco de " + team.getName() + " antes de gerar a tabela.");
+                }
+            }
+            Instant start = request == null ? null : request.firstMatchAt();
+            if (start == null || start.isBefore(meta.registrationDeadline())) {
+                throw badRequest("A primeira partida deve ocorrer após o prazo de inscrição.");
+            }
+            boolean season = CONTEXT_SEASON.equals(meta.contextType());
+            if (!isMatchDay(start.atZone(CAMPUS_ZONE).getDayOfWeek(), season)) {
+                throw badRequest(
+                        season ? "Temporadas jogam às terças e quintas." : "Torneios jogam aos sábados e domingos.");
+            }
+            int lastRound = season
+                    ? (teams.size() - 1) * ("double round-robin".equals(meta.formatOrMode()) ? 2 : 1)
+                    : teams.size() == 32 ? 10 : 3;
+            if (!this.campusOrganizerClient.containsAcademicSchedule(start.atZone(CAMPUS_ZONE).toLocalDate(),
+                    roundDate(start, lastRound + (season ? 1 : 0), season).atZone(CAMPUS_ZONE).toLocalDate(),
+                    bearerToken)) {
+                throw badRequest(
+                        "Escolha uma data que permita jogar todas as rodadas dentro de um semestre cadastrado.");
+            }
+            int matchesPerDay = teams.size() / 2;
+            if (!start.atZone(CAMPUS_ZONE).plusHours(matchesPerDay - 1L).toLocalDate()
+                    .equals(start.atZone(CAMPUS_ZONE).toLocalDate())) {
+                throw badRequest("Escolha um horário mais cedo para acomodar todos os jogos da rodada.");
+            }
+            String location = requireNonBlank(request.location(), "location", 200);
+            matches = new ArrayList<>();
+            if (season) {
+                addRoundRobin(matches, meta, contextId, teams, start, location, true);
+            } else {
+                for (int i = 0; i < teams.size(); i += 4) {
+                    addRoundRobin(matches, meta, contextId, teams.subList(i, i + 4), start,
+                            truncate(location, 185) + " (Grupo " + (char) ('A' + i / 4) + ")", false);
+                }
+            }
+            this.matchRepository.saveAll(matches);
+        }
+        if (CONTEXT_SEASON.equals(meta.contextType())) {
+            this.seasonRepository.findById(contextId).ifPresent(Season::openSchedule);
+        } else {
+            this.competitionRepository.findById(contextId).ifPresent(Competition::openSchedule);
+        }
         Map<UUID, String> teamNames = teams.stream().collect(Collectors.toMap(SportsTeam::getId, SportsTeam::getName));
-        return toMatchResponses(allMatches, teamNames, userId, true);
+        return toMatchResponses(matches, teamNames, userId, true, meta, null);
+    }
+
+    private void lockSchedule(EventMeta meta, UUID contextId) {
+        lockSchedule(meta.contextType(), contextId);
+    }
+
+    private void lockSchedule(String contextType, UUID contextId) {
+        if (CONTEXT_SEASON.equals(contextType)) {
+            this.seasonRepository.lockById(contextId);
+        } else if (CONTEXT_COMPETITION.equals(contextType)) {
+            this.competitionRepository.lockById(contextId);
+        }
+    }
+
+    private static final ZoneId CAMPUS_ZONE = ZoneId.of("America/Sao_Paulo");
+
+    private static boolean isMatchDay(DayOfWeek day, boolean season) {
+        return season
+                ? day == DayOfWeek.TUESDAY || day == DayOfWeek.THURSDAY
+                : day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY;
+    }
+
+    private static Instant roundDate(Instant start, int round, boolean season) {
+        var date = start.atZone(CAMPUS_ZONE);
+        for (int i = 1; i < round; i++) {
+            do {
+                date = date.plusDays(1);
+            } while (!isMatchDay(date.getDayOfWeek(), season));
+        }
+        return date.toInstant();
+    }
+
+    private void addRoundRobin(List<SportsMatch> matches, EventMeta meta, UUID contextId, List<SportsTeam> teams,
+            Instant start, String location, boolean season) {
+        List<SportsTeam> rotation = new ArrayList<>(teams);
+        int rounds = teams.size() - 1;
+        for (int round = 1; round <= rounds; round++) {
+            for (int i = 0; i < teams.size() / 2; i++) {
+                UUID home = rotation.get(i).getId();
+                UUID away = rotation.get(teams.size() - 1 - i).getId();
+                addMatch(matches, meta, contextId, round, home, away, start, location);
+                if (season && "double round-robin".equals(meta.formatOrMode())) {
+                    addMatch(matches, meta, contextId, round + rounds, away, home, start, location);
+                }
+            }
+            rotation.add(1, rotation.remove(rotation.size() - 1));
+        }
+    }
+
+    private void addMatch(List<SportsMatch> matches, EventMeta meta, UUID contextId, int round, UUID home, UUID away,
+            Instant start, String location) {
+        long earlierMatches = matches.stream().filter(match -> match.getRoundNumber() == round).count();
+        Instant date = roundDate(start, round, CONTEXT_SEASON.equals(meta.contextType())).plus(earlierMatches,
+                ChronoUnit.HOURS);
+        matches.add(new SportsMatch(UUID.randomUUID(), meta.contextType(), contextId, round, home, away, date, location,
+                null, null, STATUS_SCHEDULED, null, Instant.now(this.clock)));
     }
 
     private void assignConfirmedTeamToOpenSlotOrSchedule(SportsTeam confirmedTeam) {
@@ -809,7 +1021,6 @@ public class SportsParticipationService {
         }
         SportsTeam openSlot = confirmed.stream().filter(SportsTeam::isPlaceholderSlot).findFirst().orElse(null);
         if (openSlot == null) {
-            scheduleMissingMatchesIfTournamentActive(confirmedTeam.getContextType(), confirmedTeam.getContextId());
             return;
         }
         List<SportsMatch> matches = this.matchRepository
@@ -826,78 +1037,6 @@ public class SportsParticipationService {
         }
         this.teamRepository.delete(openSlot);
         this.teamRepository.flush();
-    }
-
-    private void scheduleMissingMatchesIfTournamentActive(String contextType, UUID contextId) {
-        if (!this.matchRepository.existsByContextTypeAndContextId(contextType, contextId)) {
-            return;
-        }
-        List<SportsTeam> teams = this.teamRepository
-                .findByContextTypeAndContextIdAndStatusOrderByCreatedAtAsc(contextType, contextId, STATUS_CONFIRMED);
-        if (teams.size() >= 2) {
-            generateMissingMatchups(contextType, contextId, teams, null, null);
-        }
-    }
-
-    private List<SportsMatch> generateMissingMatchups(String contextType, UUID contextId, List<SportsTeam> teams,
-            Instant requestedStart, String requestedLocation) {
-        List<SportsMatch> existing = this.matchRepository
-                .findByContextTypeAndContextIdOrderByRoundNumberAscScheduledAtAsc(contextType, contextId);
-        Set<String> paired = new HashSet<>();
-        int maxRound = 0;
-        Instant latestScheduled = null;
-        for (SportsMatch match : existing) {
-            paired.add(pairKey(match.getHomeTeamId(), match.getAwayTeamId()));
-            if (match.getRoundNumber() > maxRound) {
-                maxRound = match.getRoundNumber();
-            }
-            if (latestScheduled == null || match.getScheduledAt().isAfter(latestScheduled)) {
-                latestScheduled = match.getScheduledAt();
-            }
-        }
-
-        Instant start = resolveFirstMatchStart(requestedStart, latestScheduled);
-        String location = requestedLocation != null && !requestedLocation.isBlank()
-                ? truncate(requestedLocation.trim(), 200)
-                : DEFAULT_LOCATION;
-
-        Instant now = Instant.now(this.clock);
-        List<SportsMatch> generated = new ArrayList<>();
-        int newIndex = 0;
-        for (int i = 0; i < teams.size(); i++) {
-            for (int j = i + 1; j < teams.size(); j++) {
-                UUID homeId = teams.get(i).getId();
-                UUID awayId = teams.get(j).getId();
-                if (paired.contains(pairKey(homeId, awayId))) {
-                    continue;
-                }
-                int roundNumber = maxRound + newIndex + 1;
-                Instant scheduledAt = start.plus(newIndex * 2L, ChronoUnit.HOURS);
-                generated.add(new SportsMatch(UUID.randomUUID(), contextType, contextId, roundNumber, homeId, awayId,
-                        scheduledAt, location, null, null, STATUS_SCHEDULED, null, now));
-                newIndex++;
-            }
-        }
-        if (!generated.isEmpty()) {
-            this.matchRepository.saveAll(generated);
-        }
-        List<SportsMatch> combined = new ArrayList<>(existing);
-        combined.addAll(generated);
-        return combined;
-    }
-
-    private Instant resolveFirstMatchStart(Instant requestedStart, Instant latestScheduled) {
-        if (requestedStart != null) {
-            return requestedStart;
-        }
-        if (latestScheduled != null) {
-            return latestScheduled.plus(2, ChronoUnit.HOURS);
-        }
-        return Instant.now(this.clock).plus(1, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-    }
-
-    private static String pairKey(UUID a, UUID b) {
-        return a.compareTo(b) <= 0 ? a + ":" + b : b + ":" + a;
     }
 
     @Transactional
@@ -919,29 +1058,44 @@ public class SportsParticipationService {
         }
 
         SportsMatch match = findMatch(matchId);
+        lockSchedule(match.getContextType(), match.getContextId());
         EventMeta meta = resolveEventMeta(match.getContextType(), match.getContextId());
         requireAuthorizedOrganizer(meta.organizerType(), meta.organizerId(), bearerToken);
 
         Integer resolvedHomePenalty = null;
         Integer resolvedAwayPenalty = null;
-        if (CONTEXT_COMPETITION.equals(match.getContextType()) && match.getRoundNumber() == 5) {
-            SportsMatch idaMatch = findPairedIdaMatch(match);
+        if (meta.manualChampionTeamId() != null || "CANCELLED".equals(meta.status())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Os placares deste campeonato estão fechados.");
+        }
+        List<SportsMatch> schedule = this.matchRepository
+                .findByContextTypeAndContextIdOrderByRoundNumberAscScheduledAtAsc(meta.contextType(),
+                        match.getContextId());
+        boolean season = CONTEXT_SEASON.equals(meta.contextType());
+        List<SportsMatch> bracket = schedule.stream()
+                .filter(game -> game.getRoundNumber() < SportsStandings.TIEBREAK_ROUND).toList();
+        boolean standardBracket = !season && bracket.stream().filter(game -> game.getRoundNumber() <= 3).count() == 48;
+        int round = match.getRoundNumber();
+        boolean tiebreak = season && round == SportsStandings.TIEBREAK_ROUND;
+        String lockReason = scoreLockReason(meta, match, schedule, standardBracket);
+        if (lockReason != null) {
+            throw badRequest(lockReason);
+        }
+        if ((tiebreak || standardBracket && round == 10) && request.homeScore().equals(request.awayScore())) {
+            if (homePenalty == null || awayPenalty == null || homePenalty.equals(awayPenalty)) {
+                throw penaltiesRequired(request.homeScore(), request.awayScore());
+            }
+            resolvedHomePenalty = homePenalty;
+            resolvedAwayPenalty = awayPenalty;
+        }
+        if (CONTEXT_COMPETITION.equals(match.getContextType())
+                && (round == 5 || standardBracket && (round == 7 || round == 9))) {
+            SportsMatch idaMatch = SportsKnockout.pairedLeg(schedule, match, round - 1);
             if (idaMatch != null) {
-                if (idaMatch.getHomeScore() == null || idaMatch.getAwayScore() == null) {
-                    throw badRequest("Registre o placar do jogo de Ida antes de lançar o resultado da Volta");
-                }
-                int homeIdaGoals = idaMatch.getHomeTeamId().equals(match.getHomeTeamId())
-                        ? idaMatch.getHomeScore()
-                        : idaMatch.getAwayScore();
-                int awayIdaGoals = idaMatch.getHomeTeamId().equals(match.getAwayTeamId())
-                        ? idaMatch.getHomeScore()
-                        : idaMatch.getAwayScore();
-                int aggregateHome = homeIdaGoals + request.homeScore();
-                int aggregateAway = awayIdaGoals + request.awayScore();
+                int aggregateHome = SportsKnockout.scoreFor(idaMatch, match.getHomeTeamId()) + request.homeScore();
+                int aggregateAway = SportsKnockout.scoreFor(idaMatch, match.getAwayTeamId()) + request.awayScore();
                 if (aggregateHome == aggregateAway) {
                     if (homePenalty == null || awayPenalty == null || homePenalty.equals(awayPenalty)) {
-                        throw badRequest("O placar agregado terminou empatado (" + aggregateHome + " x " + aggregateAway
-                                + "). Informe o placar dos pênaltis sem igualdade.");
+                        throw penaltiesRequired(aggregateHome, aggregateAway);
                     }
                     resolvedHomePenalty = homePenalty;
                     resolvedAwayPenalty = awayPenalty;
@@ -951,35 +1105,220 @@ public class SportsParticipationService {
 
         match.recordScore(request.homeScore(), request.awayScore(), resolvedHomePenalty, resolvedAwayPenalty);
         SportsMatch saved = this.matchRepository.save(match);
+        if (season && !tiebreak) {
+            scheduleSeasonTiebreaks(meta, match.getContextId(), schedule);
+        } else if (standardBracket) {
+            advanceBracket(meta, match.getContextId(), bracket);
+        }
+        List<SportsMatch> updatedSchedule = this.matchRepository
+                .findByContextTypeAndContextIdOrderByRoundNumberAscScheduledAtAsc(meta.contextType(),
+                        match.getContextId());
         Map<UUID, String> teamNames = loadTeamNames(List.of(saved.getHomeTeamId(), saved.getAwayTeamId()));
-        return toMatchResponses(List.of(saved), teamNames, userId, true).get(0);
+        return toMatchResponses(updatedSchedule, teamNames, userId, true, meta, null).stream()
+                .filter(response -> response.id().equals(saved.getId())).findFirst().orElseThrow();
     }
 
-    private SportsMatch findPairedIdaMatch(SportsMatch voltaMatch) {
-        List<SportsMatch> competitionMatches = this.matchRepository
-                .findByContextTypeAndContextIdOrderByRoundNumberAscScheduledAtAsc(voltaMatch.getContextType(),
-                        voltaMatch.getContextId());
-        for (SportsMatch candidate : competitionMatches) {
-            if (candidate.getRoundNumber() != voltaMatch.getRoundNumber() - 1) {
-                continue;
+    private static ResponseStatusException penaltiesRequired(int home, int away) {
+        var error = new ResponseStatusException(HttpStatus.BAD_REQUEST, "O confronto terminou empatado (" + home + " × "
+                + away + "). Informe o placar dos pênaltis sem igualdade.");
+        error.getBody().setProperty("code", "PENALTIES_REQUIRED");
+        return error;
+    }
+
+    private static List<UUID> seasonLeaders(EventMeta meta, List<SportsMatch> matches,
+            SportsStandings.Result standings) {
+        if (!CONTEXT_SEASON.equals(meta.contextType()) || "CANCELLED".equals(meta.status()) || matches.isEmpty()
+                || matches.stream().anyMatch(game -> game.getHomeScore() == null) || !standings.playoffs().isEmpty()) {
+            return List.of();
+        }
+        return standings.tables().getFirst().rows().stream().filter(row -> row.rank() == 1)
+                .map(SportsStandingsResponse.Row::teamId).toList();
+    }
+
+    private static List<UUID> manualChampionCandidates(EventMeta meta, List<SportsMatch> matches,
+            SportsStandings.Result standings) {
+        List<UUID> leaders = seasonLeaders(meta, matches, standings);
+        return meta.manualChampionTeamId() == null && leaders.size() > 1 ? leaders : List.of();
+    }
+
+    private static String sportsPhase(EventMeta meta, List<SportsMatch> matches, UUID champion) {
+        if ("CANCELLED".equals(meta.status())) {
+            return "CANCELADO";
+        }
+        if ("COMPLETED".equals(meta.status()) || "ARCHIVED".equals(meta.status()) || "CLOSED".equals(meta.status())) {
+            return "FINALIZADO";
+        }
+        if (matches.isEmpty()) {
+            return "INSCRICAO";
+        }
+        if (CONTEXT_SEASON.equals(meta.contextType())) {
+            return champion == null ? "ROLANDO" : "FINALIZADO";
+        }
+        return matches.stream().anyMatch(game -> game.getRoundNumber() == 10 && game.getHomeScore() != null)
+                ? "FINALIZADO"
+                : "ROLANDO";
+    }
+
+    private void scheduleSeasonTiebreaks(EventMeta meta, UUID contextId, List<SportsMatch> schedule) {
+        var standings = SportsStandings.calculate(true, meta.sport(), Map.of(), schedule);
+        if (standings.playoffs().isEmpty()) {
+            return;
+        }
+        SportsMatch first = schedule.getFirst();
+        int lastRound = schedule.stream().mapToInt(SportsMatch::getRoundNumber).max().orElseThrow();
+        Instant date = roundDate(first.getScheduledAt(), lastRound + 1, true);
+        List<SportsMatch> games = new ArrayList<>();
+        for (var pair : standings.playoffs()) {
+            games.add(new SportsMatch(UUID.randomUUID(), meta.contextType(), contextId, SportsStandings.TIEBREAK_ROUND,
+                    pair.home(), pair.away(), date.plus(games.size(), ChronoUnit.HOURS), first.getLocation(), null,
+                    null, STATUS_SCHEDULED, null, Instant.now(this.clock)));
+        }
+        this.matchRepository.saveAll(games);
+    }
+
+    private void advanceBracket(EventMeta meta, UUID contextId, List<SportsMatch> bracket) {
+        int lastRound = bracket.stream().mapToInt(SportsMatch::getRoundNumber).max().orElseThrow();
+        if (lastRound >= 10 || bracket.stream().anyMatch(game -> game.getHomeScore() == null)) {
+            return;
+        }
+        List<UUID> qualifiers = new ArrayList<>();
+        if (lastRound == 3) {
+            List<UUID> teamIds = bracket.stream()
+                    .flatMap(game -> java.util.stream.Stream.of(game.getHomeTeamId(), game.getAwayTeamId())).distinct()
+                    .toList();
+            var standings = SportsStandings.calculate(false, meta.sport(), loadTeamNames(teamIds), bracket);
+            List<List<UUID>> groups = standings.tables().stream().map(table -> table.rows().stream()
+                    .filter(SportsStandingsResponse.Row::qualified).map(SportsStandingsResponse.Row::teamId).toList())
+                    .toList();
+            if (groups.size() != 8 || groups.stream().anyMatch(group -> group.size() != 2)) {
+                return;
             }
-            boolean swappedMatch = candidate.getHomeTeamId().equals(voltaMatch.getAwayTeamId())
-                    && candidate.getAwayTeamId().equals(voltaMatch.getHomeTeamId());
-            boolean sameOrderMatch = candidate.getHomeTeamId().equals(voltaMatch.getHomeTeamId())
-                    && candidate.getAwayTeamId().equals(voltaMatch.getAwayTeamId());
-            if (swappedMatch || sameOrderMatch) {
-                return candidate;
+            for (int i = 0; i < groups.size(); i += 2) {
+                qualifiers.add(groups.get(i).get(0));
+                qualifiers.add(groups.get(i + 1).get(1));
+                qualifiers.add(groups.get(i + 1).get(0));
+                qualifiers.add(groups.get(i).get(1));
+            }
+        } else {
+            for (SportsMatch secondLeg : bracket) {
+                if (secondLeg.getRoundNumber() != lastRound) {
+                    continue;
+                }
+                SportsMatch firstLeg = SportsKnockout.pairedLeg(bracket, secondLeg, lastRound - 1);
+                qualifiers.add(SportsKnockout.result(firstLeg, secondLeg).winnerTeamId());
+            }
+        }
+        SportsMatch first = bracket.get(0);
+        String venue = first.getLocation().replaceFirst(" \\(Grupo [A-Z]\\)$", "");
+        Instant start = first.getScheduledAt();
+        List<SportsMatch> next = new ArrayList<>();
+        for (int i = 0; i < qualifiers.size(); i += 2) {
+            UUID home = qualifiers.get(i);
+            UUID away = qualifiers.get(i + 1);
+            addMatch(next, meta, contextId, lastRound + 1, home, away, start, venue);
+            if (lastRound < 9) {
+                addMatch(next, meta, contextId, lastRound + 2, away, home, start, venue);
+            }
+        }
+        this.matchRepository.saveAll(next);
+    }
+
+    private static boolean rosterComplete(EventMeta meta, SportsTeam team, int memberCount) {
+        Integer reserved = team.getReservedPlayerCount();
+        return memberCount >= Math.max(meta.rosterMin(), reserved == null ? 0 : reserved);
+    }
+
+    private static List<SportsEventOverviewResponse.KnockoutTie> knockoutTies(List<SportsMatch> schedule) {
+        return schedule.stream().filter(first -> switch (first.getRoundNumber()) {
+            case 4, 6, 8, 10 -> true;
+            default -> false;
+        }).map(first -> {
+            int round = first.getRoundNumber();
+            SportsMatch second = round == 10 ? null : SportsKnockout.pairedLeg(schedule, first, round + 1);
+            var result = SportsKnockout.result(first, second);
+            return new SportsEventOverviewResponse.KnockoutTie(round, first.getId(),
+                    second == null ? null : second.getId(), result.home(), result.away(), result.winnerTeamId());
+        }).toList();
+    }
+
+    private static String scoreLockReason(EventMeta meta, SportsMatch match, List<SportsMatch> schedule,
+            boolean standardBracket) {
+        int round = match.getRoundNumber();
+        if (CONTEXT_SEASON.equals(meta.contextType()) && round != SportsStandings.TIEBREAK_ROUND
+                && schedule.stream().anyMatch(game -> game.getRoundNumber() == SportsStandings.TIEBREAK_ROUND)) {
+            return "A classificação desta fase já está em desempate. Os placares estão fechados.";
+        }
+        int decidingRound = round <= 3 ? 3 : round + (round % 2 == 0 ? 1 : 0);
+        if (standardBracket && schedule.stream().anyMatch(game -> game.getRoundNumber() > decidingRound
+                && game.getRoundNumber() < SportsStandings.TIEBREAK_ROUND)) {
+            return "A fase seguinte já foi gerada. O resultado desta fase está fechado.";
+        }
+        if (CONTEXT_COMPETITION.equals(meta.contextType())
+                && (round == 5 || standardBracket && (round == 7 || round == 9))) {
+            SportsMatch firstLeg = SportsKnockout.pairedLeg(schedule, match, round - 1);
+            if (firstLeg != null && (firstLeg.getHomeScore() == null || firstLeg.getAwayScore() == null)) {
+                return "Registre o placar do jogo de Ida antes de lançar o resultado da Volta";
             }
         }
         return null;
     }
 
+    public record AttendanceEntry(String name, Instant checkedInAt) {
+    }
+
+    public record MatchAttendance(List<AttendanceEntry> entries, Instant closedAt) {
+        public MatchAttendance {
+            entries = entries == null ? List.of() : List.copyOf(entries);
+        }
+    }
+
+    @Transactional
+    public MatchAttendance matchAttendance(UUID matchId, String bearerToken, boolean close) {
+        SportsMatch match = lockMatch(matchId);
+        EventMeta meta = resolveEventMeta(match.getContextType(), match.getContextId());
+        requireAuthorizedOrganizer(meta.organizerType(), meta.organizerId(), bearerToken);
+        if (close && !attendanceReviewAvailable(match)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "A lista só pode ser fechada após a partida.");
+        }
+        if (close) {
+            match.closeAttendance(Instant.now(this.clock));
+        }
+        var names = new HashMap<String, String>();
+        this.teamMemberRepository
+                .findByTeamIdInOrderByJoinedAtAsc(List.of(match.getHomeTeamId(), match.getAwayTeamId()))
+                .forEach(member -> {
+                    if (member.getUserId() != null) {
+                        names.put(member.getUserId(), member.getDisplayName());
+                    }
+                });
+        var entries = this.checkInRepository.findByMatchIdIn(List.of(matchId)).stream()
+                .sorted(Comparator.comparing(SportsMatchCheckIn::getCheckedInAt))
+                .map(entry -> new AttendanceEntry(names.getOrDefault(entry.getUserId(), entry.getUserId()),
+                        entry.getCheckedInAt()))
+                .toList();
+        return new MatchAttendance(entries, match.getAttendanceClosedAt());
+    }
+
+    private boolean attendanceReviewAvailable(SportsMatch match) {
+        return match.getAttendanceClosedAt() != null || !STATUS_SCHEDULED.equals(match.getStatus())
+                || match.getScheduledAt().atZone(CAMPUS_ZONE).toLocalDate()
+                        .isBefore(Instant.now(this.clock).atZone(CAMPUS_ZONE).toLocalDate());
+    }
+
+    private SportsMatch lockMatch(UUID matchId) {
+        return this.matchRepository.lockMatch(matchId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Match not found"));
+    }
+
     @Transactional
     public SportsMatchCheckInTokenResponse generateCheckInToken(UUID matchId, String bearerToken) {
-        SportsMatch match = findMatch(matchId);
+        SportsMatch match = lockMatch(matchId);
         EventMeta meta = resolveEventMeta(match.getContextType(), match.getContextId());
         requireAuthorizedOrganizer(meta.organizerType(), meta.organizerId(), bearerToken);
 
+        if ("CANCELLED".equals(meta.status()) || attendanceReviewAvailable(match)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "O QR de presença desta partida está encerrado.");
+        }
         String token = "UNIR-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
         match.updateCheckinToken(token);
         this.matchRepository.save(match);
@@ -991,7 +1330,11 @@ public class SportsParticipationService {
         if (request == null || request.token() == null || request.token().isBlank()) {
             throw badRequest("Check-in token is required");
         }
-        SportsMatch match = findMatch(matchId);
+        SportsMatch match = lockMatch(matchId);
+        EventMeta meta = resolveEventMeta(match.getContextType(), match.getContextId());
+        if ("CANCELLED".equals(meta.status()) || attendanceReviewAvailable(match)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Check-in is not open for this match");
+        }
         if (match.getCheckinToken() == null || match.getCheckinToken().isBlank()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Check-in is not open for this match");
         }
@@ -1093,8 +1436,27 @@ public class SportsParticipationService {
                 .collect(Collectors.toMap(SportsTeam::getId, SportsTeam::getName));
     }
 
+    private static String roundLabel(EventMeta meta, int round) {
+        if (round == SportsStandings.TIEBREAK_ROUND) {
+            return "Desempate";
+        }
+        if (CONTEXT_SEASON.equals(meta.contextType())) {
+            return "Rodada " + round;
+        }
+        return switch (round) {
+            case 4 -> "Oitavas · Ida";
+            case 5 -> "Oitavas · Volta";
+            case 6 -> "Quartas · Ida";
+            case 7 -> "Quartas · Volta";
+            case 8 -> "Semifinal · Ida";
+            case 9 -> "Semifinal · Volta";
+            case 10 -> "Final";
+            default -> "Rodada " + round + " · Grupos";
+        };
+    }
+
     private List<SportsMatchResponse> toMatchResponses(List<SportsMatch> matches, Map<UUID, String> teamNames,
-            String userId, boolean includeToken) {
+            String userId, boolean includeToken, EventMeta meta, UUID viewerTeamId) {
         if (matches.isEmpty()) {
             return List.of();
         }
@@ -1108,15 +1470,27 @@ public class SportsParticipationService {
                 viewerChecked.put(checkIn.getMatchId(), true);
             }
         }
+        boolean active = !"CANCELLED".equals(meta.status());
+        boolean standardBracket = CONTEXT_COMPETITION.equals(meta.contextType())
+                && matches.stream().filter(game -> game.getRoundNumber() <= 3).count() == 48;
         return matches.stream().map(match -> {
             boolean hasToken = match.getCheckinToken() != null && !match.getCheckinToken().isBlank();
-            return new SportsMatchResponse(match.getId(), match.getRoundNumber(), match.getHomeTeamId(),
+            return new SportsMatchResponse(match.getId(), match.getRoundNumber(),
+                    roundLabel(meta, match.getRoundNumber()), match.getHomeTeamId(),
                     teamNames.getOrDefault(match.getHomeTeamId(), "Mandante"), match.getAwayTeamId(),
                     teamNames.getOrDefault(match.getAwayTeamId(), "Visitante"), match.getScheduledAt(),
                     match.getLocation(), match.getHomeScore(), match.getAwayScore(), match.getHomePenaltyScore(),
                     match.getAwayPenaltyScore(), match.getStatus(), counts.getOrDefault(match.getId(), 0),
                     viewerChecked.getOrDefault(match.getId(), false), hasToken,
-                    includeToken ? match.getCheckinToken() : null);
+                    includeToken && active && !attendanceReviewAvailable(match) ? match.getCheckinToken() : null,
+                    active && hasToken && !attendanceReviewAvailable(match)
+                            && (match.getHomeTeamId().equals(viewerTeamId)
+                                    || match.getAwayTeamId().equals(viewerTeamId))
+                            && !viewerChecked.getOrDefault(match.getId(), false),
+                    includeToken && active && meta.manualChampionTeamId() == null
+                            && scoreLockReason(meta, match, matches, standardBracket) == null,
+                    includeToken && active && !attendanceReviewAvailable(match),
+                    includeToken && attendanceReviewAvailable(match));
         }).toList();
     }
 
@@ -1170,7 +1544,7 @@ public class SportsParticipationService {
             return new EventMeta(CONTEXT_COMPETITION, c.getId(), c.getTitle(), c.getSport(), c.getSkillLevel(),
                     c.getOrganizerType(), c.getOrganizerId(), c.getTargetTeamCount(), c.getRosterMin(),
                     c.getRosterMax(), c.getTeamEntryPrice(), c.getFreeAgentPrice(), c.getRegistrationDeadline(),
-                    c.getFormat(), List.of(c.getTieBreakers()), c.getStatus());
+                    c.getFormat(), c.getStatus(), null);
         }
         if (CONTEXT_SEASON.equals(contextType)) {
             Season s = this.seasonRepository.findById(contextId)
@@ -1178,7 +1552,7 @@ public class SportsParticipationService {
             return new EventMeta(CONTEXT_SEASON, s.getId(), s.getTitle(), s.getSport(), s.getSkillLevel(),
                     s.getOrganizerType(), s.getOrganizerId(), s.getTargetTeamCount(), s.getRosterMin(),
                     s.getRosterMax(), s.getTeamEntryPrice(), s.getFreeAgentPrice(), s.getRegistrationDeadline(),
-                    s.getRoundRobinMode(), List.of(s.getTieBreakers()), s.getStatus());
+                    s.getRoundRobinMode(), s.getStatus(), s.getManualChampionTeamId());
         }
         throw badRequest("contextType must be COMPETITION or SEASON");
     }
@@ -1208,20 +1582,6 @@ public class SportsParticipationService {
         if (rosterMin < 1 || rosterMax < rosterMin) {
             throw badRequest("rosterMin must be >= 1 and <= rosterMax");
         }
-    }
-
-    private static String[] validateTieBreakers(List<String> raw) {
-        if (raw == null || raw.isEmpty()) {
-            return new String[]{"SCORE_DIFFERENCE", "WINS"};
-        }
-        List<String> normalized = raw.stream().map(SportsParticipationService::normalizeUpper)
-                .filter(value -> !value.isEmpty()).distinct().toList();
-        for (String value : normalized) {
-            if (!ALLOWED_TIE_BREAKERS.contains(value)) {
-                throw badRequest("Unsupported tieBreaker: " + value);
-            }
-        }
-        return normalized.toArray(new String[0]);
     }
 
     private static long validatePrice(Long price, String field) {
@@ -1281,7 +1641,7 @@ public class SportsParticipationService {
 
     private record EventMeta(String contextType, UUID contextId, String title, Sport sport, String skillLevel,
             String organizerType, UUID organizerId, int targetTeamCount, int rosterMin, int rosterMax,
-            long teamEntryPrice, long freeAgentPrice, Instant registrationDeadline, String formatOrMode,
-            List<String> tieBreakers, String status) {
+            long teamEntryPrice, long freeAgentPrice, Instant registrationDeadline, String formatOrMode, String status,
+            UUID manualChampionTeamId) {
     }
 }

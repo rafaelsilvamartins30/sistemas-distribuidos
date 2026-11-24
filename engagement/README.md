@@ -29,7 +29,7 @@ Serviço de domínio responsável por **Eventos**, **Inscrições**, **Oportunid
 
 - **Eventos e inscrições:** `GET/POST /api/v1/events`, `GET/PATCH/DELETE /api/v1/events/{eventId}`, `GET /api/v1/events/organizer-contexts`, `GET /api/v1/events/managed`, `POST /api/v1/events/{eventId}/registrations`, `GET /api/v1/registrations/me`, `DELETE /api/v1/registrations/{registrationId}`
 - **Oportunidades:** `GET/POST /api/v1/opportunities`, `GET/PATCH/DELETE /api/v1/opportunities/{opportunityId}`, `GET /api/v1/opportunities/publisher-contexts`, `GET /api/v1/opportunities/managed`
-- **Esportes:** `/api/v1/sports`, `/api/v1/competitions`, `/api/v1/seasons`, `/api/v1/sports-events/{contextType}/{contextId}/overview|teams|teams/join|free-agents|matches/generate|cancel`, `PATCH /api/v1/sports-events/{contextType}/{contextId}`, `PATCH /api/v1/sports-matches/{matchId}/score`, `POST /api/v1/sports-matches/{matchId}/checkin-token|checkins`
+- **Esportes:** `/api/v1/sports`, `/api/v1/competitions`, `/api/v1/seasons`, `/api/v1/sports-events/{contextType}/{contextId}/overview|teams|teams/join|free-agents|matches/generate|cancel`, `PATCH /api/v1/sports-events/{contextType}/{contextId}`, `PATCH /api/v1/sports-matches/{matchId}/score`, `POST /api/v1/sports-matches/{matchId}/checkin-token|checkins`, `GET/POST /api/v1/sports-matches/{matchId}/attendance`, `GET /api/v1/payment-references/me`
 - **Contratos detalhados:**
   - [Saga Coreografada (Pagamentos, Confirmação e Estorno)](../docs/SAGA.md)
   - [Projeção CQRS de Eventos](../docs/contracts/event-projection-v1.md)

@@ -18,4 +18,5 @@ public interface SportsFreeAgentRepository extends JpaRepository<SportsFreeAgent
             String status);
 
     List<SportsFreeAgent> findByUserIdAndStatusOrderByRegisteredAtDesc(String userId, String status);
+    List<SportsFreeAgent> findByUserId(String userId);
 }

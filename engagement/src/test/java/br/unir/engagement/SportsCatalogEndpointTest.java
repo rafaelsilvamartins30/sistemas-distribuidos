@@ -83,8 +83,8 @@ class SportsCatalogEndpointTest {
         this.jdbcTemplate.update("DELETE FROM sports_matches");
         this.jdbcTemplate.update("DELETE FROM sports_free_agents");
         this.jdbcTemplate.update("DELETE FROM sports_team_members");
-        this.jdbcTemplate.update("DELETE FROM sports_teams");
         this.jdbcTemplate.update("DELETE FROM seasons");
+        this.jdbcTemplate.update("DELETE FROM sports_teams");
         this.jdbcTemplate.update("DELETE FROM competitions");
         this.jdbcTemplate.update("DELETE FROM sports");
         when(this.campusEventOrganizerClient.getContexts(anyString()))
@@ -133,8 +133,7 @@ class SportsCatalogEndpointTest {
                 .andExpect(jsonPath("$.name").value("Vôlei")).andExpect(jsonPath("$.allowsDraw").value(true));
         this.mockMvc.perform(get("/api/v1/competitions/{id}", competition.getId()).with(userJwt()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ARCHIVED"))
-                .andExpect(jsonPath("$.sportName").value("Vôlei"))
-                .andExpect(jsonPath("$.tieBreakers[0]").value("SCORE_DIFFERENCE"));
+                .andExpect(jsonPath("$.sportName").value("Vôlei")).andExpect(jsonPath("$.tieBreakers").doesNotExist());
         this.mockMvc.perform(get("/api/v1/seasons/{id}", season.getId()).with(userJwt())).andExpect(status().isOk())
                 .andExpect(jsonPath("$.targetTeamCount").value(10))
                 .andExpect(jsonPath("$.roundRobinMode").value("double round-robin"))
@@ -201,7 +200,7 @@ class SportsCatalogEndpointTest {
                 .perform(
                         post("/api/v1/competitions").with(userJwt()).contentType(MediaType.APPLICATION_JSON).content("""
                                 {"title":"Copa 3x3 UFLA","sportId":"%s","skillLevel":"COMPETITIVE",
-                                 "organizerType":"DEPARTMENT","organizerId":"%s","targetTeamCount":16,
+                                 "organizerType":"DEPARTMENT","organizerId":"%s","targetTeamCount":32,
                                  "teamEntryPrice":5000,"freeAgentPrice":1000,
                                  "registrationDeadline":"2027-06-30T23:59:00Z"}
                                 """.formatted(createdSportId, ORGANIZER_ID)))
@@ -223,8 +222,7 @@ class SportsCatalogEndpointTest {
                 ORGANIZER_ID, "ACTIVE");
         this.sportRepository.saveAndFlush(sport);
         Competition comp = new Competition(UUID.randomUUID(), "Copa Integração", sport, "COMPETITIVE", "DEPARTMENT",
-                ORGANIZER_ID, new UUID[0], 16, 2, 4, new String[]{"SCORE_DIFFERENCE", "WINS"}, 0, 0,
-                Instant.now().plusSeconds(86_400), null, "OPEN", "GROUPS_KNOCKOUT");
+                ORGANIZER_ID, 32, 2, 4, 0, 0, Instant.now().plusSeconds(86_400), "OPEN", "GROUPS_KNOCKOUT");
         this.competitionRepository.saveAndFlush(comp);
 
         when(this.campusEventOrganizerClient.getContexts("organizer-token"))
@@ -259,16 +257,39 @@ class SportsCatalogEndpointTest {
         this.mockMvc.perform(post("/api/v1/sports-events/COMPETITION/{id}/matches/generate", comp.getId())
                 .with(userJwt("captain-1", "Carlos"))).andExpect(status().isForbidden());
 
-        // Organizer generates matches
+        this.mockMvc.perform(
+                post("/api/v1/sports-events/COMPETITION/{id}/matches/generate", comp.getId()).with(organizerJwt())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"location\":\"Quadra 1 UFLA\"}"))
+                .andExpect(status().isBadRequest());
+
+        for (int i = 3; i <= 32; i++) {
+            this.mockMvc
+                    .perform(post("/api/v1/sports-events/COMPETITION/{id}/teams", comp.getId())
+                            .with(userJwt("captain-" + i, "Capitão " + i)).contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Time " + i + "\",\"memberNames\":[\"Atleta\"]}"))
+                    .andExpect(status().isCreated());
+        }
+        when(this.campusEventOrganizerClient.containsAcademicSchedule(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("organizer-token")))
+                .thenReturn(true);
+        Instant firstMatch = java.time.LocalDate.of(2027, 7, 3).atTime(8, 0)
+                .atZone(java.time.ZoneId.of("America/Sao_Paulo")).toInstant();
         MvcResult matchesResult = this.mockMvc
                 .perform(post("/api/v1/sports-events/COMPETITION/{id}/matches/generate", comp.getId())
                         .with(organizerJwt()).contentType(MediaType.APPLICATION_JSON).content("""
-                                {"location":"Quadra 1 UFLA"}
-                                """))
-                .andExpect(status().isCreated()).andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].location").value("Quadra 1 UFLA")).andReturn();
+                                {"location":"Quadra 1 UFLA","firstMatchAt":"%s"}
+                                """.formatted(firstMatch)))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.length()").value(48)).andReturn();
         JsonNode generated = this.objectMapper.readTree(matchesResult.getResponse().getContentAsString());
-        String matchId = generated.get(0).get("id").asText();
+        String matchId = "";
+        for (JsonNode game : generated) {
+            if ((game.get("homeTeamName").asText() + game.get("awayTeamName").asText()).contains("Time Alpha")
+                    && (game.get("homeTeamName").asText() + game.get("awayTeamName").asText()).contains("Time Beta")) {
+                matchId = game.get("id").asText();
+                break;
+            }
+        }
+        org.junit.jupiter.api.Assertions.assertFalse(matchId.isEmpty());
 
         // Organizer generates check-in token
         MvcResult tokenResult = this.mockMvc
@@ -291,10 +312,17 @@ class SportsCatalogEndpointTest {
 
         // Player sees upcoming match in /api/v1/sports-matches/me
         this.mockMvc.perform(get("/api/v1/sports-matches/me").with(userJwt("free-1", "Lucas")))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1))
-                .andExpect(jsonPath("$.items[0].teamName").value("Time Beta"))
-                .andExpect(jsonPath("$.items[0].opponentName").value("Time Alpha"))
-                .andExpect(jsonPath("$.items[0].viewerCheckedIn").value(true));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(3))
+                .andExpect(jsonPath("$.items[?(@.matchId == '" + matchId + "')].viewerCheckedIn")
+                        .value(org.hamcrest.Matchers.contains(true)));
+
+        // Organizer can view live check-ins before match finishes, but cannot close
+        // early
+        this.mockMvc.perform(get("/api/v1/sports-matches/{id}/attendance", matchId).with(organizerJwt()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.entries[0].name").value("Lucas"))
+                .andExpect(jsonPath("$.closedAt").doesNotExist());
+        this.mockMvc.perform(post("/api/v1/sports-matches/{id}/attendance", matchId).with(organizerJwt()))
+                .andExpect(status().isConflict());
 
         // Organizer records score
         this.mockMvc
@@ -306,9 +334,192 @@ class SportsCatalogEndpointTest {
         // Overview returns complete modal payload
         this.mockMvc.perform(get("/api/v1/sports-events/COMPETITION/{id}/overview", comp.getId()).with(organizerJwt()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.viewerCanManage").value(true))
-                .andExpect(jsonPath("$.teams.length()").value(2))
-                .andExpect(jsonPath("$.matches[0].checkinCount").value(1))
-                .andExpect(jsonPath("$.matches[0].checkinToken").value(checkinToken));
+                .andExpect(jsonPath("$.teams.length()").value(32))
+                .andExpect(jsonPath("$.matches[?(@.id == '" + matchId + "')].checkinCount")
+                        .value(org.hamcrest.Matchers.contains(1)))
+                .andExpect(jsonPath("$.matches[?(@.id == '" + matchId + "')].viewerCanReviewAttendance")
+                        .value(org.hamcrest.Matchers.contains(true)));
+
+        this.mockMvc.perform(get("/api/v1/sports-matches/{id}/attendance", matchId).with(userJwt("free-1", "Lucas")))
+                .andExpect(status().isForbidden());
+        this.mockMvc.perform(get("/api/v1/sports-matches/{id}/attendance", matchId).with(organizerJwt()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.entries[0].name").value("Lucas"))
+                .andExpect(jsonPath("$.closedAt").doesNotExist());
+        this.mockMvc.perform(post("/api/v1/sports-matches/{id}/attendance", matchId).with(organizerJwt()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.closedAt").isNotEmpty());
+        this.mockMvc.perform(post("/api/v1/sports-matches/{id}/checkin-token", matchId).with(organizerJwt()))
+                .andExpect(status().isConflict());
+
+        JsonNode scoredGame = null;
+        for (JsonNode game : generated) {
+            if (game.get("id").asText().equals(matchId)) {
+                scoredGame = game;
+            }
+        }
+        org.junit.jupiter.api.Assertions.assertNotNull(scoredGame);
+        String strongest = scoredGame.get("homeTeamId").asText();
+        String groupVenue = scoredGame.get("location").asText();
+        var peers = new java.util.TreeSet<String>();
+        for (JsonNode game : generated) {
+            if (game.get("location").asText().equals(groupVenue)) {
+                peers.add(game.get("homeTeamId").asText());
+                peers.add(game.get("awayTeamId").asText());
+            }
+        }
+        peers.remove(strongest);
+        var tied = peers.stream().limit(2).toList();
+        for (JsonNode game : generated) {
+            if (!game.get("id").asText().equals(matchId)) {
+                String home = game.get("homeTeamId").asText();
+                String away = game.get("awayTeamId").asText();
+                boolean tie = tied.contains(home) && tied.contains(away);
+                boolean homeWins = home.equals(strongest) || !away.equals(strongest) && home.compareTo(away) < 0;
+                recordGame(game,
+                        tie
+                                ? "{\"homeScore\":1,\"awayScore\":1}"
+                                : homeWins ? "{\"homeScore\":1,\"awayScore\":0}" : "{\"homeScore\":0,\"awayScore\":1}");
+            }
+        }
+        org.junit.jupiter.api.Assertions.assertEquals(64, readTournamentMatches(comp.getId()).size());
+        this.mockMvc.perform(get("/api/v1/sports-events/COMPETITION/{id}/overview", comp.getId()).with(organizerJwt()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.standings.length()").value(8))
+                .andExpect(jsonPath("$.phase").value("ROLANDO"));
+        for (int round : List.of(4, 6, 8)) {
+            int expectedGames = 8 >> ((round - 4) / 2);
+            JsonNode bracket = readTournamentMatches(comp.getId());
+            int firstLegs = 0;
+            int secondLegs = 0;
+            for (JsonNode game : bracket) {
+                int number = game.get("roundNumber").asInt();
+                if (number == round) {
+                    recordGame(game, "{\"homeScore\":1,\"awayScore\":0}");
+                    firstLegs++;
+                } else if (number == round + 1) {
+                    this.mockMvc
+                            .perform(patch("/api/v1/sports-matches/{id}/score", game.get("id").asText())
+                                    .with(organizerJwt()).contentType(MediaType.APPLICATION_JSON)
+                                    .content("{\"homeScore\":1,\"awayScore\":0}"))
+                            .andExpect(status().isBadRequest())
+                            .andExpect(jsonPath("$.code").value("PENALTIES_REQUIRED"));
+                    recordGame(game, "{\"homeScore\":1,\"awayScore\":0,\"homePenaltyScore\":5,\"awayPenaltyScore\":4}");
+                    secondLegs++;
+                }
+            }
+            org.junit.jupiter.api.Assertions.assertEquals(expectedGames, firstLegs);
+            org.junit.jupiter.api.Assertions.assertEquals(expectedGames, secondLegs);
+        }
+        JsonNode finalGame = readTournamentMatches(comp.getId()).get(76);
+        org.junit.jupiter.api.Assertions.assertEquals(10, finalGame.get("roundNumber").asInt());
+        recordGame(finalGame, "{\"homeScore\":0,\"awayScore\":0,\"homePenaltyScore\":3,\"awayPenaltyScore\":4}");
+        this.mockMvc.perform(get("/api/v1/sports-events/COMPETITION/{id}/overview", comp.getId()).with(organizerJwt()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.knockoutTies.length()").value(15))
+                .andExpect(jsonPath("$.knockoutTies[0].homeAggregate").value(1))
+                .andExpect(jsonPath("$.knockoutTies[0].awayAggregate").value(1))
+                .andExpect(jsonPath("$.knockoutTies[14].winnerTeamId").value(finalGame.get("awayTeamId").asText()));
+    }
+
+    @Test
+    void seasonGeneratesNinetyGamesOverEighteenTuesdayAndThursdayRounds() throws Exception {
+        Sport sport = new Sport(SPORT_ID, "Tênis", 1, 1, 2, true, 3, 1, 0, 3, "Regras.", "DEPARTMENT", ORGANIZER_ID,
+                "ACTIVE");
+        this.sportRepository.saveAndFlush(sport);
+        Instant start = Instant.parse("2027-07-06T12:00:00Z");
+        Season season = this.seasonRepository.saveAndFlush(new Season(UUID.randomUUID(), "Liga", sport, "COMPETITIVE",
+                "DEPARTMENT", ORGANIZER_ID, 10, 1, 2, 0, 0, start.minusSeconds(86_400), "OPEN", "double round-robin"));
+        when(this.campusEventOrganizerClient.getContexts("organizer-token"))
+                .thenReturn(new EventOrganizerContextsResponse(
+                        List.of(new EventOrganizerContext("DEPARTMENT", ORGANIZER_ID, "DCC"))));
+        this.mockMvc
+                .perform(patch("/api/v1/sports-events/SEASON/{id}", season.getId()).with(organizerJwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"registrationDeadline\":\"" + start.minusSeconds(86_400) + "\"}"))
+                .andExpect(status().isOk());
+        for (int i = 1; i <= 10; i++) {
+            MvcResult team = this.mockMvc
+                    .perform(post("/api/v1/sports-events/SEASON/{id}/teams", season.getId())
+                            .with(userJwt("league-" + i, "Capitão " + i)).contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Time " + i + "\",\"reservedPlayerCount\":" + (i == 1 ? 2 : 1) + "}"))
+                    .andExpect(status().isCreated()).andReturn();
+            if (i == 1) {
+                String code = this.objectMapper.readTree(team.getResponse().getContentAsString()).get("inviteCode")
+                        .asText();
+                this.mockMvc
+                        .perform(post("/api/v1/sports-events/SEASON/{id}/teams/join", season.getId())
+                                .with(userJwt("league-partner", "Parceira")).contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"inviteCode\":\"" + code + "\"}"))
+                        .andExpect(status().isCreated()).andExpect(jsonPath("$.members.length()").value(2));
+            }
+        }
+        this.mockMvc
+                .perform(post("/api/v1/sports-events/SEASON/{id}/matches/generate", season.getId()).with(organizerJwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"location\":\"Quadra 1\",\"firstMatchAt\":\"" + start + "\"}"))
+                .andExpect(status().isBadRequest());
+        when(this.campusEventOrganizerClient.containsAcademicSchedule(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("organizer-token")))
+                .thenReturn(true);
+        MvcResult result = this.mockMvc
+                .perform(post("/api/v1/sports-events/SEASON/{id}/matches/generate", season.getId()).with(organizerJwt())
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                                {"location":"Quadra 1","firstMatchAt":"%s"}
+                                """.formatted(start)))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.length()").value(90)).andReturn();
+        JsonNode games = this.objectMapper.readTree(result.getResponse().getContentAsString());
+        java.util.Map<Integer, Integer> rounds = new java.util.HashMap<>();
+        java.util.Set<String> directedFixtures = new java.util.HashSet<>();
+        for (JsonNode game : games) {
+            var day = Instant.parse(game.get("scheduledAt").asText()).atZone(java.time.ZoneId.of("America/Sao_Paulo"))
+                    .getDayOfWeek();
+            org.junit.jupiter.api.Assertions
+                    .assertTrue(day == java.time.DayOfWeek.TUESDAY || day == java.time.DayOfWeek.THURSDAY);
+            rounds.merge(game.get("roundNumber").asInt(), 1, Integer::sum);
+            directedFixtures.add(game.get("homeTeamId").asText() + ":" + game.get("awayTeamId").asText());
+        }
+        org.junit.jupiter.api.Assertions.assertEquals(18, rounds.size());
+        org.junit.jupiter.api.Assertions.assertTrue(rounds.values().stream().allMatch(count -> count == 5));
+        org.junit.jupiter.api.Assertions.assertEquals(90, directedFixtures.size());
+        this.mockMvc.perform(get("/api/v1/seasons/{id}", season.getId()).with(userJwt())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+
+        String champion = games.get(0).get("homeTeamId").asText();
+        String decision = "{\"championTeamId\":\"" + champion + "\"}";
+        this.mockMvc.perform(patch("/api/v1/sports-events/SEASON/{id}", season.getId()).with(organizerJwt())
+                .contentType(MediaType.APPLICATION_JSON).content(decision)).andExpect(status().isConflict());
+        for (JsonNode game : games) {
+            recordGame(game, "{\"homeScore\":1,\"awayScore\":1}");
+        }
+        this.mockMvc.perform(get("/api/v1/sports-events/SEASON/{id}/overview", season.getId()).with(organizerJwt()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.manualChampionCandidates.length()").value(10))
+                .andExpect(jsonPath("$.championTeamId").doesNotExist()).andExpect(jsonPath("$.phase").value("ROLANDO"));
+        this.mockMvc
+                .perform(patch("/api/v1/sports-events/SEASON/{id}", season.getId()).with(organizerJwt())
+                        .contentType(MediaType.APPLICATION_JSON).content(decision))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.championTeamId").value(champion));
+        this.mockMvc.perform(get("/api/v1/sports-events/SEASON/{id}/overview", season.getId()).with(userJwt()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.manualChampionCandidates").isEmpty())
+                .andExpect(jsonPath("$.championTeamId").value(champion))
+                .andExpect(jsonPath("$.phase").value("FINALIZADO"));
+        this.mockMvc
+                .perform(
+                        patch("/api/v1/sports-matches/{id}/score", games.get(0).get("id").asText()).with(organizerJwt())
+                                .contentType(MediaType.APPLICATION_JSON).content("{\"homeScore\":1,\"awayScore\":0}"))
+                .andExpect(status().isConflict());
+
+        this.mockMvc.perform(post("/api/v1/sports-events/SEASON/{id}/cancel", season.getId()).with(organizerJwt()))
+                .andExpect(status().isOk());
+
+    }
+
+    private void recordGame(JsonNode game, String score) throws Exception {
+        this.mockMvc.perform(patch("/api/v1/sports-matches/{id}/score", game.get("id").asText()).with(organizerJwt())
+                .contentType(MediaType.APPLICATION_JSON).content(score)).andExpect(status().isOk());
+    }
+
+    private JsonNode readTournamentMatches(UUID id) throws Exception {
+        MvcResult result = this.mockMvc
+                .perform(get("/api/v1/sports-events/COMPETITION/{id}/overview", id).with(organizerJwt()))
+                .andExpect(status().isOk()).andReturn();
+        return this.objectMapper.readTree(result.getResponse().getContentAsString()).get("matches");
     }
 
     @Test
@@ -317,8 +528,7 @@ class SportsCatalogEndpointTest {
                 ORGANIZER_ID, "ACTIVE");
         this.sportRepository.saveAndFlush(sport);
         Season season = new Season(UUID.randomUUID(), "Liga de Duplas", sport, "RECREATIONAL", "DEPARTMENT",
-                ORGANIZER_ID, new UUID[0], 10, 2, 2, new String[]{"WINS"}, 0, 0, Instant.now().plusSeconds(86_400),
-                "OPEN", "double round-robin");
+                ORGANIZER_ID, 10, 2, 2, 0, 0, Instant.now().plusSeconds(86_400), "OPEN", "double round-robin");
         this.seasonRepository.saveAndFlush(season);
 
         this.mockMvc
@@ -339,8 +549,7 @@ class SportsCatalogEndpointTest {
                 ORGANIZER_ID, "ACTIVE");
         this.sportRepository.saveAndFlush(sport);
         Competition comp = new Competition(UUID.randomUUID(), "Copa Paga UFLA", sport, "COMPETITIVE", "DEPARTMENT",
-                ORGANIZER_ID, new UUID[0], 16, 2, 4, new String[]{"SCORE_DIFFERENCE"}, 5000, 1000,
-                Instant.now().plusSeconds(86_400), null, "OPEN", "GROUPS_KNOCKOUT");
+                ORGANIZER_ID, 16, 2, 4, 5000, 1000, Instant.now().plusSeconds(86_400), "OPEN", "GROUPS_KNOCKOUT");
         this.competitionRepository.saveAndFlush(comp);
 
         MvcResult teamResult = this.mockMvc
@@ -350,6 +559,16 @@ class SportsCatalogEndpointTest {
                                 """))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("PENDING_PAYMENT")).andReturn();
         String teamId = this.objectMapper.readTree(teamResult.getResponse().getContentAsString()).get("id").asText();
+
+        this.mockMvc.perform(get("/api/v1/sports-payment-origins/me").with(userJwt("payer-1", "Rafael")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$['" + teamId + "']").value("SPORTS_TEAM"));
+        this.mockMvc.perform(get("/api/v1/payment-references/me").with(userJwt("payer-1", "Rafael")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$['" + teamId + "'].origin").value("SPORTS_TEAM"))
+                .andExpect(jsonPath("$['" + teamId + "'].title").value("Copa Paga UFLA"))
+                .andExpect(jsonPath("$['" + teamId + "'].subtitle").value("Equipe · Time Pago"))
+                .andExpect(jsonPath("$['" + teamId + "'].targetPath").value("/esportes/campeonatos/" + comp.getId()));
+        this.mockMvc.perform(get("/api/v1/sports-payment-origins/me").with(userJwt("outsider", "Fora")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$['" + teamId + "']").doesNotExist());
 
         // Not yet in /sports-events/me before payment confirmation
         this.mockMvc.perform(get("/api/v1/sports-events/me").with(userJwt("payer-1", "Rafael")))
@@ -445,11 +664,10 @@ class SportsCatalogEndpointTest {
         Sport sport = sport(SPORT_ID, "Basquete");
         this.sportRepository.saveAndFlush(sport);
         Competition invalidCompetition = new Competition(UUID.randomUUID(), "Formato não suportado", sport,
-                "COMPETITIVE", "DEPARTMENT", ORGANIZER_ID, new UUID[0], 16, 5, 10, new String[]{"WINS"}, 0, 0,
-                Instant.now().plusSeconds(86_400), null, null, "ROUND_ROBIN");
+                "COMPETITIVE", "DEPARTMENT", ORGANIZER_ID, 16, 5, 10, 0, 0, Instant.now().plusSeconds(86_400), null,
+                "ROUND_ROBIN");
         Season invalidSeason = new Season(UUID.randomUUID(), "Turno incompatível", sport, "COMPETITIVE", "DEPARTMENT",
-                ORGANIZER_ID, new UUID[0], 10, 5, 10, new String[0], 0, 0, Instant.now().plusSeconds(86_400), null,
-                "single round-robin");
+                ORGANIZER_ID, 10, 5, 10, 0, 0, Instant.now().plusSeconds(86_400), null, "single round-robin");
 
         org.junit.jupiter.api.Assertions.assertThrows(DataIntegrityViolationException.class,
                 () -> this.competitionRepository.saveAndFlush(invalidCompetition));
@@ -463,15 +681,14 @@ class SportsCatalogEndpointTest {
     }
 
     private static Competition competition(UUID id, String title, Sport sport, int targetTeams, String status) {
-        return new Competition(id, title, sport, "COMPETITIVE", "DEPARTMENT", ORGANIZER_ID,
-                new UUID[]{UUID.randomUUID()}, targetTeams, 7, 12, new String[]{"SCORE_DIFFERENCE", "WINS"}, 1000, 100,
-                Instant.now().plusSeconds(86_400), null, status, "GROUPS_KNOCKOUT");
+        return new Competition(id, title, sport, "COMPETITIVE", "DEPARTMENT", ORGANIZER_ID, targetTeams, 7, 12, 1000,
+                100, Instant.now().plusSeconds(86_400), status, "GROUPS_KNOCKOUT");
     }
 
     private static Season season(UUID id, String title, Sport sport, int targetTeams) {
         String roundRobinMode = targetTeams == 10 ? "double round-robin" : "single round-robin";
-        return new Season(id, title, sport, "RECREATIONAL", "DEPARTMENT", ORGANIZER_ID, new UUID[0], targetTeams, 7, 12,
-                new String[]{"HEAD_TO_HEAD"}, 500, 50, Instant.now().plusSeconds(86_400), null, roundRobinMode);
+        return new Season(id, title, sport, "RECREATIONAL", "DEPARTMENT", ORGANIZER_ID, targetTeams, 7, 12, 500, 50,
+                Instant.now().plusSeconds(86_400), null, roundRobinMode);
     }
 
     private static RequestPostProcessor userJwt() {

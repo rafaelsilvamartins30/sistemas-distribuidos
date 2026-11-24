@@ -53,6 +53,20 @@ public class SportsMatch {
     @Column(name = "checkin_token", length = 64)
     private String checkinToken;
 
+    @Column(name = "attendance_closed_at")
+    private Instant attendanceClosedAt;
+
+    public Instant getAttendanceClosedAt() {
+        return this.attendanceClosedAt;
+    }
+
+    public void closeAttendance(Instant now) {
+        if (this.attendanceClosedAt == null) {
+            this.attendanceClosedAt = now;
+            this.checkinToken = null;
+        }
+    }
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 

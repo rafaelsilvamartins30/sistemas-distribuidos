@@ -2,9 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router-dom";
-import { CampusSpaceCard } from "../src/components/CampusSpaceCard.js";
-import { DepartmentCard } from "../src/components/DepartmentCard.js";
 import { PaginationControls } from "../src/components/PaginationControls.js";
 import {
   CampusApiError,
@@ -139,14 +136,6 @@ test("department service surfaces Gateway not found responses", async () => {
   );
 });
 
-test("department card displays data returned by Campus", () => {
-  const markup = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(DepartmentCard, { department })));
-
-  assert.match(markup, /Departamento de Ciência da Computação/);
-  assert.match(markup, /Departamento de Ciência da Computação da UFLA/);
-  assert.match(markup, /href="\/departamentos\/10000000-0000-4000-8000-000000000001"/);
-});
-
 test("academic catalog services treat units as peer profiles and filter courses by department", async () => {
   const requested: string[] = [];
   const fetchImpl: typeof globalThis.fetch = async (url) => {
@@ -216,26 +205,7 @@ test("academic entity and community services use paginated Gateway endpoints and
   ]);
 });
 
-test("academic entity and community cards show Campus values and point to their details", () => {
-  const markup = renderToStaticMarkup(
-    createElement(
-      MemoryRouter,
-      null,
-      createElement(CampusSpaceCard, {
-        id: academicEntity.id,
-        name: academicEntity.name,
-        description: academicEntity.description,
-        kind: academicEntity.entityType,
-        detailPath: `/entidades/${academicEntity.id}`,
-        logoUrl: academicEntity.logoUrl,
-        bannerUrl: academicEntity.bannerUrl,
-      }),
-    ),
-  );
-
-  assert.match(markup, /Entidade de Demonstração do DCC/);
-  assert.match(markup, /href="\/entidades\/20000000-0000-4000-8000-000000000001"/);
-
+test("pagination controls show current page and next action", () => {
   const pagination = renderToStaticMarkup(
     createElement(PaginationControls, { page: 0, totalPages: 2, onPageChange: () => {} }),
   );

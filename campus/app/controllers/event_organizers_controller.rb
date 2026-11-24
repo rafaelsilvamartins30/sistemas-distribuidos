@@ -11,7 +11,7 @@ class EventOrganizersController < ApplicationController
   private
 
   def organizer_contexts_for(subject)
-    university_contexts(subject) +
+    university_contexts +
       academic_unit_contexts(subject) +
       department_contexts(subject) +
       entity_contexts(subject) +
@@ -19,9 +19,9 @@ class EventOrganizersController < ApplicationController
       professor_context(subject)
   end
 
-  def university_contexts(subject)
+  def university_contexts
     university = University.current
-    return [] unless university && administered_by?(university, subject)
+    return [] unless university && global_platform_admin?
 
     [organizer_context('UNIVERSITY', university.id, university.name)]
   end
@@ -68,6 +68,8 @@ class EventOrganizersController < ApplicationController
   end
 
   def administered_by?(record, subject)
+    return true if global_platform_admin?
+
     ids =
       if record.respond_to?(:administrator_user_ids)
         record.administrator_user_ids

@@ -2,7 +2,7 @@ package br.unir.engagement.controller;
 
 import br.unir.engagement.dto.CreateEventRequest;
 import br.unir.engagement.dto.EventListResponse;
-import br.unir.engagement.dto.EventOrganizerContextsResponse;
+import br.unir.engagement.dto.EventPublicationContextsResponse;
 import br.unir.engagement.dto.EventResponse;
 import br.unir.engagement.dto.UpdateEventRequest;
 import br.unir.engagement.service.EventService;
@@ -39,7 +39,7 @@ public class EventController {
     }
 
     @GetMapping("/organizer-contexts")
-    public EventOrganizerContextsResponse organizerContexts(@AuthenticationPrincipal Jwt jwt) {
+    public EventPublicationContextsResponse organizerContexts(@AuthenticationPrincipal Jwt jwt) {
         return this.eventService.getOrganizerContexts(jwt.getTokenValue());
     }
 
@@ -50,8 +50,8 @@ public class EventController {
     }
 
     @GetMapping("/{eventId}")
-    public EventResponse getEvent(@PathVariable UUID eventId) {
-        return this.eventService.getEvent(eventId);
+    public EventResponse getEvent(@PathVariable UUID eventId, @AuthenticationPrincipal Jwt jwt) {
+        return this.eventService.getEvent(eventId, jwt.getTokenValue(), jwt.getSubject());
     }
 
     @PostMapping

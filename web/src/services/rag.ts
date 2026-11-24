@@ -1,3 +1,5 @@
+import { parseApiError } from "../utils/apiError.js";
+
 export type RagSourceTypeFilter = "EVENT" | "OPPORTUNITY";
 
 export interface RagSourceReference {
@@ -86,14 +88,8 @@ export async function queryRagAssistant(
   });
 
   if (!response.ok) {
-    let message: string | undefined;
-    try {
-      const err = (await response.json()) as { message?: string; detail?: string; error?: string };
-      message = err.message ?? err.detail ?? err.error;
-    } catch {
-      // Ignore non-JSON error payloads
-    }
-    throw new RagApiError(response.status, message);
+    const parsed = await parseApiError(response, `Assistente RAG respondeu com status ${response.status}.`);
+    throw new RagApiError(response.status, parsed.message);
   }
 
   return (await response.json()) as RagQueryResponse;

@@ -1,9 +1,6 @@
+import { formatBrl } from "../utils/currency.js";
 import { Link } from "react-router-dom";
 import type { Competition, Season } from "../services/sports.js";
-
-function currency(value: number): string {
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value / 100);
-}
 
 function statusLabel(status: string | null): string {
   if (status === "CANCELLED") return "Cancelado";
@@ -66,10 +63,10 @@ export function CompetitionCard({
       <Facts item={competition} />
       <div className="sports-catalog-price">
         <span>
-          Equipe <strong>{currency(competition.teamEntryPrice)}</strong>
+          Equipe <strong>{formatBrl(competition.teamEntryPrice)}</strong>
         </span>
         <span>
-          Free agent <strong>{currency(competition.freeAgentPrice)}</strong>
+          Free agent <strong>{formatBrl(competition.freeAgentPrice)}</strong>
         </span>
       </div>
       {onOpen ? (
@@ -113,10 +110,10 @@ export function SeasonCard({
       <Facts item={season} />
       <div className="sports-catalog-price">
         <span>
-          Equipe <strong>{currency(season.teamEntryPrice)}</strong>
+          Equipe <strong>{formatBrl(season.teamEntryPrice)}</strong>
         </span>
         <span>
-          Free agent <strong>{currency(season.freeAgentPrice)}</strong>
+          Free agent <strong>{formatBrl(season.freeAgentPrice)}</strong>
         </span>
       </div>
       {onOpen ? (

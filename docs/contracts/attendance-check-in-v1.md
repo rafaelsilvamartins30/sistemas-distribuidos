@@ -82,3 +82,26 @@ docker compose exec access /app/access issue-qr <event-id>
 ```
 
 Para execução fora do Compose, use `cargo run -- issue-qr <event-id>` com `DB_URL` apontando para o PostgreSQL do Access. A tela Web usa `BarcodeDetector` quando disponível e oferece campo manual como fallback.
+
+## Organizer actions
+
+`GET /api/v1/attendance/events/{eventId}/organizer-action` (Web equivalent under
+`/api/v1/web/attendance`) returns `{ "action": "GENERATE_EVENT_QR" }`,
+`{ "action": "SCAN_PARTICIPANT_QR" }`, or `{ "action": null }`. Access derives the action
+from the authenticated subject and the creator, mode and status of its attendance session.
+Missing sessions, closed sessions and callers other than the recorded creator get a null
+action. Session creation still follows the registration flow. QR generation and organizer
+check-in commands revalidate the action, and scans still enforce the check-in window and
+the ticket status when submitted.
+
+The participant entries in `/api/v1/attendance/me` and `/api/v1/attendance/tickets/me`
+include `action` (`SCAN_EVENT_QR`, `GENERATE_PARTICIPANT_QR`, or null). Access
+derives this from the open session, its mode and the entry's eligibility.
+
+The recorded creator can inspect live check-ins at any time while the session is not cancelled via
+`GET /api/v1/attendance/events/{eventId}/attendance-review` (returning recorded check-ins and
+`closedAt`). After the check-in window, Access advertises `REVIEW_ATTENDANCE` to the recorded
+creator and `POST` at the same path finalizes the list (marking remaining eligible entries as
+`NO_SHOW`) and preserves the original closing time on retries. `POST` before the end of the check-in
+window returns `409 Conflict`. The Web BFF resolves display names through Campus after Access
+authorizes the request. The closing action preserves existing check-ins.

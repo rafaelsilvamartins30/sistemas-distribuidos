@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useOutletContext, useParams, useSearchParams } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { CommunitySpacePanel, FollowControl, InstitutionalPostsPanel } from "../components/CampusSocial";
 import { Icon } from "../components/Icon";
 import { InstitutionalProfileEditor } from "../components/InstitutionalProfileEditor";
+import { useToast } from "../contexts/ToastContext";
 import {
   InstitutionalLinks,
   InstitutionalProfileTabs,
@@ -13,9 +14,6 @@ import {
 import { RequestProfileForm } from "./CampusRequestsPage";
 import {
   CampusApiError,
-  createSemester,
-  createUniversityProfile,
-  createDepartmentCourse,
   getAcademicEntities,
   getAcademicEntity,
   getAcademicUnit,
@@ -25,15 +23,12 @@ import {
   getDepartment,
   getDepartments,
   getUniversity,
-  getSemesters,
-  updateSemester,
   type AcademicUnit,
   type AcademicEntity,
   type CampusPage,
   type Community,
   type Department,
   type University,
-  type Semester,
 } from "../services/campus";
 import {
   campusProfilePath,
@@ -245,142 +240,6 @@ function ProfileCard({ profile }: { profile: ProfileSummary }) {
   );
 }
 
-function UniversitySemesterAdmin({ token }: { token: string }) {
-  const [semesters, setSemesters] = useState<Semester[]>([]);
-  const [draft, setDraft] = useState({ name: "", startOn: "", endOn: "" });
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    let active = true;
-    getSemesters(token)
-      .then(({ items }) => active && setSemesters(items))
-      .catch(() => active && setError("Não foi possível carregar os semestres cadastrados."))
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [token]);
-
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    setError("");
-    setMessage("");
-    try {
-      const saved = editingId ? await updateSemester(token, editingId, draft) : await createSemester(token, draft);
-      setSemesters((current) =>
-        [...current.filter((semester) => semester.id !== saved.id), saved].sort((left, right) =>
-          right.startOn.localeCompare(left.startOn),
-        ),
-      );
-      setDraft({ name: "", startOn: "", endOn: "" });
-      setEditingId(null);
-      setMessage(`${saved.name} salvo.`);
-    } catch {
-      setError("Não foi possível salvar. Use o formato AAAA/1 ou AAAA/2 e confira as datas.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <details className="university-semester-admin">
-      <summary>Gerenciar semestres</summary>
-      <div className="university-semester-admin-content">
-        <p>Cadastre os períodos acadêmicos para organizar e filtrar as publicações.</p>
-        <form className="campus-semester-form" onSubmit={(event) => void save(event)}>
-          <label className="field">
-            <span>Semestre</span>
-            <input
-              required
-              pattern="[0-9]{4}/[12]"
-              placeholder="2026/2"
-              value={draft.name}
-              onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-            />
-          </label>
-          <label className="field">
-            <span>Data de início</span>
-            <input
-              required
-              type="date"
-              value={draft.startOn}
-              onChange={(event) => setDraft((current) => ({ ...current, startOn: event.target.value }))}
-            />
-          </label>
-          <label className="field">
-            <span>Data de fim</span>
-            <input
-              required
-              type="date"
-              value={draft.endOn}
-              onChange={(event) => setDraft((current) => ({ ...current, endOn: event.target.value }))}
-            />
-          </label>
-          <div className="campus-semester-form-actions">
-            <button className="button button-primary" disabled={saving} type="submit">
-              {saving ? "Salvando…" : editingId ? "Salvar alterações" : "Adicionar semestre"}
-            </button>
-            {editingId && (
-              <button
-                className="button button-secondary"
-                type="button"
-                onClick={() => {
-                  setEditingId(null);
-                  setDraft({ name: "", startOn: "", endOn: "" });
-                }}
-              >
-                Cancelar edição
-              </button>
-            )}
-          </div>
-        </form>
-        {error && (
-          <p className="notice notice-error" role="alert">
-            {error}
-          </p>
-        )}
-        {message && (
-          <p className="notice notice-success" role="status">
-            {message}
-          </p>
-        )}
-        {loading ? (
-          <p className="notice" role="status">
-            Carregando semestres…
-          </p>
-        ) : (
-          <div className="campus-semester-list">
-            {semesters.map((semester) => (
-              <div className="campus-semester-row" key={semester.id}>
-                <strong>{semester.name}</strong>
-                <span>
-                  {semester.startOn} — {semester.endOn}
-                </span>
-                <button
-                  className="text-link"
-                  type="button"
-                  onClick={() => {
-                    setEditingId(semester.id);
-                    setDraft({ name: semester.name, startOn: semester.startOn, endOn: semester.endOn });
-                  }}
-                >
-                  Editar
-                </button>
-              </div>
-            ))}
-            {semesters.length === 0 && <p>Nenhum semestre cadastrado.</p>}
-          </div>
-        )}
-      </div>
-    </details>
-  );
-}
-
 export function ProfilesPage() {
   const { keycloak } = useOutletContext<WebContext>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -407,9 +266,9 @@ export function ProfilesPage() {
     ACADEMIC_ENTITY: 0,
     COMMUNITY: 0,
   });
-  const [failedTypes, setFailedTypes] = useState<CampusProfileType[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const toast = useToast();
   const token = keycloak.token ?? "";
   const activeType = campusProfileTypeFromFilter(searchParams.get("tipo"));
 
@@ -451,14 +310,16 @@ export function ProfilesPage() {
       setPageByType({ UNIVERSITY: 0, ACADEMIC_UNIT: 0, DEPARTMENT: 0, ACADEMIC_ENTITY: 0, COMMUNITY: 0 });
       setTotalPages(nextPages);
       setTotalByType(nextTotals);
-      setFailedTypes(failed);
+      if (failed.length > 0) {
+        toast.error("Alguns perfis não puderam ser carregados. Recarregue a página para tentar novamente.");
+      }
       setLoading(false);
     });
 
     return () => {
       active = false;
     };
-  }, [token]);
+  }, [token, toast]);
 
   const visibleProfiles = useMemo(() => {
     const normalizedQuery = query
@@ -500,14 +361,12 @@ export function ProfilesPage() {
       }),
     );
     const nextProfiles: ProfileSummary[] = [];
-    const succeeded: CampusProfileType[] = [];
     const failed: CampusProfileType[] = [];
     const nextPageByType = { ...pageByType };
 
     results.forEach((result, index) => {
       const fallbackType = typesWithMore[index];
       if (result.status === "fulfilled") {
-        succeeded.push(result.value.type);
         nextPageByType[result.value.type] = result.value.page;
         nextProfiles.push(...result.value.result.items.map((item) => mapProfile(result.value.type, item)));
       } else {
@@ -524,7 +383,9 @@ export function ProfilesPage() {
       ),
     );
     setPageByType(nextPageByType);
-    setFailedTypes((current) => [...current.filter((type) => !succeeded.includes(type)), ...failed]);
+    if (failed.length > 0) {
+      toast.error("Alguns perfis não puderam ser carregados.");
+    }
     setLoadingMore(false);
   }
 
@@ -581,12 +442,6 @@ export function ProfilesPage() {
           </div>
         </div>
       </section>
-
-      {failedTypes.length > 0 && (
-        <p className="notice notice-error profile-directory-error" role="status">
-          Alguns perfis não puderam ser carregados. Recarregue a página para tentar novamente.
-        </p>
-      )}
 
       {loading ? (
         <p className="notice" role="status">
@@ -645,6 +500,7 @@ export function ProfilesPage() {
 
 export function UnifiedProfilePage() {
   const { keycloak } = useOutletContext<WebContext>();
+  const toast = useToast();
   const { profileType: profileTypeSlug, profileId = "" } = useParams();
   const profileType = campusProfileTypeFromSlug(profileTypeSlug);
   const [record, setRecord] = useState<ProfileRecord | null>(null);
@@ -652,17 +508,6 @@ export function UnifiedProfilePage() {
   const [error, setError] = useState("");
   const [currentTerm, setCurrentTerm] = useState("");
   const [selectedTab, setSelectedTab] = useInstitutionalProfileTab();
-  const [courseName, setCourseName] = useState("");
-  const [courseError, setCourseError] = useState("");
-  const [courseSaving, setCourseSaving] = useState(false);
-  const [catalogKind, setCatalogKind] = useState<"ACADEMIC_UNIT" | "DEPARTMENT">("ACADEMIC_UNIT");
-  const [catalogCode, setCatalogCode] = useState("");
-  const [catalogName, setCatalogName] = useState("");
-  const [catalogDescription, setCatalogDescription] = useState("");
-  const [catalogInfo, setCatalogInfo] = useState("");
-  const [catalogError, setCatalogError] = useState("");
-  const [catalogMessage, setCatalogMessage] = useState("");
-  const [catalogSaving, setCatalogSaving] = useState(false);
   const token = keycloak.token ?? "";
 
   useEffect(() => {
@@ -674,6 +519,7 @@ export function UnifiedProfilePage() {
 
     if (!profileType || !profileId) {
       setError("Este perfil não foi encontrado.");
+      toast.error("Este perfil não foi encontrado.");
       setLoading(false);
       return () => {
         active = false;
@@ -693,67 +539,18 @@ export function UnifiedProfilePage() {
       })
       .catch((requestError: unknown) => {
         if (!active) return;
-        setError(profileError(requestError));
+        const msg = profileError(requestError);
+        setError(msg);
+        toast.error(msg);
         setLoading(false);
       });
 
     return () => {
       active = false;
     };
-  }, [profileId, profileType, token]);
+  }, [profileId, profileType, token, toast]);
 
-  async function addCourse(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (profileType !== "DEPARTMENT" || !courseName.trim()) return;
-    setCourseSaving(true);
-    setCourseError("");
-    try {
-      await createDepartmentCourse(token, profileId, courseName.trim());
-      setCourseName("");
-      setRecord(await getDepartment(token, profileId));
-    } catch (requestError) {
-      setCourseError(
-        requestError instanceof CampusApiError && requestError.status === 403
-          ? "Somente administradores do departamento podem cadastrar cursos."
-          : "Não foi possível cadastrar o curso.",
-      );
-    } finally {
-      setCourseSaving(false);
-    }
-  }
-
-  async function createCatalogProfile(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (profileType !== "UNIVERSITY" || !record?.viewerCanManage) return;
-    setCatalogSaving(true);
-    setCatalogError("");
-    setCatalogMessage("");
-    try {
-      const created = (await createUniversityProfile(token, catalogKind, {
-        ...(catalogKind === "DEPARTMENT" ? { acronym: catalogCode } : { code: catalogCode }),
-        name: catalogName.trim(),
-        description: catalogDescription.trim(),
-        generalInfoMarkdown: catalogInfo.trim(),
-        links: [],
-      })) as { name?: string };
-      const kind = catalogKind === "DEPARTMENT" ? "Departamento" : "Unidade acadêmica";
-      setCatalogMessage(`${kind} ${created.name ?? catalogName.trim()} cadastrado.`);
-      setCatalogCode("");
-      setCatalogName("");
-      setCatalogDescription("");
-      setCatalogInfo("");
-    } catch (requestError) {
-      setCatalogError(
-        requestError instanceof CampusApiError && requestError.status === 403
-          ? "Somente administradores da universidade podem cadastrar perfis acadêmicos."
-          : "Não foi possível cadastrar o perfil. Confira se o código já está em uso.",
-      );
-    } finally {
-      setCatalogSaving(false);
-    }
-  }
-
-  if (!profileType) {
+  if (!profileType || !profileId) {
     return (
       <div className="public-profile-page">
         <Link className="back-link" to="/perfis">
@@ -836,6 +633,17 @@ export function UnifiedProfilePage() {
                     Abrir central da comunidade <Icon name="arrowUpRight" width="15" height="15" />
                   </Link>
                 )}
+                {record.viewerCanEditProfile && profileType !== "UNIVERSITY" && (
+                  <InstitutionalProfileEditor
+                    token={token}
+                    type={profileType}
+                    profileId={record.id}
+                    profile={record}
+                    onSaved={(updated) =>
+                      setRecord((current) => current && ({ ...current, ...updated } as ProfileRecord))
+                    }
+                  />
+                )}
               </div>
             </div>
           </article>
@@ -872,114 +680,7 @@ export function UnifiedProfilePage() {
                       ) : (
                         <p>Nenhum curso listado.</p>
                       )}
-                      {(record as Department).viewerCanManage && (
-                        <form className="campus-course-form" onSubmit={(event) => void addCourse(event)}>
-                          <label className="field">
-                            <span>Adicionar curso</span>
-                            <input
-                              maxLength={255}
-                              value={courseName}
-                              onChange={(event) => setCourseName(event.target.value)}
-                              placeholder="Nome do curso"
-                            />
-                          </label>
-                          <button
-                            className="button button-secondary"
-                            disabled={courseSaving || !courseName.trim()}
-                            type="submit"
-                          >
-                            {courseSaving ? "Salvando…" : "Adicionar"}
-                          </button>
-                          {courseError && (
-                            <p className="notice notice-error" role="alert">
-                              {courseError}
-                            </p>
-                          )}
-                        </form>
-                      )}
                     </section>
-                  )}
-                  {profileType === "UNIVERSITY" && record.viewerCanManage && (
-                    <section className="public-profile-courses university-profile-creation">
-                      <h3>Perfis acadêmicos</h3>
-                      <p>Cadastre uma unidade acadêmica ou um departamento da universidade.</p>
-                      <details>
-                        <summary>Cadastrar unidade ou departamento</summary>
-                        <form className="campus-post-composer" onSubmit={(event) => void createCatalogProfile(event)}>
-                          <label className="field">
-                            <span>Tipo de perfil</span>
-                            <select
-                              value={catalogKind}
-                              onChange={(event) => setCatalogKind(event.target.value as "ACADEMIC_UNIT" | "DEPARTMENT")}
-                            >
-                              <option value="ACADEMIC_UNIT">Unidade acadêmica</option>
-                              <option value="DEPARTMENT">Departamento</option>
-                            </select>
-                          </label>
-                          <label className="field">
-                            <span>{catalogKind === "DEPARTMENT" ? "Sigla" : "Código"}</span>
-                            <input
-                              required
-                              maxLength={80}
-                              value={catalogCode}
-                              onChange={(event) => setCatalogCode(event.target.value)}
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Nome</span>
-                            <input
-                              required
-                              maxLength={255}
-                              value={catalogName}
-                              onChange={(event) => setCatalogName(event.target.value)}
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Descrição</span>
-                            <textarea
-                              required
-                              rows={2}
-                              value={catalogDescription}
-                              onChange={(event) => setCatalogDescription(event.target.value)}
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Informações gerais</span>
-                            <textarea
-                              required
-                              rows={4}
-                              value={catalogInfo}
-                              onChange={(event) => setCatalogInfo(event.target.value)}
-                            />
-                          </label>
-                          {catalogError && (
-                            <p className="notice notice-error" role="alert">
-                              {catalogError}
-                            </p>
-                          )}
-                          <button className="button button-primary" disabled={catalogSaving} type="submit">
-                            {catalogSaving ? "Salvando…" : "Criar perfil"}
-                          </button>
-                        </form>
-                      </details>
-                      {catalogMessage && (
-                        <p className="notice notice-success" role="status">
-                          {catalogMessage}
-                        </p>
-                      )}
-                      <UniversitySemesterAdmin token={token} />
-                    </section>
-                  )}
-                  {record.viewerCanManage && (
-                    <InstitutionalProfileEditor
-                      token={token}
-                      type={profileType}
-                      profileId={record.id}
-                      profile={record}
-                      onSaved={(updated) =>
-                        setRecord((current) => current && ({ ...current, ...updated } as ProfileRecord))
-                      }
-                    />
                   )}
                 </article>
                 <aside className="public-profile-card public-profile-aside" aria-label="Informações do perfil">
@@ -1070,6 +771,7 @@ export function UnifiedProfilePage() {
 
 export function CommunitySpacePage() {
   const { keycloak } = useOutletContext<WebContext>();
+  const toast = useToast();
   const { communityId = "" } = useParams();
   const token = keycloak.token ?? "";
   const viewerName = String(keycloak.tokenParsed?.name || keycloak.tokenParsed?.preferred_username || "Você");
@@ -1091,7 +793,9 @@ export function CommunitySpacePage() {
       })
       .catch((requestError: unknown) => {
         if (!active) return;
-        setError(profileError(requestError));
+        const msg = profileError(requestError);
+        setError(msg);
+        toast.error(msg);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -1099,7 +803,7 @@ export function CommunitySpacePage() {
     return () => {
       active = false;
     };
-  }, [communityId, token]);
+  }, [communityId, token, toast]);
 
   return (
     <div className="community-central-page">

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import type Keycloak from "keycloak-js";
+import { useToast } from "../contexts/ToastContext";
 import { queryRagAssistant, type RagQueryResponse, type RagSourceTypeFilter } from "../services/rag";
+import { extractErrorMessage } from "../utils/apiError.js";
 
 interface RagAssistantWidgetProps {
   keycloak: Keycloak;
@@ -35,6 +37,7 @@ function sourceTypeLabel(sourceType: string): string {
 }
 
 export function RagAssistantWidget({ keycloak }: RagAssistantWidgetProps) {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [question, setQuestion] = useState("");
   const [sourceFilter, setSourceFilter] = useState<RagSourceTypeFilter | null>(null);
@@ -92,12 +95,14 @@ export function RagAssistantWidget({ keycloak }: RagAssistantWidgetProps) {
         },
       ]);
     } catch (err) {
+      const errorText = extractErrorMessage(err, "Não foi possível consultar o Assistente RAG.");
+      toast.error(errorText);
       setMessages((prev) => [
         ...prev,
         {
           id: `error-${Date.now()}`,
           role: "error",
-          text: err instanceof Error ? err.message : "Não foi possível consultar o Assistente RAG.",
+          text: errorText,
         },
       ]);
     } finally {

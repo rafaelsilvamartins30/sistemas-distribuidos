@@ -70,9 +70,10 @@ module InstitutionalRequestReview
   end
 
   def can_review?(record)
+    return true if global_platform_admin?
     return record.target_department.administrator_user_ids.include?(current_subject) if record.target_department_id
 
-    University.current&.administrator_user_ids&.include?(current_subject)
+    false
   end
 
   def approve_request!(record)
@@ -107,8 +108,8 @@ module InstitutionalRequestReview
       render_problem(:not_found, 'Institutional request not found')
       return
     end
-    return unless pending_for_review?(record)
     return unless authorized_to_review?(record)
+    return unless pending_for_review?(record)
 
     record
   end

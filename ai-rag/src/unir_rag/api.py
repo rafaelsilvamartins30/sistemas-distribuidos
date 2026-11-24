@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 
 from unir_rag.auth import (
+    ForbiddenAccessToken,
     IdentityProviderUnavailable,
     InvalidAccessToken,
     KeycloakServiceTokenProvider,
@@ -109,8 +110,25 @@ def create_app(
             return token
         except IdentityProviderUnavailable as exc:
             raise HTTPException(status_code=503, detail="Identity provider unavailable") from exc
+        except ForbiddenAccessToken as exc:
+            raise HTTPException(status_code=403, detail="Insufficient permissions") from exc
         except InvalidAccessToken as exc:
             raise HTTPException(status_code=401, detail="Invalid access token") from exc
+
+    def require_admin_token(token: str = Depends(extract_bearer_token)) -> str:
+        try:
+            claims = validator.verify(token)
+        except IdentityProviderUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Identity provider unavailable") from exc
+        except ForbiddenAccessToken as exc:
+            raise HTTPException(status_code=403, detail="Insufficient permissions") from exc
+        except InvalidAccessToken as exc:
+            raise HTTPException(status_code=401, detail="Invalid access token") from exc
+        realm_access = claims.get("realm_access") if isinstance(claims, dict) else None
+        roles = realm_access.get("roles", []) if isinstance(realm_access, dict) else []
+        if "PLATFORM_ADMIN" not in roles:
+            raise HTTPException(status_code=403, detail="PLATFORM_ADMIN role is required")
+        return token
 
     def require_sync_token(x_rag_sync_token: str | None = Header(default=None)) -> bool:
         if cfg.sync_token is None:
@@ -137,9 +155,7 @@ def create_app(
                 "geminiConfigured": cfg.gemini_api_key is not None,
             }
         except Exception as exc:
-            raise HTTPException(
-                status_code=503, detail=f"Qdrant vector store unavailable: {exc}"
-            ) from exc
+            raise HTTPException(status_code=503, detail="Qdrant vector store unavailable") from exc
 
     @app.post("/api/v1/rag/ingest")
     def ingest_knowledge_base(
@@ -195,7 +211,7 @@ def create_app(
 
     @app.post("/api/v1/rag/evaluate")
     def evaluate_rag(
-        token: str = Depends(require_user_token),
+        token: str = Depends(require_admin_token),
     ) -> dict[str, Any]:
         _ = token
         return run_academic_evaluation(rag_chain)

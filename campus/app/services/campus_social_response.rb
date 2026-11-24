@@ -37,14 +37,24 @@ class CampusSocialResponse
   def self.poll(poll, voter_id: nil)
     return unless poll
 
+    current_vote = poll.poll_votes.find_by(user_id: voter_id)
+    counts = poll_vote_counts(poll, current_vote)
     {
       id: poll.id, question: poll.question, closesAt: poll.closes_at, closed: poll.closed?,
-      myVoteOptionId: poll.poll_votes.find_by(user_id: voter_id)&.poll_option_id,
-      options: poll.poll_options.map do |option|
-        { id: option.id, text: option.text, votes: option.poll_votes.count }
-      end
+      myVoteOptionId: current_vote&.poll_option_id, totalVotes: counts&.values&.sum,
+      options: serialize_poll_options(poll, counts)
     }
   end
+
+  def self.poll_vote_counts(poll, current_vote)
+    poll.poll_votes.group(:poll_option_id).count if current_vote || poll.closed?
+  end
+  private_class_method :poll_vote_counts
+
+  def self.serialize_poll_options(poll, counts)
+    poll.poll_options.map { |option| { id: option.id, text: option.text, votes: counts&.fetch(option.id, 0) } }
+  end
+  private_class_method :serialize_poll_options
 
   def self.user_name(subject, viewer_id:, viewer_name:)
     UserProfile.find_by(keycloak_user_id: subject)&.name || (viewer_name if subject == viewer_id) || 'Usuário UNIR'

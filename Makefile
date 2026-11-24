@@ -6,6 +6,7 @@ COMPONENTS := $(CURRENT) $(FUTURE)
 
 .PHONY: quality test infra security secrets dependencies ci \
 	k8s-demo k8s-clean k8s-reset-demo k8s-reset-clean k8s-down k8s-verify k8s-scale-demo demo-saga \
+	docker-demo docker-clean docker-reset-demo docker-reset-clean docker-down docker-demo-saga \
 	$(CURRENT) campus payment access ai-rag gateway engagement admin-bff admin-web
 
 quality: $(COMPONENTS)
@@ -52,6 +53,27 @@ k8s-scale-demo:
 
 demo-saga:
 	GATEWAY_URL=http://localhost:$${UNIR_K8S_PORT:-18080} KEYCLOAK_URL=http://localhost:$${UNIR_K8S_PORT:-18080} ./scripts/demo-saga-compensation.sh
+
+# --- Docker Compose local (sem Kubernetes) ---
+docker-demo:
+	UNIR_SEED_MODE=demo ./scripts/compose-up.sh
+
+docker-clean:
+	UNIR_SEED_MODE=clean ./scripts/compose-up.sh
+
+docker-reset-demo:
+	./scripts/compose-down.sh --volumes
+	UNIR_SEED_MODE=demo ./scripts/compose-up.sh
+
+docker-reset-clean:
+	./scripts/compose-down.sh --volumes
+	UNIR_SEED_MODE=clean ./scripts/compose-up.sh
+
+docker-down:
+	./scripts/compose-down.sh
+
+docker-demo-saga:
+	GATEWAY_URL=http://localhost:$${GATEWAY_PORT:-18084} KEYCLOAK_URL=http://localhost:$${KEYCLOAK_PORT:-18081} ./scripts/demo-saga-compensation.sh
 
 $(CURRENT) campus payment access ai-rag gateway engagement admin-bff admin-web:
 	bash scripts/quality.sh component $@

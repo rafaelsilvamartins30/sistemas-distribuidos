@@ -4,6 +4,7 @@ import br.unir.engagement.dto.RegistrationListResponse;
 import br.unir.engagement.dto.RegistrationResponse;
 import br.unir.engagement.service.RegistrationService;
 import java.net.URI;
+import java.time.LocalDate;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -36,8 +37,10 @@ public class RegistrationController {
 
     @GetMapping("/registrations/me")
     public RegistrationListResponse listMine(@AuthenticationPrincipal Jwt jwt,
-            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
-        return this.registrationService.listForUser(subject(jwt), page, size);
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) UUID eventId, @RequestParam(required = false) LocalDate startOn,
+            @RequestParam(required = false) LocalDate endOn, @RequestParam(required = false) String agenda) {
+        return this.registrationService.listForUser(subject(jwt), page, size, eventId, startOn, endOn, agenda);
     }
 
     @DeleteMapping("/registrations/{registrationId}")

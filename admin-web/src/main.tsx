@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import Keycloak from "keycloak-js";
 import { App } from "./App";
 import { env } from "./config/env";
+import { ToastProvider } from "./contexts/ToastContext";
 import "./styles.css";
 
 const keycloak = new Keycloak({
@@ -18,6 +19,8 @@ const keycloakReady = keycloak.init({
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App keycloak={keycloak} keycloakReady={keycloakReady} />
+    <ToastProvider>
+      <App keycloak={keycloak} keycloakReady={keycloakReady} />
+    </ToastProvider>
   </React.StrictMode>,
 );

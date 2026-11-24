@@ -26,43 +26,44 @@ public class SecurityConfiguration {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http.csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(
-                        requests -> requests.requestMatchers(HttpMethod.GET, "/health").permitAll()
-                                .requestMatchers(HttpMethod.GET, "/api/v1/events", "/api/v1/events/*")
-                                .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                                .requestMatchers(HttpMethod.POST, "/api/v1/events")
-                                .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                                .requestMatchers(HttpMethod.PATCH, "/api/v1/events/*")
-                                .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                                .requestMatchers(HttpMethod.DELETE, "/api/v1/events/*")
-                                .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                                .requestMatchers(HttpMethod.GET, "/api/v1/opportunities", "/api/v1/opportunities/*")
-                                .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                                .requestMatchers(HttpMethod.POST, "/api/v1/opportunities")
-                                .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                                .requestMatchers(HttpMethod.PATCH, "/api/v1/opportunities/*")
-                                .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                                .requestMatchers(HttpMethod.DELETE, "/api/v1/opportunities/*")
-                                .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                                .requestMatchers(HttpMethod.GET, "/api/v1/sports", "/api/v1/sports/*",
-                                        "/api/v1/competitions", "/api/v1/competitions/*", "/api/v1/seasons",
-                                        "/api/v1/seasons/*", "/api/v1/sports-events/me",
-                                        "/api/v1/sports-events/*/*/overview", "/api/v1/sports-matches/me")
-                                .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                                .requestMatchers(HttpMethod.POST, "/api/v1/sports", "/api/v1/competitions",
-                                        "/api/v1/seasons", "/api/v1/sports-events/*/*/teams",
-                                        "/api/v1/sports-events/*/*/free-agents",
-                                        "/api/v1/sports-events/*/*/matches/generate",
-                                        "/api/v1/sports-matches/*/checkin-token", "/api/v1/sports-matches/*/checkins")
-                                .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                                .requestMatchers(HttpMethod.PATCH, "/api/v1/sports-matches/*/score")
-                                .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                                .requestMatchers(HttpMethod.POST, "/api/v1/events/*/registrations")
-                                .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                                .requestMatchers(HttpMethod.GET, "/api/v1/registrations/me")
-                                .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                                .requestMatchers(HttpMethod.DELETE, "/api/v1/registrations/*")
-                                .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN).anyRequest().denyAll())
+                .authorizeHttpRequests(requests -> requests.requestMatchers(HttpMethod.GET, "/health").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/events", "/api/v1/events/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/events")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/events/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/events/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/opportunities", "/api/v1/opportunities/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/opportunities")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/opportunities/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/opportunities/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/sports", "/api/v1/sports/*", "/api/v1/competitions",
+                                "/api/v1/competitions/*", "/api/v1/seasons", "/api/v1/seasons/*",
+                                "/api/v1/sports-events/me", "/api/v1/sports-events/*/*/overview",
+                                "/api/v1/sports-matches/me", "/api/v1/sports-matches/*/attendance",
+                                "/api/v1/sports-payment-origins/me", "/api/v1/payment-references/me")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/sports", "/api/v1/competitions", "/api/v1/seasons",
+                                "/api/v1/sports-events/*/*/teams", "/api/v1/sports-events/*/*/teams/join",
+                                "/api/v1/sports-events/*/*/free-agents", "/api/v1/sports-events/*/*/matches/generate",
+                                "/api/v1/sports-events/*/*/cancel", "/api/v1/sports-matches/*/checkin-token",
+                                "/api/v1/sports-matches/*/checkins", "/api/v1/sports-matches/*/attendance")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/sports-matches/*/score",
+                                "/api/v1/sports-events/*/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/events/*/registrations")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/registrations/me")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/registrations/*")
+                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN).anyRequest().denyAll())
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(this.jwtAuthenticationConverter())))
                 .build();

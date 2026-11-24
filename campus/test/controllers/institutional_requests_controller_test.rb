@@ -25,6 +25,7 @@ class InstitutionalRequestsControllerTest < ActionDispatch::IntegrationTest
 
   test 'university administrator can approve a university-level entity request' do
     create_university(administrators: ['university-admin'])
+    create_profile(subject: 'global-admin', institutional_id: 'ADMIN-0001')
     body = profile_request('ENTITY_CREATION', nil).tap do |request|
       request[:payload][:entityType] = 'PESQUISA'
       request[:payload].delete(:category)
@@ -35,11 +36,13 @@ class InstitutionalRequestsControllerTest < ActionDispatch::IntegrationTest
     request_id = response.parsed_body.fetch('id')
     assert_equal 'UNIVERSITY', response.parsed_body.fetch('targetType')
     review_request(request_id, 'approve', subject: 'university-admin')
+    assert_response :forbidden
 
+    review_request(request_id, 'approve', subject: 'global-admin', roles: ['PLATFORM_ADMIN'])
     assert_response :success
     entity = AcademicEntity.sole
     assert_nil entity.department_id
-    assert_equal ['entity-requester'], entity.administrator_user_ids
+    assert_equal %w[entity-requester global-admin], entity.administrator_user_ids
   end
 
   test 'creation requests reject client-selected administrators and unauthorized review is scoped' do

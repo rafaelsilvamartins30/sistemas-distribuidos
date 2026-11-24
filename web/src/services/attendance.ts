@@ -1,10 +1,15 @@
+import { parseApiError } from "../utils/apiError.js";
+
 export type AttendanceEntryStatus = "ELIGIBLE" | "CANCELLED" | "ATTENDED" | "NO_SHOW";
+
+export type ParticipantAttendanceAction = "SCAN_EVENT_QR" | "GENERATE_PARTICIPANT_QR";
 
 export interface MyAttendance {
   eventId: string;
   sessionId: string;
   attendanceEntryId: string;
   status: AttendanceEntryStatus;
+  action?: ParticipantAttendanceAction | null;
   registeredAt: string;
   checkedAt: string | null;
 }
@@ -33,6 +38,8 @@ export interface TicketRegistration {
   registeredAt: string;
   confirmedAt: string | null;
   cancelledAt: string | null;
+  canCancel: boolean;
+  cancellationBlockedReason: string | null;
   event: {
     id: string;
     title: string;
@@ -44,6 +51,7 @@ export interface TicketRegistration {
     startsAt: string;
     endsAt: string;
     category: string;
+    registrationMode: "INTERNAL_FREE" | "INTERNAL_PAID" | "EXTERNAL_PAID";
     attendanceEnabled: boolean;
     attendanceMode: MyTicket["mode"] | null;
   };
@@ -99,15 +107,8 @@ async function request<T>(
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   if (!response.ok) {
-    let detail = `Gateway respondeu com status ${response.status}.`;
-    try {
-      const problem = (await response.json()) as { detail?: unknown; error?: unknown };
-      if (typeof problem.detail === "string") detail = problem.detail;
-      else if (typeof problem.error === "string") detail = problem.error;
-    } catch {
-      // The HTTP status is enough when the upstream does not return JSON.
-    }
-    throw new AttendanceApiError(response.status, detail);
+    const parsed = await parseApiError(response);
+    throw new AttendanceApiError(response.status, parsed.message);
   }
   return (await response.json()) as T;
 }
@@ -138,10 +139,14 @@ export function checkInWithEventQr(
 
 export function getMyTickets(
   token: string,
+  filters: { page: number; agenda: "upcoming" | "past"; startOn?: string; endOn?: string },
   gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<TicketPage> {
-  return request("GET", "/api/v1/web/me/tickets", token, gatewayUrl, fetchImpl);
+  const query = new URLSearchParams({ page: String(filters.page), agenda: filters.agenda, size: "20" });
+  if (filters.startOn) query.set("startOn", filters.startOn);
+  if (filters.endOn) query.set("endOn", filters.endOn);
+  return request("GET", `/api/v1/web/me/tickets?${query}`, token, gatewayUrl, fetchImpl);
 }
 
 export function issueMyTicketQr(
@@ -153,6 +158,23 @@ export function issueMyTicketQr(
   return request(
     "POST",
     `/api/v1/web/attendance/tickets/${encodeURIComponent(eventId)}/qr`,
+    token,
+    gatewayUrl,
+    fetchImpl,
+  );
+}
+
+export type OrganizerAttendanceAction = "GENERATE_EVENT_QR" | "SCAN_PARTICIPANT_QR" | "REVIEW_ATTENDANCE";
+
+export function getOrganizerAttendanceAction(
+  token: string,
+  eventId: string,
+  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<{ action: OrganizerAttendanceAction | null }> {
+  return request(
+    "GET",
+    `/api/v1/web/attendance/events/${encodeURIComponent(eventId)}/organizer-action`,
     token,
     gatewayUrl,
     fetchImpl,
@@ -194,4 +216,19 @@ export function confirmOrganizerCheckIn(
   return request("POST", "/api/v1/web/attendance/organizer-check-ins/confirm", token, gatewayUrl, fetchImpl, {
     token: qrToken,
   });
+}
+
+export interface EventAttendanceReview {
+  entries: { userId: string; name?: string; checkedInAt: string }[];
+  closedAt: string | null;
+}
+
+export function reviewEventAttendance(token: string, eventId: string, close = false): Promise<EventAttendanceReview> {
+  return request(
+    close ? "POST" : "GET",
+    `/api/v1/web/attendance/events/${encodeURIComponent(eventId)}/attendance-review`,
+    token,
+    import.meta.env.VITE_GATEWAY_URL ?? "",
+    globalThis.fetch,
+  );
 }

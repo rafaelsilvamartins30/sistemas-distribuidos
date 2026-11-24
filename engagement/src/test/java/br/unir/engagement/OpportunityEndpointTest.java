@@ -58,6 +58,8 @@ class OpportunityEndpointTest {
 
     @BeforeEach
     void clearOpportunities() {
+        when(this.campusPublisherClient.getContexts(anyString()))
+                .thenReturn(new OpportunityPublisherContextsResponse(List.of()));
         this.jdbcTemplate.update("DELETE FROM opportunities");
     }
 
@@ -271,7 +273,8 @@ class OpportunityEndpointTest {
         this.mockMvc.perform(get("/api/v1/opportunities/managed").with(userJwt("dept-admin-token")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
                 .andExpect(jsonPath("$.items[0].id").value(managedActive.getId().toString()))
-                .andExpect(jsonPath("$.items[1].id").value(managedClosed.getId().toString()));
+                .andExpect(jsonPath("$.items[1].id").value(managedClosed.getId().toString()))
+                .andExpect(jsonPath("$.items[1].canReactivate").value(true));
 
         this.mockMvc.perform(get("/api/v1/opportunities/managed").with(userJwt("regular-user-token")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(0))
@@ -307,8 +310,7 @@ class OpportunityEndpointTest {
 
         this.mockMvc
                 .perform(patch("/api/v1/opportunities/{id}", managedClosed.getId()).with(userJwt("dept-admin-token"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"status\":\"ACTIVE\",\"clearDeadline\":true}"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reactivate\":true}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE"))
                 .andExpect(jsonPath("$.deadline").isEmpty());
     }

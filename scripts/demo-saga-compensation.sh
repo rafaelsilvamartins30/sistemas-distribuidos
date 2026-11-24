@@ -14,7 +14,7 @@ if [[ -z "$DEMO_PASSWORD" && -f "config/local-demo-accounts.json" ]]; then
   DEMO_PASSWORD="$(python3 -c 'import json; d=json.load(open("config/local-demo-accounts.json")); print(d.get("accounts", d).get("admin", {}).get("password", ""))' 2>/dev/null || true)"
 fi
 if [[ -z "$DEMO_PASSWORD" ]]; then
-  echo "Defina DEMO_USER e DEMO_PASSWORD (ou rode 'make local-reset' para gerar config/local-demo-accounts.json)." >&2
+  echo "Defina DEMO_USER e DEMO_PASSWORD (ou rode 'make k8s-demo' / 'make docker-demo' para gerar config/local-demo-accounts.json)." >&2
   exit 1
 fi
 

@@ -1,0 +1,1 @@
+ALTER TABLE attendance_sessions ADD COLUMN attendance_reviewed_at TIMESTAMPTZ;

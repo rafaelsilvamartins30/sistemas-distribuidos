@@ -16,7 +16,7 @@ class OpportunityPublishersController < ApplicationController
 
   def department_contexts(subject)
     Department.order(:name).filter_map do |department|
-      next unless department.administered_by?(subject)
+      next unless global_platform_admin? || department.administered_by?(subject)
 
       publisher_context('DEPARTMENT', department.id, department.name)
     end
@@ -24,7 +24,7 @@ class OpportunityPublishersController < ApplicationController
 
   def entity_contexts(subject)
     AcademicEntity.order(:name).filter_map do |entity|
-      next unless entity.administrator_user_ids.include?(subject)
+      next unless global_platform_admin? || entity.administrator_user_ids.include?(subject)
 
       publisher_context('ACADEMIC_ENTITY', entity.id, entity.name)
     end

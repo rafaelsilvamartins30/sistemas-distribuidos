@@ -569,9 +569,7 @@ class GatewayRoutingAndSecurityTest {
         this.mockMvc
                 .perform(post("/api/v1/web/sports").header(HttpHeaders.AUTHORIZATION, authorizationHeader)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Futsal\"}"))
-                .andExpect(status().isOk());
-        assertThat(LAST_METHOD.get()).isEqualTo("POST");
-        assertThat(LAST_PATH.get()).isEqualTo("/api/v1/web/sports");
+                .andExpect(status().isForbidden());
 
         this.mockMvc
                 .perform(get("/api/v1/web/sports-matches/me").header(HttpHeaders.AUTHORIZATION, authorizationHeader))
@@ -634,6 +632,14 @@ class GatewayRoutingAndSecurityTest {
         String eventId = "10000000-0000-4000-8000-000000000001";
         String token = signToken(VALID_JWK, expectedIssuer(), Instant.now().plusSeconds(300), List.of("USER"));
         String authorizationHeader = "Bearer " + token;
+
+        BFF_BODY.set("{\"action\":\"SCAN_PARTICIPANT_QR\"}");
+        String organizerActionPath = "/api/v1/web/attendance/events/" + eventId + "/organizer-action";
+        this.mockMvc.perform(get(organizerActionPath)).andExpect(status().isUnauthorized());
+        this.mockMvc.perform(get(organizerActionPath).header(HttpHeaders.AUTHORIZATION, authorizationHeader))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.action").value("SCAN_PARTICIPANT_QR"));
+        assertThat(LAST_PATH.get()).isEqualTo(organizerActionPath);
+        assertThat(LAST_AUTHORIZATION.get()).isEqualTo(authorizationHeader);
 
         BFF_BODY.set("{\"eventId\":\"" + eventId + "\",\"status\":\"ELIGIBLE\",\"checkedAt\":null}");
         this.mockMvc

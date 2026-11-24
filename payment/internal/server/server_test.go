@@ -99,22 +99,59 @@ func TestSimulatedConfirmationRouteIsAbsentWithoutLocalWiring(t *testing.T) {
 	}
 }
 
-func TestSimulatedConfirmationRoutePassesRegistrationAndEffectivePaidAt(t *testing.T) {
+func TestSimulatedConfirmationRouteRequiresVerifiedAdminToken(t *testing.T) {
+	fixture := newJWTFixture(t)
 	paidAt := time.Date(2026, 11, 16, 15, 4, 0, 0, time.UTC)
 	confirmer := &stubConfirmer{result: payment.PaymentConfirmedEvent{
 		RegistrationID: "550e8400-e29b-41d4-a716-446655440002", PaidAt: paidAt,
 	}}
-	handler := server.NewHandlerWithSimulation(stubPinger{}, confirmer)
-	req := httptest.NewRequest(http.MethodPost,
+	handler := server.NewHandlerWithStoreAndVerifier(stubPinger{}, nil, confirmer, fixture.verifier)
+
+	// Unverified token must be rejected with 401
+	unverifiedReq := httptest.NewRequest(http.MethodPost,
 		"/local/simulated-payments/550e8400-e29b-41d4-a716-446655440002/confirm",
 		strings.NewReader(`{"paidAt":"2026-11-16T15:04:00Z"}`))
-	req.Header.Set("Authorization", "Bearer local-test")
-	rec := httptest.NewRecorder()
+	unverifiedReq.Header.Set("Authorization", "Bearer local-test")
+	unverifiedRec := httptest.NewRecorder()
+	handler.ServeHTTP(unverifiedRec, unverifiedReq)
+	if unverifiedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unverified token, got %d", unverifiedRec.Code)
+	}
 
-	handler.ServeHTTP(rec, req)
+	// Regular USER token must be rejected with 403
+	userReq := httptest.NewRequest(http.MethodPost,
+		"/local/simulated-payments/550e8400-e29b-41d4-a716-446655440002/confirm",
+		strings.NewReader(`{"paidAt":"2026-11-16T15:04:00Z"}`))
+	userReq.Header.Set("Authorization", "Bearer "+fixture.token(t, validClaims("student-1")))
+	userRec := httptest.NewRecorder()
+	handler.ServeHTTP(userRec, userReq)
+	if userRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-admin token, got %d", userRec.Code)
+	}
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	// Token without UNIR global role must be rejected with 403
+	noRoleClaims := validClaims("ghost-1")
+	noRoleClaims["realm_access"] = map[string]any{"roles": []string{}}
+	noRoleReq := httptest.NewRequest(http.MethodPost,
+		"/local/simulated-payments/550e8400-e29b-41d4-a716-446655440002/confirm",
+		strings.NewReader(`{"paidAt":"2026-11-16T15:04:00Z"}`))
+	noRoleReq.Header.Set("Authorization", "Bearer "+fixture.token(t, noRoleClaims))
+	noRoleRec := httptest.NewRecorder()
+	handler.ServeHTTP(noRoleRec, noRoleReq)
+	if noRoleRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for roleless token, got %d", noRoleRec.Code)
+	}
+
+	// Verified PLATFORM_ADMIN token succeeds
+	adminReq := httptest.NewRequest(http.MethodPost,
+		"/local/simulated-payments/550e8400-e29b-41d4-a716-446655440002/confirm",
+		strings.NewReader(`{"paidAt":"2026-11-16T15:04:00Z"}`))
+	adminReq.Header.Set("Authorization", "Bearer "+fixture.token(t, adminClaims("admin-1")))
+	adminRec := httptest.NewRecorder()
+	handler.ServeHTTP(adminRec, adminReq)
+
+	if adminRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", adminRec.Code, adminRec.Body.String())
 	}
 	if confirmer.registrationID != "550e8400-e29b-41d4-a716-446655440002" || !confirmer.paidAt.Equal(paidAt) {
 		t.Fatalf("unexpected confirmation input: registration=%q paidAt=%v", confirmer.registrationID,

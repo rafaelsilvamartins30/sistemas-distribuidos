@@ -25,6 +25,7 @@ flowchart LR
     WebBFF --> AiRag["AI / RAG (FastAPI)"]
 
     AdminBFF --> Campus
+    AdminBFF --> Engagement
 
     Engagement -->|"Autorização contextual"| Campus
     AiRag -->|"Leitura paginada / Live tool"| Engagement

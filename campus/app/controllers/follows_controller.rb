@@ -7,7 +7,7 @@ class FollowsController < ApplicationController
   wrap_parameters false
 
   def index
-    follows = Follow.active.where(user_id: current_subject).order(:created_at)
+    follows = filtered_follows
     render json: { items: follows.map { |follow| follow_response(follow) } }
   end
 
@@ -33,6 +33,12 @@ class FollowsController < ApplicationController
   end
 
   private
+
+  def filtered_follows
+    follows = Follow.active.where(user_id: current_subject).order(:created_at)
+    target = params.values_at(:targetType, :targetId).map(&:to_s)
+    target.all?(&:present?) ? follows.where(target_type: target[0], target_id: target[1]) : follows
+  end
 
   def follow_payload
     payload = request.request_parameters

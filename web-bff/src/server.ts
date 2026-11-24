@@ -26,6 +26,17 @@ export function createServer(options: ServerOptions = {}) {
   const fetchPaymentService = options.fetch ?? globalThis.fetch;
   const server = Fastify({ logger: true });
 
+  server.addHook("preValidation", async (request, reply) => {
+    const params = request.params;
+    if (params && typeof params === "object") {
+      for (const value of Object.values(params as Record<string, unknown>)) {
+        if (typeof value === "string" && (value === "." || value === "..")) {
+          return reply.code(400).send({ error: "Invalid path parameter" });
+        }
+      }
+    }
+  });
+
   server.get("/health", async () => ({ status: "ok" }));
 
   async function forwardToCampus(
@@ -34,7 +45,6 @@ export function createServer(options: ServerOptions = {}) {
     method: "GET" | "POST" | "PATCH" | "DELETE",
     path: string,
     unavailableError = "User Service unavailable",
-    hideAdministrativeUserIds = false,
   ) {
     const authorization = request.headers.authorization;
     if (typeof authorization !== "string" || !/^Bearer\s+\S+$/i.test(authorization)) {
@@ -63,10 +73,6 @@ export function createServer(options: ServerOptions = {}) {
       return reply.code(503).send({ error: unavailableError });
     }
 
-    if (hideAdministrativeUserIds && response.ok) {
-      body = removeAdministrativeUserIds(body);
-    }
-
     const contentType = response.headers.get("content-type");
     if (contentType) {
       reply.header("content-type", contentType);
@@ -91,11 +97,7 @@ export function createServer(options: ServerOptions = {}) {
   });
 
   server.get("/api/v1/web/university", async (request, reply) =>
-    forwardToCampus(request, reply, "GET", "/university", "Campus unavailable", true),
-  );
-
-  server.patch("/api/v1/web/university", async (request, reply) =>
-    forwardToCampus(request, reply, "PATCH", "/university", "Campus unavailable", true),
+    forwardToCampus(request, reply, "GET", "/university", "Campus unavailable"),
   );
 
   server.get("/api/v1/web/semesters", async (request, reply) => {
@@ -113,23 +115,9 @@ export function createServer(options: ServerOptions = {}) {
     ),
   );
 
-  server.post("/api/v1/web/semesters", async (request, reply) =>
-    forwardToCampus(request, reply, "POST", "/semesters", "Campus unavailable"),
-  );
-
-  server.patch<{ Params: { semesterId: string } }>("/api/v1/web/semesters/:semesterId", async (request, reply) =>
-    forwardToCampus(
-      request,
-      reply,
-      "PATCH",
-      `/semesters/${encodeURIComponent(request.params.semesterId)}`,
-      "Campus unavailable",
-    ),
-  );
-
   server.get("/api/v1/web/academic-units", async (request, reply) => {
     const query = new URL(request.url, "http://localhost").search;
-    return forwardToCampus(request, reply, "GET", `/academic-units${query}`, "Campus unavailable", true);
+    return forwardToCampus(request, reply, "GET", `/academic-units${query}`, "Campus unavailable");
   });
 
   server.get<{ Params: { unitId: string } }>("/api/v1/web/academic-units/:unitId", async (request, reply) =>
@@ -139,12 +127,7 @@ export function createServer(options: ServerOptions = {}) {
       "GET",
       `/academic-units/${encodeURIComponent(request.params.unitId)}`,
       "Campus unavailable",
-      true,
     ),
-  );
-
-  server.post("/api/v1/web/academic-units", async (request, reply) =>
-    forwardToCampus(request, reply, "POST", "/academic-units", "Campus unavailable", true),
   );
 
   server.patch<{ Params: { unitId: string } }>("/api/v1/web/academic-units/:unitId", async (request, reply) =>
@@ -154,7 +137,6 @@ export function createServer(options: ServerOptions = {}) {
       "PATCH",
       `/academic-units/${encodeURIComponent(request.params.unitId)}`,
       "Campus unavailable",
-      true,
     ),
   );
 
@@ -173,23 +155,9 @@ export function createServer(options: ServerOptions = {}) {
     ),
   );
 
-  server.post("/api/v1/web/courses", async (request, reply) =>
-    forwardToCampus(request, reply, "POST", "/courses", "Campus unavailable"),
-  );
-
-  server.patch<{ Params: { courseId: string } }>("/api/v1/web/courses/:courseId", async (request, reply) =>
-    forwardToCampus(
-      request,
-      reply,
-      "PATCH",
-      `/courses/${encodeURIComponent(request.params.courseId)}`,
-      "Campus unavailable",
-    ),
-  );
-
   server.get("/api/v1/web/departments", async (request, reply) => {
     const query = new URL(request.url, "http://localhost").search;
-    return forwardToCampus(request, reply, "GET", `/departments${query}`, "Campus unavailable", true);
+    return forwardToCampus(request, reply, "GET", `/departments${query}`, "Campus unavailable");
   });
 
   server.get<{ Params: { departmentId: string } }>("/api/v1/web/departments/:departmentId", async (request, reply) =>
@@ -199,12 +167,7 @@ export function createServer(options: ServerOptions = {}) {
       "GET",
       `/departments/${encodeURIComponent(request.params.departmentId)}`,
       "Campus unavailable",
-      true,
     ),
-  );
-
-  server.post("/api/v1/web/departments", async (request, reply) =>
-    forwardToCampus(request, reply, "POST", "/departments", "Campus unavailable", true),
   );
 
   server.patch<{ Params: { departmentId: string } }>("/api/v1/web/departments/:departmentId", async (request, reply) =>
@@ -214,7 +177,6 @@ export function createServer(options: ServerOptions = {}) {
       "PATCH",
       `/departments/${encodeURIComponent(request.params.departmentId)}`,
       "Campus unavailable",
-      true,
     ),
   );
 
@@ -375,9 +337,10 @@ export function createServer(options: ServerOptions = {}) {
     ),
   );
 
-  server.get("/api/v1/web/follows", async (request, reply) =>
-    forwardToCampus(request, reply, "GET", "/follows", "Campus unavailable"),
-  );
+  server.get("/api/v1/web/follows", async (request, reply) => {
+    const query = new URL(request.url, "http://localhost").search;
+    return forwardToCampus(request, reply, "GET", `/follows${query}`, "Campus unavailable");
+  });
 
   server.post("/api/v1/web/follows", async (request, reply) =>
     forwardToCampus(request, reply, "POST", "/follows", "Campus unavailable"),
@@ -428,7 +391,7 @@ export function createServer(options: ServerOptions = {}) {
 
   server.get("/api/v1/web/entities", async (request, reply) => {
     const query = new URL(request.url, "http://localhost").search;
-    return forwardToCampus(request, reply, "GET", `/entities${query}`, "Campus unavailable", true);
+    return forwardToCampus(request, reply, "GET", `/entities${query}`, "Campus unavailable");
   });
 
   server.get<{ Params: { entityId: string } }>("/api/v1/web/entities/:entityId", async (request, reply) =>
@@ -438,7 +401,6 @@ export function createServer(options: ServerOptions = {}) {
       "GET",
       `/entities/${encodeURIComponent(request.params.entityId)}`,
       "Campus unavailable",
-      true,
     ),
   );
 
@@ -449,13 +411,12 @@ export function createServer(options: ServerOptions = {}) {
       "PATCH",
       `/entities/${encodeURIComponent(request.params.entityId)}`,
       "Campus unavailable",
-      true,
     ),
   );
 
   server.get("/api/v1/web/communities", async (request, reply) => {
     const query = new URL(request.url, "http://localhost").search;
-    return forwardToCampus(request, reply, "GET", `/communities${query}`, "Campus unavailable", true);
+    return forwardToCampus(request, reply, "GET", `/communities${query}`, "Campus unavailable");
   });
 
   server.get<{ Params: { communityId: string } }>("/api/v1/web/communities/:communityId", async (request, reply) =>
@@ -465,7 +426,6 @@ export function createServer(options: ServerOptions = {}) {
       "GET",
       `/communities/${encodeURIComponent(request.params.communityId)}`,
       "Campus unavailable",
-      true,
     ),
   );
 
@@ -476,7 +436,6 @@ export function createServer(options: ServerOptions = {}) {
       "PATCH",
       `/communities/${encodeURIComponent(request.params.communityId)}`,
       "Campus unavailable",
-      true,
     ),
   );
 
@@ -514,6 +473,15 @@ export function createServer(options: ServerOptions = {}) {
     }
 
     const contentType = response.headers.get("content-type");
+    if (response.ok && contentType?.includes("json") && /^\/api\/v1\/events(?:[/?]|$)/.test(path)) {
+      const payload = JSON.parse(body.toString("utf8"), (key, value: unknown) =>
+        key === "href" && typeof value === "string" && /^\/api\/v1\/events(?:[/?]|$)/.test(value)
+          ? value.replace("/api/v1/events", "/api/v1/web/events")
+          : value,
+      );
+      if (contentType) reply.header("content-type", contentType);
+      return reply.code(response.status).send(payload);
+    }
     if (contentType) reply.header("content-type", contentType);
     return reply.code(response.status).send(body);
   }
@@ -646,14 +614,6 @@ export function createServer(options: ServerOptions = {}) {
     return forwardToEngagementService(request, reply, `/api/v1/sports${query}`);
   });
 
-  server.get("/api/v1/web/sports/organizer-contexts", async (request, reply) =>
-    forwardToEngagementService(request, reply, "/api/v1/sports/organizer-contexts"),
-  );
-
-  server.post("/api/v1/web/sports", async (request, reply) =>
-    forwardToEngagementService(request, reply, "/api/v1/sports", "POST"),
-  );
-
   server.get<{ Params: { sportId: string } }>("/api/v1/web/sports/:sportId", async (request, reply) =>
     forwardToEngagementService(request, reply, `/api/v1/sports/${encodeURIComponent(request.params.sportId)}`),
   );
@@ -662,10 +622,6 @@ export function createServer(options: ServerOptions = {}) {
     const query = new URL(request.url, "http://localhost").search;
     return forwardToEngagementService(request, reply, `/api/v1/competitions${query}`);
   });
-
-  server.post("/api/v1/web/competitions", async (request, reply) =>
-    forwardToEngagementService(request, reply, "/api/v1/competitions", "POST"),
-  );
 
   server.get<{ Params: { competitionId: string } }>("/api/v1/web/competitions/:competitionId", async (request, reply) =>
     forwardToEngagementService(
@@ -680,10 +636,6 @@ export function createServer(options: ServerOptions = {}) {
     return forwardToEngagementService(request, reply, `/api/v1/seasons${query}`);
   });
 
-  server.post("/api/v1/web/seasons", async (request, reply) =>
-    forwardToEngagementService(request, reply, "/api/v1/seasons", "POST"),
-  );
-
   server.get<{ Params: { seasonId: string } }>("/api/v1/web/seasons/:seasonId", async (request, reply) =>
     forwardToEngagementService(request, reply, `/api/v1/seasons/${encodeURIComponent(request.params.seasonId)}`),
   );
@@ -695,28 +647,6 @@ export function createServer(options: ServerOptions = {}) {
         request,
         reply,
         `/api/v1/sports-events/${encodeURIComponent(request.params.contextType)}/${encodeURIComponent(request.params.contextId)}/overview`,
-      ),
-  );
-
-  server.patch<{ Params: { contextType: string; contextId: string } }>(
-    "/api/v1/web/sports-events/:contextType/:contextId",
-    async (request, reply) =>
-      forwardToEngagementService(
-        request,
-        reply,
-        `/api/v1/sports-events/${encodeURIComponent(request.params.contextType)}/${encodeURIComponent(request.params.contextId)}`,
-        "PATCH",
-      ),
-  );
-
-  server.post<{ Params: { contextType: string; contextId: string } }>(
-    "/api/v1/web/sports-events/:contextType/:contextId/cancel",
-    async (request, reply) =>
-      forwardToEngagementService(
-        request,
-        reply,
-        `/api/v1/sports-events/${encodeURIComponent(request.params.contextType)}/${encodeURIComponent(request.params.contextId)}/cancel`,
-        "POST",
       ),
   );
 
@@ -753,17 +683,6 @@ export function createServer(options: ServerOptions = {}) {
       ),
   );
 
-  server.post<{ Params: { contextType: string; contextId: string } }>(
-    "/api/v1/web/sports-events/:contextType/:contextId/matches/generate",
-    async (request, reply) =>
-      forwardToEngagementService(
-        request,
-        reply,
-        `/api/v1/sports-events/${encodeURIComponent(request.params.contextType)}/${encodeURIComponent(request.params.contextId)}/matches/generate`,
-        "POST",
-      ),
-  );
-
   server.get("/api/v1/web/sports-events/me", async (request, reply) =>
     forwardToEngagementService(request, reply, "/api/v1/sports-events/me"),
   );
@@ -795,6 +714,32 @@ export function createServer(options: ServerOptions = {}) {
         ...(requestBody !== undefined ? { body: requestBody } : {}),
         signal: AbortSignal.timeout(5000),
       });
+      if (path === "/api/v1/payments/me" && response.ok) {
+        const payload = (await response.json()) as { items: { referenceId: string }[] };
+        type ReferenceMeta = string | { origin?: string; title?: string; subtitle?: string; targetPath?: string };
+        const references = await fetchEngagementService(`${engagementServiceUrl}/api/v1/payment-references/me`, {
+          headers,
+          signal: AbortSignal.timeout(5000),
+        })
+          .then(async (result) => (result.ok ? ((await result.json()) as Record<string, ReferenceMeta>) : null))
+          .catch(() => null);
+        return reply.code(response.status).send({
+          ...payload,
+          items: payload.items.map((charge) => {
+            const meta = references?.[charge.referenceId];
+            if (typeof meta === "string") {
+              return { ...charge, origin: meta };
+            }
+            return {
+              ...charge,
+              origin: meta?.origin ?? "UNKNOWN",
+              ...(meta?.title ? { title: meta.title } : {}),
+              ...(meta?.subtitle ? { subtitle: meta.subtitle } : {}),
+              ...(meta?.targetPath ? { targetPath: meta.targetPath } : {}),
+            };
+          }),
+        });
+      }
       const body = Buffer.from(await response.arrayBuffer());
       const contentType = response.headers.get("content-type");
       if (contentType) reply.header("content-type", contentType);
@@ -816,26 +761,6 @@ export function createServer(options: ServerOptions = {}) {
         request,
         reply,
         `/api/v1/payments/${encodeURIComponent(request.params.registrationId)}/confirm`,
-        "POST",
-      ),
-  );
-
-  server.patch<{ Params: { matchId: string } }>("/api/v1/web/sports-matches/:matchId/score", async (request, reply) =>
-    forwardToEngagementService(
-      request,
-      reply,
-      `/api/v1/sports-matches/${encodeURIComponent(request.params.matchId)}/score`,
-      "PATCH",
-    ),
-  );
-
-  server.post<{ Params: { matchId: string } }>(
-    "/api/v1/web/sports-matches/:matchId/checkin-token",
-    async (request, reply) =>
-      forwardToEngagementService(
-        request,
-        reply,
-        `/api/v1/sports-matches/${encodeURIComponent(request.params.matchId)}/checkin-token`,
         "POST",
       ),
   );
@@ -869,8 +794,11 @@ export function createServer(options: ServerOptions = {}) {
       return reply.code(401).send({ error: "A bearer token is required" });
     }
     try {
+      const query = new URL(request.url, "http://localhost").searchParams;
+      if (!query.has("page")) query.set("page", "0");
+      if (!query.has("size")) query.set("size", "100");
       const [registrationsResponse, ticketsResponse] = await Promise.all([
-        fetchEngagementService(`${engagementServiceUrl}/api/v1/registrations/me?page=0&size=100`, {
+        fetchEngagementService(`${engagementServiceUrl}/api/v1/registrations/me?${query}`, {
           headers: { authorization },
           signal: AbortSignal.timeout(5000),
         }),
@@ -951,6 +879,37 @@ export function createServer(options: ServerOptions = {}) {
         ...(requestBody !== undefined ? { body: requestBody } : {}),
         signal: AbortSignal.timeout(5000),
       });
+      if (response.ok && path.endsWith("/attendance-review")) {
+        const review = (await response.json()) as {
+          entries: { userId: string; checkedInAt: string }[];
+          closedAt: string | null;
+        };
+        const ids = [...new Set(review.entries.map((entry) => entry.userId))];
+        const names = new Map<string, string>();
+        const pages = Array.from({ length: Math.ceil(ids.length / 100) }, (_, page) =>
+          ids.slice(page * 100, (page + 1) * 100),
+        );
+        await Promise.allSettled(
+          pages.map(async (page) => {
+            const query = new URLSearchParams();
+            page.forEach((id) => query.append("subjects[]", id));
+            const directory = await fetchCampus(`${campusUrl}/users?${query}`, {
+              headers: { authorization },
+              signal: AbortSignal.timeout(3000),
+            });
+            if (!directory.ok) return;
+            const { items } = (await directory.json()) as { items: { keycloakUserId: string; name: string }[] };
+            items.forEach((item) => names.set(item.keycloakUserId, item.name));
+          }),
+        );
+        return reply.send({
+          ...review,
+          entries: review.entries.map((entry) => ({
+            ...entry,
+            name: names.get(entry.userId) ?? null,
+          })),
+        });
+      }
       const body = Buffer.from(await response.arrayBuffer());
       const contentType = response.headers.get("content-type");
       if (contentType) reply.header("content-type", contentType);
@@ -959,6 +918,20 @@ export function createServer(options: ServerOptions = {}) {
       request.log.error({ err: error }, "Access Service request failed");
       return reply.code(503).send({ error: "Access Service unavailable" });
     }
+  }
+
+  for (const method of ["GET", "POST"] as const) {
+    server.route<{ Params: { eventId: string } }>({
+      method,
+      url: "/api/v1/web/attendance/events/:eventId/attendance-review",
+      handler: (request, reply) =>
+        forwardToAccessService(
+          request,
+          reply,
+          `/api/v1/attendance/events/${encodeURIComponent(request.params.eventId)}/attendance-review`,
+          method,
+        ),
+    });
   }
 
   server.get("/api/v1/web/attendance/me", async (request, reply) => {
@@ -972,6 +945,17 @@ export function createServer(options: ServerOptions = {}) {
 
   server.get("/api/v1/web/attendance/tickets/me", async (request, reply) =>
     forwardToAccessService(request, reply, "/api/v1/attendance/tickets/me", "GET"),
+  );
+
+  server.get<{ Params: { eventId: string } }>(
+    "/api/v1/web/attendance/events/:eventId/organizer-action",
+    async (request, reply) =>
+      forwardToAccessService(
+        request,
+        reply,
+        `/api/v1/attendance/events/${encodeURIComponent(request.params.eventId)}/organizer-action`,
+        "GET",
+      ),
   );
 
   server.post<{ Params: { eventId: string } }>("/api/v1/web/attendance/events/:eventId/qr", async (request, reply) =>
@@ -1001,25 +985,4 @@ export function createServer(options: ServerOptions = {}) {
   );
 
   return server;
-}
-
-function removeAdministrativeUserIds(body: Buffer): Buffer {
-  try {
-    const value = JSON.parse(body.toString("utf8")) as unknown;
-    return Buffer.from(JSON.stringify(withoutAdministrativeUserIds(value)));
-  } catch {
-    return body;
-  }
-}
-
-function withoutAdministrativeUserIds(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(withoutAdministrativeUserIds);
-  if (value === null || typeof value !== "object") return value;
-
-  const viewerCanManage = (value as Record<string, unknown>).viewerCanManage === true;
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([key]) => viewerCanManage || (key !== "administratorUserIds" && key !== "managerUserIds"))
-      .map(([key, child]) => [key, withoutAdministrativeUserIds(child)]),
-  );
 }

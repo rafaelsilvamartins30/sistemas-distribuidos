@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
+import { useToast } from "../contexts/ToastContext";
 import {
   CampusSocialApiError,
   getMyInstitutionalRequests,
@@ -8,6 +9,7 @@ import {
   reviewInstitutionalRequest,
   type InstitutionalRequest,
 } from "../services/campusSocial";
+import { extractErrorMessage } from "../utils/apiError.js";
 
 interface WebContext {
   keycloak: Keycloak;
@@ -73,16 +75,15 @@ function RequestCard({
 
 export function CampusRequestsPage() {
   const { keycloak } = useOutletContext<WebContext>();
+  const toast = useToast();
   const [mine, setMine] = useState<InstitutionalRequest[]>([]);
   const [pending, setPending] = useState<InstitutionalRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [reviewing, setReviewing] = useState(false);
-  const [error, setError] = useState("");
   const token = keycloak.token ?? "";
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError("");
     try {
       const [minePage, pendingPage] = await Promise.all([
         getMyInstitutionalRequests(token),
@@ -91,15 +92,15 @@ export function CampusRequestsPage() {
       setMine(minePage.items);
       setPending(pendingPage.items);
     } catch (requestError) {
-      setError(
+      toast.error(
         requestError instanceof CampusSocialApiError && requestError.status === 403
           ? "Você não tem permissão para consultar esta área."
-          : "Não foi possível carregar as solicitações do Campus.",
+          : extractErrorMessage(requestError, "Não foi possível carregar as solicitações do Campus."),
       );
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, toast]);
 
   useEffect(() => {
     document.title = "UNIR — Solicitações";
@@ -108,12 +109,17 @@ export function CampusRequestsPage() {
 
   async function review(id: string, decision: "approve" | "reject") {
     setReviewing(true);
-    setError("");
     try {
       await reviewInstitutionalRequest(token, id, decision);
+      toast.success(decision === "approve" ? "Solicitação aprovada." : "Solicitação recusada.");
       await load();
-    } catch {
-      setError("O Campus recusou a decisão. Confirme se você administra o departamento ou a universidade do pedido.");
+    } catch (requestError) {
+      toast.error(
+        extractErrorMessage(
+          requestError,
+          "O Campus recusou a decisão. Confirme se você administra o departamento ou a universidade do pedido.",
+        ),
+      );
     } finally {
       setReviewing(false);
     }
@@ -126,11 +132,6 @@ export function CampusRequestsPage() {
         <h1>Solicitações</h1>
         <p>Acompanhe seus pedidos e analise os que foram enviados aos perfis que você administra.</p>
       </header>
-      {error && (
-        <p className="notice notice-error" role="alert">
-          {error}
-        </p>
-      )}
       {loading ? (
         <p className="notice" role="status">
           Carregando solicitações…
@@ -198,6 +199,7 @@ export function RequestProfileForm({
   onCreated?: () => void;
   presentation?: "inline" | "modal";
 }) {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [departments, setDepartments] = useState<Array<{ id: string; name: string; acronym: string }>>([]);
@@ -206,8 +208,6 @@ export function RequestProfileForm({
   const [description, setDescription] = useState("");
   const [generalInfoMarkdown, setGeneralInfoMarkdown] = useState("");
   const [typeOrCategory, setTypeOrCategory] = useState("");
-  const [error, setError] = useState("");
-  const [sent, setSent] = useState("");
   const [busy, setBusy] = useState(false);
   const title = type === "COMMUNITY_CREATION" ? "Solicitar uma comunidade" : "Solicitar uma entidade";
 
@@ -225,17 +225,17 @@ export function RequestProfileForm({
     import("../services/campus")
       .then(({ getDepartments }) => getDepartments(token, 0, 100))
       .then((page) => active && setDepartments(page.items))
-      .catch(() => active && setError("Não foi possível carregar os departamentos."));
+      .catch((err) => {
+        if (active) toast.error(extractErrorMessage(err, "Não foi possível carregar os departamentos."));
+      });
     return () => {
       active = false;
     };
-  }, [open, token]);
+  }, [open, token, toast]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
-    setError("");
-    setSent("");
     try {
       const { createInstitutionalRequest } = await import("../services/campusSocial");
       const payload = {
@@ -246,15 +246,17 @@ export function RequestProfileForm({
         ...(type === "COMMUNITY_CREATION" ? { category: typeOrCategory || null } : { entityType: typeOrCategory }),
       };
       const created = await createInstitutionalRequest(token, type, targetDepartmentId || null, payload);
-      setSent(`Pedido enviado para ${created.targetDepartmentName || "a Universidade"}. Protocolo ${created.id}.`);
+      toast.success(`Pedido enviado para ${created.targetDepartmentName || "a Universidade"}.`);
       setName("");
       setDescription("");
       setGeneralInfoMarkdown("");
       setTypeOrCategory("");
       onCreated?.();
       if (presentation === "modal") setOpen(false);
-    } catch {
-      setError("Não foi possível enviar o pedido. Revise as informações e tente novamente.");
+    } catch (requestError) {
+      toast.error(
+        extractErrorMessage(requestError, "Não foi possível enviar o pedido. Revise as informações e tente novamente."),
+      );
     } finally {
       setBusy(false);
     }
@@ -304,11 +306,6 @@ export function RequestProfileForm({
           onChange={(event) => setGeneralInfoMarkdown(event.target.value)}
         />
       </label>
-      {error && (
-        <p className="notice notice-error" role="alert">
-          {error}
-        </p>
-      )}
       <button className="button button-primary" disabled={busy} type="submit">
         {busy ? "Enviando…" : "Enviar para aprovação"}
       </button>
@@ -320,11 +317,6 @@ export function RequestProfileForm({
       <button className="button button-secondary" type="button" onClick={() => setOpen((value) => !value)}>
         {presentation === "inline" && open ? "Fechar solicitação" : title}
       </button>
-      {sent && (
-        <p className="notice notice-success" role="status">
-          {sent}
-        </p>
-      )}
       {presentation === "modal" ? (
         <dialog
           aria-labelledby={`profile-request-title-${type.toLowerCase()}`}

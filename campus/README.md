@@ -22,7 +22,7 @@ Serviço de domínio responsável pela **estrutura institucional**, **perfis de 
 ## Endpoints e contratos
 
 - **Perfis e diretório:** `GET /users`, `POST /users`, `GET /users/me`, `PATCH /users/me`
-- **Estrutura institucional:** `GET/PATCH /university`, `GET/POST/PATCH/DELETE /academic-units`, `/departments`, `/courses`, `/semesters`
+- **Estrutura institucional:** `GET/PATCH /university`, `GET/POST/PATCH/DELETE /academic-units`, `/departments` e `/courses`; semestres aceitam `GET/POST/PATCH` e são mantidos para preservar referências históricas
 - **Entidades, comunidades e solicitações:** `/entities`, `/communities`, `/requests`, `/professor-verification-requests`
 - **Social e notificações:** `/profiles/:profileType/:profileId/posts`, `/follows`, `/feed`, `/polls/:pollId/votes`, `/communities/:id/space/posts`, `/community-space-posts/:id/comments`, `/notifications`
 - **Contratos detalhados:**

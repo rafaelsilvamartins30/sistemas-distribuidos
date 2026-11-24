@@ -122,6 +122,8 @@ test("GET /api/v1/web/me/tickets combines Engagement registrations with Access a
     id: "registration-1",
     eventId: "event-1",
     status: "CONFIRMED",
+    canCancel: false,
+    cancellationBlockedReason: "CANCELLATION_WINDOW_CLOSED",
     event: { id: "event-1", title: "Evento de teste" },
   };
   const attendance = { registrationId: "registration-1", status: "ATTENDED", checkedAt: "2027-06-15T18:00:00Z" };
@@ -370,7 +372,6 @@ test("university and department reads forward JWTs and keep administrator IDs ou
     id: "department-1",
     acronym: "DCC",
     name: "Departamento de Ciência da Computação",
-    administratorUserIds: ["admin-user-id"],
   };
   const server = createServer({
     campusUrl: "http://campus:3000/",
@@ -417,7 +418,7 @@ test("university and department reads forward JWTs and keep administrator IDs ou
   );
 });
 
-test("semester catalog reads and admin writes are forwarded through Campus with the bearer token", async (t) => {
+test("semester catalog reads are forwarded through Campus with the bearer token", async (t) => {
   const requested = [];
   const server = createServer({
     campusUrl: "http://campus:3000",
@@ -437,31 +438,52 @@ test("semester catalog reads and admin writes are forwarded through Campus with 
   const headers = { authorization: "Bearer campus-token", "content-type": "application/json" };
   const list = await server.inject({ method: "GET", url: "/api/v1/web/semesters?page=0&size=100", headers });
   const detail = await server.inject({ method: "GET", url: "/api/v1/web/semesters/semester-1", headers });
-  const created = await server.inject({
-    method: "POST",
-    url: "/api/v1/web/semesters",
-    headers,
-    payload: { name: "2026/2", startOn: "2026-08-01", endOn: "2026-12-20" },
-  });
-  const updated = await server.inject({
-    method: "PATCH",
-    url: "/api/v1/web/semesters/semester-1",
-    headers,
-    payload: { endOn: "2026-12-22" },
-  });
-
-  for (const response of [list, detail, created, updated]) assert.equal(response.statusCode, 200);
+  assert.equal(list.statusCode, 200);
+  assert.equal(detail.statusCode, 200);
   assert.deepEqual(
     requested.map(([url, method, authorization]) => [url, method, authorization]),
     [
       ["http://campus:3000/semesters?page=0&size=100", "GET", "Bearer campus-token"],
       ["http://campus:3000/semesters/semester-1", "GET", "Bearer campus-token"],
-      ["http://campus:3000/semesters", "POST", "Bearer campus-token"],
-      ["http://campus:3000/semesters/semester-1", "PATCH", "Bearer campus-token"],
     ],
   );
-  assert.deepEqual(JSON.parse(requested[2][3]), { name: "2026/2", startOn: "2026-08-01", endOn: "2026-12-20" });
-  assert.deepEqual(JSON.parse(requested[3][3]), { endOn: "2026-12-22" });
+});
+
+test("institutional and sports management mutations are not exposed by the Web BFF", async (t) => {
+  let upstreamCalls = 0;
+  const server = createServer({
+    fetch: async () => {
+      upstreamCalls += 1;
+      return new Response(null, { status: 204 });
+    },
+  });
+  t.after(() => server.close());
+
+  const mutations = [
+    ["PATCH", "/api/v1/web/university"],
+    ["POST", "/api/v1/web/semesters"],
+    ["PATCH", "/api/v1/web/semesters/semester-1"],
+    ["POST", "/api/v1/web/academic-units"],
+    ["POST", "/api/v1/web/departments"],
+    ["POST", "/api/v1/web/sports"],
+    ["POST", "/api/v1/web/competitions"],
+    ["POST", "/api/v1/web/seasons"],
+    ["POST", "/api/v1/web/sports-events/COMPETITION/event-1/cancel"],
+    ["POST", "/api/v1/web/sports-events/COMPETITION/event-1/matches/generate"],
+    ["PATCH", "/api/v1/web/sports-matches/match-1/score"],
+    ["POST", "/api/v1/web/sports-matches/match-1/checkin-token"],
+  ];
+
+  for (const [method, url] of mutations) {
+    const response = await server.inject({
+      method,
+      url,
+      headers: { authorization: "Bearer user-token" },
+      payload: {},
+    });
+    assert.equal(response.statusCode, 404, `${method} ${url}`);
+  }
+  assert.equal(upstreamCalls, 0);
 });
 
 test("university and department reads require a bearer token and return Campus errors", async (t) => {
@@ -556,7 +578,6 @@ test("entity and community reads forward pagination and JWTs while hiding manage
   const record = {
     id: "entity-1",
     name: "Entidade de demonstração",
-    managerUserIds: ["keycloak-manager-id"],
   };
   const server = createServer({
     campusUrl: "http://campus:3000/",
@@ -636,8 +657,7 @@ test("Campus profile requests, feed, community conversations, follows, and notif
     campusUrl: "http://campus:3000/",
     fetch: async (url, options) => {
       requested.push({ url: String(url), options });
-      const body =
-        options.method === "DELETE" ? null : JSON.stringify({ administratorUserIds: ["private-admin"], items: [] });
+      const body = options.method === "DELETE" ? null : JSON.stringify({ items: [] });
       return new Response(body, {
         status: options.method === "DELETE" ? 204 : 200,
         headers: options.method === "DELETE" ? undefined : { "content-type": "application/json" },
@@ -663,7 +683,7 @@ test("Campus profile requests, feed, community conversations, follows, and notif
   const feed = await server.inject({ method: "GET", url: "/api/v1/web/feed?term=2026%2F2", headers });
   const profilePosts = await server.inject({
     method: "GET",
-    url: "/api/v1/web/profiles/DEPARTMENT/department-1/posts?term=2026%2F2&includeExpired=true",
+    url: "/api/v1/web/profiles/DEPARTMENT/department-1/posts?term=2026%2F2",
     headers,
   });
   const officialPost = await server.inject({
@@ -717,7 +737,7 @@ test("Campus profile requests, feed, community conversations, follows, and notif
       ["http://campus:3000/departments/department-1", "PATCH", token],
       ["http://campus:3000/requests", "POST", token],
       ["http://campus:3000/feed?term=2026%2F2", "GET", token],
-      ["http://campus:3000/profiles/DEPARTMENT/department-1/posts?term=2026%2F2&includeExpired=true", "GET", token],
+      ["http://campus:3000/profiles/DEPARTMENT/department-1/posts?term=2026%2F2", "GET", token],
       ["http://campus:3000/profiles/DEPARTMENT/department-1/posts", "POST", token],
       ["http://campus:3000/communities/community-1/space/posts", "POST", token],
       ["http://campus:3000/community-space-posts/post-1/comments", "POST", token],
@@ -833,6 +853,24 @@ test("event mutations allow the Engagement write transaction up to 15 seconds", 
   }
 
   assert.deepEqual(timeoutDurations, [15_000, 15_000, 15_000]);
+});
+
+test("event mutation forwards Engagement validation as Problem Details", async (t) => {
+  const problem = { status: 400, code: "EVENT_END_NOT_AFTER_START", detail: "endsAt must be after startsAt" };
+  const server = createServer({
+    fetch: async () => Response.json(problem, { status: 400, headers: { "content-type": "application/problem+json" } }),
+  });
+  t.after(() => server.close());
+
+  const response = await server.inject({
+    method: "PATCH",
+    url: "/api/v1/web/events/event-1",
+    headers: { authorization: "Bearer event-token" },
+    payload: { endsAt: "2027-01-01T12:00:00Z" },
+  });
+  assert.equal(response.statusCode, 400);
+  assert.match(response.headers["content-type"], /^application\/problem\+json/);
+  assert.deepEqual(response.json(), problem);
 });
 
 test("event routes require a bearer token and return 503 when Engagement is unavailable", async (t) => {
@@ -1224,4 +1262,125 @@ test("professor verification and department review forward the JWT and preserve 
 
   const noToken = await server.inject({ method: "GET", url: "/api/v1/web/opportunities/publisher-contexts" });
   assert.equal(noToken.statusCode, 401);
+});
+
+test("payment list enriches events, teams and free agents with origin and readable metadata", async (t) => {
+  const server = createServer({
+    fetch: async (url, options) => {
+      assert.equal(options.headers.authorization, "Bearer token");
+      if (new URL(url).pathname === "/api/v1/payments/me") {
+        return Response.json({ items: ["event", "team", "agent", "missing"].map((referenceId) => ({ referenceId })) });
+      }
+      assert.equal(new URL(url).pathname, "/api/v1/payment-references/me");
+      return Response.json({
+        event: {
+          origin: "EVENT",
+          title: "Semana de Computação",
+          subtitle: "Inscrição em evento",
+          targetPath: "/eventos/ev-1",
+        },
+        team: {
+          origin: "SPORTS_TEAM",
+          title: "Copa UFLA",
+          subtitle: "Equipe · Raquetes",
+          targetPath: "/esportes/campeonatos/comp-1",
+        },
+        agent: {
+          origin: "SPORTS_FREE_AGENT",
+          title: "Liga de Tênis",
+          subtitle: "Inscrição individual (Free Agent)",
+          targetPath: "/esportes/temporadas/season-1",
+        },
+      });
+    },
+  });
+  t.after(() => server.close());
+  const response = await server.inject({
+    method: "GET",
+    url: "/api/v1/web/payments/me",
+    headers: { authorization: "Bearer token" },
+  });
+  assert.equal(response.statusCode, 200);
+  const items = response.json().items;
+  assert.deepEqual(
+    items.map(({ origin }) => origin),
+    ["EVENT", "SPORTS_TEAM", "SPORTS_FREE_AGENT", "UNKNOWN"],
+  );
+  assert.equal(items[0].title, "Semana de Computação");
+  assert.equal(items[0].targetPath, "/eventos/ev-1");
+  assert.equal(items[1].subtitle, "Equipe · Raquetes");
+  assert.equal(items[3].title, undefined);
+});
+
+test("event links returned through the Web BFF use public Gateway paths", async (t) => {
+  const server = createServer({
+    fetch: async () =>
+      Response.json({
+        _links: {
+          self: { href: "/api/v1/events/123", method: "GET" },
+          cancel: { href: "/api/v1/events/123", method: "DELETE" },
+        },
+      }),
+  });
+  t.after(() => server.close());
+  const response = await server.inject({
+    method: "GET",
+    url: "/api/v1/web/events/123",
+    headers: { authorization: "Bearer token" },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json()._links.self.href, "/api/v1/web/events/123");
+  assert.deepEqual(response.json()._links.cancel, { href: "/api/v1/web/events/123", method: "DELETE" });
+});
+
+test("the organizer attendance action comes from Access", async (t) => {
+  const action = { action: "SCAN_PARTICIPANT_QR" };
+  const server = createServer({
+    accessServiceUrl: "http://access:8080",
+    fetch: async (url, init) => {
+      assert.equal(url, "http://access:8080/api/v1/attendance/events/event-1/organizer-action");
+      assert.equal(init.method, "GET");
+      assert.equal(init.headers.authorization, "Bearer token");
+      return Response.json(action);
+    },
+  });
+  t.after(() => server.close());
+  const response = await server.inject({
+    method: "GET",
+    url: "/api/v1/web/attendance/events/event-1/organizer-action",
+    headers: { authorization: "Bearer token" },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), action);
+});
+
+test("attendance review uses Access authorization before resolving participant names in Campus", async (t) => {
+  let campusCalls = 0;
+  const server = createServer({
+    accessServiceUrl: "http://access:8080",
+    campusUrl: "http://campus:3000",
+    fetch: async (url, init) => {
+      const path = new URL(url);
+      if (path.hostname === "access") {
+        assert.equal(path.pathname, "/api/v1/attendance/events/event-1/attendance-review");
+        if (init.headers.authorization !== "Bearer organizer") return Response.json({}, { status: 403 });
+        assert.equal(init.method, "POST");
+        return Response.json({
+          entries: [{ userId: "participant", checkedInAt: "2027-01-01T12:00:00Z" }],
+          closedAt: "2027-01-01T13:00:00Z",
+        });
+      }
+      campusCalls++;
+      assert.deepEqual(path.searchParams.getAll("subjects[]"), ["participant"]);
+      return Response.json({ items: [{ keycloakUserId: "participant", name: "Marina Costa" }] });
+    },
+  });
+  t.after(() => server.close());
+  const url = "/api/v1/web/attendance/events/event-1/attendance-review";
+  const denied = await server.inject({ method: "GET", url, headers: { authorization: "Bearer student" } });
+  assert.equal(denied.statusCode, 403);
+  assert.equal(campusCalls, 0);
+  const closed = await server.inject({ method: "POST", url, headers: { authorization: "Bearer organizer" } });
+  assert.equal(closed.statusCode, 200);
+  assert.equal(closed.json().entries[0].name, "Marina Costa");
 });

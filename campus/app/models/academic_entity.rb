@@ -2,6 +2,8 @@
 
 # Academic entities may optionally be associated with a department.
 class AcademicEntity < ApplicationRecord
+  include ProtectGlobalAdministrator
+
   belongs_to :department, optional: true
 
   before_validation :assign_id, on: :create

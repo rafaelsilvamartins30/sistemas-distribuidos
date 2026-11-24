@@ -41,9 +41,7 @@ class DepartmentsControllerTest < ActionDispatch::IntegrationTest
     assert_nil response.parsed_body.fetch('administratorUserIds')
     assert_equal [], response.parsed_body.fetch('courses')
 
-    with_jwks do
-      get "/departments/#{department.id}", headers: bearer_headers(subject: 'keycloak-admin-id')
-    end
+    with_jwks { get "/departments/#{department.id}", headers: bearer_headers(subject: 'keycloak-admin-id') }
     assert_response :success
     assert_equal ['keycloak-admin-id'], response.parsed_body.fetch('administratorUserIds')
 
@@ -85,23 +83,48 @@ class DepartmentsControllerTest < ActionDispatch::IntegrationTest
     assert_response :forbidden
   end
 
+  test 'keeps the global administrator in contextual administrator lists' do
+    create_profile(subject: 'global-admin-sub', institutional_id: 'ADMIN-0001')
+    department = create_department(id: '10000000-0000-4000-8000-000000000011', acronym: 'DCC')
+
+    with_jwks do
+      patch "/departments/#{department.id}", params: { administratorUserIds: ['keycloak-admin-id'] },
+                                             headers: bearer_headers(subject: 'keycloak-admin-id'), as: :json
+    end
+    assert_response :success
+    assert_equal %w[keycloak-admin-id global-admin-sub], department.reload.administrator_user_ids
+    assert_equal %w[keycloak-admin-id global-admin-sub], response.parsed_body.fetch('administratorUserIds')
+  end
+
+  test 'the global administrator can manage older profiles and cannot be removed from their administrator list' do
+    department = create_department(id: '10000000-0000-4000-8000-000000000012', acronym: 'LEG', administrators: [])
+    create_profile(subject: 'global-admin-sub', institutional_id: 'ADMIN-0001')
+    headers = bearer_headers(subject: 'global-admin-sub', roles: ['PLATFORM_ADMIN'])
+
+    with_jwks { get "/departments/#{department.id}", headers: headers }
+    assert_response :success
+    assert_equal true, response.parsed_body.fetch('viewerCanManage')
+    assert_equal ['global-admin-sub'], response.parsed_body.fetch('administratorUserIds')
+
+    with_jwks do
+      patch "/departments/#{department.id}", params: { administratorUserIds: [] }, headers: headers, as: :json
+    end
+    assert_response :success
+    assert_equal ['global-admin-sub'], department.reload.administrator_user_ids
+  end
+
   private
 
-  def create_department(id:, acronym:)
-    Department.create!(
-      id: id,
-      name: acronym == 'DCC' ? 'Departamento de Ciência da Computação' : 'Departamento de Engenharia Elétrica',
-      acronym: acronym,
-      description: "Departamento #{acronym}.",
-      general_info_markdown: "Informações gerais de #{acronym}.",
-      links: ['https://dcc.example.edu.br'],
-      administrator_user_ids: ['keycloak-admin-id']
-    )
+  def create_department(id:, acronym:, administrators: ['keycloak-admin-id'])
+    name = acronym == 'DCC' ? 'Departamento de Ciência da Computação' : 'Departamento de Engenharia Elétrica'
+    Department.create!(id: id, acronym: acronym, name: name, description: "Departamento #{acronym}.",
+                       general_info_markdown: "Informações gerais de #{acronym}.",
+                       links: ['https://dcc.example.edu.br'], administrator_user_ids: administrators)
   end
 
   def create_university(administrators:)
     University.create!(id: University::SINGLETON_ID, name: 'Universidade de Teste', acronym: 'UT',
-                       description: 'Descrição.', general_info_markdown: 'Informações.', current_term: '2026/2',
-                       links: [], administrator_user_ids: administrators)
+                       description: 'Descrição.', general_info_markdown: 'Informações.',
+                       current_term: '2026/2', links: [], administrator_user_ids: administrators)
   end
 end

@@ -22,7 +22,7 @@ test("followed feed loads recent posts without a semester filter", async () => {
   assert.equal(requestedUrl, "/api/v1/web/feed?page=0&size=20");
 });
 
-test("institutional post history requests expired posts only when selected", async () => {
+test("institutional post history uses the selected semester without an expiry toggle", async () => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{ url: string; authorization: string | null }> = [];
   globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
@@ -37,7 +37,7 @@ test("institutional post history requests expired posts only when selected", asy
   }) as typeof fetch;
 
   try {
-    await getInstitutionalPosts("campus-token", "DEPARTMENT", "department / one", "2026/2", 0, 20, true);
+    await getInstitutionalPosts("campus-token", "DEPARTMENT", "department / one", "2026/2");
     await getInstitutionalPosts("campus-token", "DEPARTMENT", "department-1", "2026/1");
   } finally {
     globalThis.fetch = originalFetch;
@@ -45,7 +45,7 @@ test("institutional post history requests expired posts only when selected", asy
 
   assert.deepEqual(requests, [
     {
-      url: "/api/v1/web/profiles/DEPARTMENT/department%20%2F%20one/posts?term=2026%2F2&includeExpired=true&page=0&size=20",
+      url: "/api/v1/web/profiles/DEPARTMENT/department%20%2F%20one/posts?term=2026%2F2&page=0&size=20",
       authorization: "Bearer campus-token",
     },
     {

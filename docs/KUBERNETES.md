@@ -77,7 +77,7 @@ Toda a operação dos serviços (deploy, rede, DNS interno, Secrets, ConfigMaps,
 
 ### Subir, alternar modo e resetar
 ```bash
-# Modo demo enxuta (Universidade + 1 admin + 10 professores verificados + 40 alunos + estrutura base)
+# Modo demo completo (Universidade + 1 admin + 10 professores + 40 alunos + posts, eventos, oportunidades, esportes e RAG indexado)
 make k8s-demo
 make k8s-reset-demo
 
@@ -112,3 +112,19 @@ kubectl -n unir get pods,svc,pvc,ingress
 kubectl -n unir get events --sort-by=.lastTimestamp
 kubectl -n unir logs deploy/engagement --tail=100
 ```
+
+### Conteúdo de demonstração pelo Gateway
+
+No modo `demo` (`make k8s-demo` ou `make k8s-reset-demo`), o `scripts/k8s-up.sh` executa
+automaticamente `python3 scripts/populate-local-demo.py` após o seed do Campus e antes da
+indexação do Qdrant/RAG. No modo `clean` (`make k8s-clean` ou `make k8s-reset-clean`), esse
+preenchimento é ignorado para manter o ambiente limpo para uso real.
+
+O script usa os tokens das contas fictícias e as APIs normais para preencher publicações,
+conversas, eventos, oportunidades e duas ligas de duplas (uma com calendário e placares da rodada
+de abertura e outra com elencos completos prontos para gerar tabela). Ele é idempotente e também
+pode ser executado manualmente a qualquer momento (`python3 scripts/populate-local-demo.py`).
+
+Para demonstrar ao vivo a projeção de eventos (CQRS) e o pagamento com compensação pelo Gateway,
+execute `make demo-saga` separadamente. O exercício cria um evento exclusivo para a execução e
+cancela esse evento após confirmar a inscrição simulada.

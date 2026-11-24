@@ -19,4 +19,5 @@ public interface SportsTeamRepository extends JpaRepository<SportsTeam, UUID> {
             String inviteCode);
 
     List<SportsTeam> findByIdIn(Collection<UUID> ids);
+    List<SportsTeam> findByCaptainUserId(String userId);
 }

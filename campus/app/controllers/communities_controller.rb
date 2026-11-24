@@ -32,6 +32,16 @@ class CommunitiesController < ApplicationController
     update_community_profile(community)
   end
 
+  def destroy
+    return unless require_university_admin
+
+    community = Community.find_by(id: params[:id])
+    return render_problem(:not_found, 'Community not found') unless community
+
+    community.destroy!
+    head :no_content
+  end
+
   private
 
   def update_community_profile(community)
@@ -39,9 +49,23 @@ class CommunitiesController < ApplicationController
                                  category departmentId])
     return unless payload
     return unless authorize_profile_update?(community, payload)
+    return unless valid_department_change?(community, payload)
 
     assign_community_fields(community, payload)
     save_community(community)
+  end
+
+  def valid_department_change?(community, payload)
+    return true unless payload.key?('departmentId') && payload['departmentId'] != community.department_id
+
+    unless global_platform_admin?
+      render_problem(:forbidden, 'Only the platform administrator can move a community between departments')
+      return false
+    end
+    return true if payload['departmentId'].nil? || Department.exists?(id: payload['departmentId'])
+
+    render_problem(:unprocessable_entity, 'Target department not found')
+    false
   end
 
   def assign_community_fields(community, payload)
@@ -54,16 +78,6 @@ class CommunitiesController < ApplicationController
     return render(json: community_response(community)) if community.save
 
     render_problem(:unprocessable_entity, "Invalid fields: #{community.errors.attribute_names.uniq.sort.join(', ')}")
-  end
-
-  def destroy
-    return unless require_university_admin
-
-    community = Community.find_by(id: params[:id])
-    return render_problem(:not_found, 'Community not found') unless community
-
-    community.destroy!
-    head :no_content
   end
 
   def pagination_parameters

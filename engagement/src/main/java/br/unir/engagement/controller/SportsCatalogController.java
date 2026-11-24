@@ -11,6 +11,7 @@ import br.unir.engagement.dto.GenerateSportsMatchesRequest;
 import br.unir.engagement.dto.JoinSportsTeamRequest;
 import br.unir.engagement.dto.MySportsEnrollmentsResponse;
 import br.unir.engagement.dto.MySportsMatchesResponse;
+import br.unir.engagement.dto.PaymentReferenceResponse;
 import br.unir.engagement.dto.RecordSportsMatchScoreRequest;
 import br.unir.engagement.dto.RegisterFreeAgentRequest;
 import br.unir.engagement.dto.SeasonListResponse;
@@ -26,6 +27,7 @@ import br.unir.engagement.dto.SportsMatchResponse;
 import br.unir.engagement.dto.SportsTeamResponse;
 import br.unir.engagement.dto.UpdateSportsEventRequest;
 import br.unir.engagement.service.SportsCatalogService;
+import br.unir.engagement.service.RegistrationService;
 import br.unir.engagement.service.SportsParticipationService;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.List;
@@ -50,12 +52,14 @@ public class SportsCatalogController {
 
     private final SportsCatalogService sportsCatalogService;
     private final SportsParticipationService participationService;
+    private final RegistrationService registrationService;
 
     @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Spring injects container-managed service beans")
     public SportsCatalogController(SportsCatalogService sportsCatalogService,
-            SportsParticipationService participationService) {
+            SportsParticipationService participationService, RegistrationService registrationService) {
         this.sportsCatalogService = sportsCatalogService;
         this.participationService = participationService;
+        this.registrationService = registrationService;
     }
 
     @GetMapping("/sports")
@@ -130,10 +134,9 @@ public class SportsCatalogController {
     }
 
     @PatchMapping("/sports-events/{contextType}/{contextId}")
-    public Map<String, Object> updateSportsEventDeadline(@PathVariable String contextType, @PathVariable UUID contextId,
+    public Map<String, Object> updateSportsEvent(@PathVariable String contextType, @PathVariable UUID contextId,
             @RequestBody UpdateSportsEventRequest request, @AuthenticationPrincipal Jwt jwt) {
-        return this.participationService.updateSportsEventDeadline(contextType, contextId, request,
-                jwt.getTokenValue());
+        return this.participationService.updateSportsEvent(contextType, contextId, request, jwt.getTokenValue());
     }
 
     @PostMapping("/sports-events/{contextType}/{contextId}/cancel")
@@ -192,6 +195,32 @@ public class SportsCatalogController {
     public SportsMatchCheckInResponse checkIn(@PathVariable UUID matchId,
             @RequestBody SportsMatchCheckInRequest request, @AuthenticationPrincipal Jwt jwt) {
         return this.participationService.checkIn(matchId, request, jwt.getSubject());
+    }
+
+    @GetMapping("/sports-matches/{id}/attendance")
+    public SportsParticipationService.MatchAttendance matchAttendance(@PathVariable UUID id,
+            @AuthenticationPrincipal Jwt jwt) {
+        return this.participationService.matchAttendance(id, jwt.getTokenValue(), false);
+    }
+
+    @PostMapping("/sports-matches/{id}/attendance")
+    public SportsParticipationService.MatchAttendance closeMatchAttendance(@PathVariable UUID id,
+            @AuthenticationPrincipal Jwt jwt) {
+        return this.participationService.matchAttendance(id, jwt.getTokenValue(), true);
+    }
+
+    @GetMapping("/sports-payment-origins/me")
+    public Map<UUID, String> mySportsPaymentOrigins(@AuthenticationPrincipal Jwt jwt) {
+        var origins = this.participationService.getMySportsPaymentOrigins(jwt.getSubject());
+        this.registrationService.getMyPaymentReferences(jwt.getSubject()).forEach(id -> origins.put(id, "EVENT"));
+        return origins;
+    }
+
+    @GetMapping("/payment-references/me")
+    public Map<UUID, PaymentReferenceResponse> myPaymentReferences(@AuthenticationPrincipal Jwt jwt) {
+        var references = this.participationService.getMySportsPaymentReferences(jwt.getSubject());
+        references.putAll(this.registrationService.getMyPaymentReferenceDetails(jwt.getSubject()));
+        return references;
     }
 
     @GetMapping("/sports-events/me")

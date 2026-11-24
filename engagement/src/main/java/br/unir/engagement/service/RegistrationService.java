@@ -1,12 +1,13 @@
 package br.unir.engagement.service;
 
+import br.unir.engagement.dto.PaymentReferenceResponse;
 import br.unir.engagement.dto.RegistrationListResponse;
 import br.unir.engagement.dto.RegistrationConfirmedPayload;
 import br.unir.engagement.dto.RegistrationCancelledPayload;
 import br.unir.engagement.dto.RegistrationPaymentRequestedPayload;
 import br.unir.engagement.dto.RegistrationResponse;
 import br.unir.engagement.entity.Event;
-import br.unir.engagement.entity.EventStatus;
+import br.unir.engagement.entity.EventRegistrationPolicy;
 import br.unir.engagement.entity.OutboxEvent;
 import br.unir.engagement.entity.Registration;
 import br.unir.engagement.entity.RegistrationStatus;
@@ -18,7 +19,10 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.List;
 import java.util.UUID;
@@ -26,7 +30,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,28 +55,47 @@ public class RegistrationService {
         this.objectMapper = objectMapper.copy();
     }
 
+    @Transactional(readOnly = true)
+    public List<UUID> getMyPaymentReferences(String userId) {
+        return this.registrationRepository.findPaymentReferences(userId);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<UUID, PaymentReferenceResponse> getMyPaymentReferenceDetails(String userId) {
+        Map<UUID, PaymentReferenceResponse> details = new HashMap<>();
+        for (Object[] row : this.registrationRepository.findPaymentReferenceDetails(userId)) {
+            UUID registrationId = (UUID) row[0];
+            UUID eventId = (UUID) row[1];
+            String eventTitle = (String) row[2];
+            details.put(registrationId,
+                    new PaymentReferenceResponse("EVENT", eventTitle, "Inscrição em evento", "/eventos/" + eventId));
+        }
+        return details;
+    }
+
     @Transactional
     public RegistrationResponse register(UUID eventId, String userId) {
         Event event = this.eventRepository.findByIdForUpdate(eventId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Event not found"));
         Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
-        validateEventForRegistration(event, now);
+        String blockedReason = EventRegistrationPolicy.blockedReason(event.getStatus(), event.getRegistrationMode(),
+                event.getRegistrationDeadline(), event.getPrice(), now);
+        if (blockedReason != null) {
+            throw conflict(blockedReason);
+        }
 
         var activeRegistration = this.registrationRepository
                 .findFirstByEventIdAndUserIdAndStatusInOrderByRegisteredAtDesc(eventId, userId, ACTIVE_STATUSES);
         if (activeRegistration.isPresent()) {
             Registration previous = activeRegistration.get();
-            if (previous.getStatus() == RegistrationStatus.PENDING_PAYMENT
-                    && (previous.getReservationExpiresAt() == null
-                            || !previous.getReservationExpiresAt().isAfter(now))) {
+            if (reservationExpired(previous, now)) {
                 previous.expirePayment();
                 this.registrationRepository.saveAndFlush(previous);
             } else {
                 throw conflict("ALREADY_REGISTERED");
             }
         }
-        if (event.getCapacity() != null && this.registrationRepository.countCapacityOccupants(eventId,
-                RegistrationStatus.CONFIRMED, RegistrationStatus.PENDING_PAYMENT, now) >= event.getCapacity()) {
+        if (eventFull(event, now)) {
             throw conflict("EVENT_FULL");
         }
 
@@ -82,9 +104,6 @@ public class RegistrationService {
             registration = new Registration(UUID.randomUUID(), event.getId(), userId, RegistrationStatus.CONFIRMED, now,
                     now, null, null, null);
         } else {
-            if (event.getPrice() == null || event.getPrice() <= 0) {
-                throw conflict("EVENT_PRICE_NOT_CONFIGURED");
-            }
             Instant paymentDeadlineAt = now.plus(Duration.ofMinutes(10));
             Instant reservationExpiresAt = now.plus(Duration.ofMinutes(15));
             registration = new Registration(UUID.randomUUID(), event.getId(), userId,
@@ -97,22 +116,32 @@ public class RegistrationService {
         } else if (event.isAttendanceEnabled()) {
             this.createRegistrationConfirmed(saved, event);
         }
-        return RegistrationResponse.from(saved, event);
+        return RegistrationResponse.from(saved, event, now);
     }
 
     @Transactional(readOnly = true)
-    public RegistrationListResponse listForUser(String userId, int page, int size) {
+    public RegistrationListResponse listForUser(String userId, int page, int size, UUID eventId, LocalDate startOn,
+            LocalDate endOn, String agenda) {
         if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "page must be non-negative and size must be between 1 and 100");
         }
-        Page<Registration> registrations = this.registrationRepository.findByUserIdOrderByRegisteredAtDesc(userId,
-                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "registeredAt")));
+        if (agenda != null && !agenda.equals("upcoming") && !agenda.equals("past")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid agenda");
+        }
+        if (startOn != null && endOn != null && endOn.isBefore(startOn)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid date range");
+        }
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        Instant startsFrom = startOn == null ? null : startOn.atStartOfDay().toInstant(ZoneOffset.UTC);
+        Instant startsBefore = endOn == null ? null : endOn.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC);
+        Page<Registration> registrations = this.registrationRepository.findAgenda(userId, eventId, startsFrom,
+                startsBefore, agenda, now, PageRequest.of(page, size));
         Map<UUID, Event> eventsById = this.eventRepository
                 .findAllById(registrations.getContent().stream().map(Registration::getEventId).distinct().toList())
                 .stream().collect(Collectors.toMap(Event::getId, Function.identity()));
-        Page<RegistrationResponse> responses = registrations.map(
-                registration -> RegistrationResponse.from(registration, eventsById.get(registration.getEventId())));
+        Page<RegistrationResponse> responses = registrations.map(registration -> RegistrationResponse.from(registration,
+                eventsById.get(registration.getEventId()), now));
         return RegistrationListResponse.from(responses);
     }
 
@@ -125,35 +154,47 @@ public class RegistrationService {
         Registration registration = this.registrationRepository.findByIdAndUserId(registrationId, userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Registration not found"));
 
-        if (registration.getStatus() != RegistrationStatus.CONFIRMED) {
-            throw conflict("REGISTRATION_NOT_ACTIVE");
-        }
-        if (event.getRegistrationMode() != RegistrationMode.INTERNAL_FREE) {
-            throw conflict("ONLY_FREE_REGISTRATIONS_CAN_BE_CANCELLED");
-        }
-
         Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
-        Instant cancellationDeadline = event.getStartsAt().minus(Duration.ofHours(24));
-        if (now.isAfter(cancellationDeadline)) {
-            throw conflict("CANCELLATION_WINDOW_CLOSED");
+        String blockedReason = registration.cancellationBlockedReason(event, now);
+        if (blockedReason != null) {
+            throw conflict(blockedReason);
         }
 
         registration.cancelByUser(now);
         Registration saved = this.registrationRepository.saveAndFlush(registration);
         this.saveRegistrationCancelled(saved, now);
-        return RegistrationResponse.from(saved, event);
+        return RegistrationResponse.from(saved, event, now);
     }
 
-    private static void validateEventForRegistration(Event event, Instant now) {
-        if (event.getStatus() == EventStatus.CANCELLED) {
-            throw conflict("EVENT_CANCELLED");
+    @Transactional(readOnly = true)
+    public String registrationBlockedReason(UUID eventId, String userId) {
+        Event event = this.eventRepository.findById(eventId).orElse(null);
+        if (event == null) {
+            return "EVENT_UNAVAILABLE";
         }
-        if (event.getRegistrationMode() == RegistrationMode.EXTERNAL_PAID) {
-            throw conflict("REGISTRATION_MODE_NOT_SUPPORTED");
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        String reason = EventRegistrationPolicy.blockedReason(event.getStatus(), event.getRegistrationMode(),
+                event.getRegistrationDeadline(), event.getPrice(), now);
+        if (reason != null) {
+            return reason;
         }
-        if (!now.isBefore(event.getRegistrationDeadline())) {
-            throw conflict("REGISTRATION_CLOSED");
+        var active = this.registrationRepository.findFirstByEventIdAndUserIdAndStatusInOrderByRegisteredAtDesc(eventId,
+                userId, ACTIVE_STATUSES);
+        if (active.isPresent() && !reservationExpired(active.get(), now)) {
+            return "ALREADY_REGISTERED";
         }
+        return eventFull(event, now) ? "EVENT_FULL" : null;
+    }
+
+    private boolean eventFull(Event event, Instant now) {
+        return event.getCapacity() != null && this.registrationRepository.countCapacityOccupants(event.getId(),
+                RegistrationStatus.CONFIRMED, RegistrationStatus.PENDING_PAYMENT, now) >= event.getCapacity();
+    }
+
+    private static boolean reservationExpired(Registration registration, Instant now) {
+        return registration.getStatus() == RegistrationStatus.PENDING_PAYMENT
+                && (registration.getReservationExpiresAt() == null
+                        || !registration.getReservationExpiresAt().isAfter(now));
     }
 
     private void createPaymentRequest(Registration registration, Event event) {

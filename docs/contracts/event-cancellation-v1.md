@@ -19,6 +19,21 @@ created by `PROFESSOR`, `DEPARTMENT`, `ACADEMIC_UNIT`, or `UNIVERSITY` must use
 `COMMUNITY` or `ACADEMIC_ENTITY` must use `EXTERNAL_PAID` (with an external
 registration URL).
 
+The organizer contexts returned by Engagement include `paidRegistrationMode`, which is derived
+from the same rule that validates event writes. The Web uses it to display the paid option.
+
+Event writes report schedule validation failures as HTTP 400 Problem Details with a `code`.
+`EVENT_END_NOT_AFTER_START` and `EVENT_DEADLINE_AFTER_END` apply to creation and editing.
+`EVENT_DEADLINE_NOT_FUTURE` applies to creation. Payment fields and capacity also return domain
+codes so the form can show the applicable message. The Web BFF forwards the response unchanged.
+
+The event detail and managed list include `_links.update` and `_links.cancel` only for active
+events in an organizer context verified for the caller. Managed list pagination matches both
+the organizer type and ID. Detail fields come from the event projection, while the link decision
+also verifies that the event is still active in the write store. When Campus or the write store
+is unavailable, event details remain available without the management links. Update and
+cancellation validate authorization again when the caller submits the command.
+
 ## `EventCancelled` v1
 
 - Publisher: Engagement Outbox.

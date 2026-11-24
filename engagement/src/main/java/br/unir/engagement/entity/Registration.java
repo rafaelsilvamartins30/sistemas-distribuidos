@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -59,6 +60,16 @@ public class Registration {
         this.cancelledAt = cancelledAt;
         this.paymentDeadlineAt = paymentDeadlineAt;
         this.reservationExpiresAt = reservationExpiresAt;
+    }
+
+    public String cancellationBlockedReason(Event event, Instant now) {
+        if (this.status != RegistrationStatus.CONFIRMED) {
+            return "REGISTRATION_NOT_ACTIVE";
+        }
+        if (event.getRegistrationMode() != RegistrationMode.INTERNAL_FREE) {
+            return "ONLY_FREE_REGISTRATIONS_CAN_BE_CANCELLED";
+        }
+        return now.isAfter(event.getStartsAt().minus(Duration.ofHours(24))) ? "CANCELLATION_WINDOW_CLOSED" : null;
     }
 
     public void cancelByUser(Instant cancelledAt) {

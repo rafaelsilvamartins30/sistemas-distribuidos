@@ -27,6 +27,7 @@ class KeycloakJwt
       algorithms: ['RS256'],
       iss: ENV.fetch('KEYCLOAK_ISSUER_URI', 'http://localhost:18081/realms/unir'),
       verify_iss: true,
+      required_claims: ['exp'],
       jwks: ->(options) { jwks_for(options) }
     }
   end

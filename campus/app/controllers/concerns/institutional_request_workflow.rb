@@ -7,6 +7,8 @@ module InstitutionalRequestWorkflow
   private
 
   def pending_requests
+    return InstitutionalRequest.pending.order(:created_at, :id) if global_platform_admin?
+
     requests = InstitutionalRequest.pending.where(target_department_id: department_admin_ids)
     requests = requests.or(InstitutionalRequest.pending.where(target_department_id: nil)) if university_admin?
     requests.includes(:target_department).order(:created_at, :id)
@@ -17,7 +19,7 @@ module InstitutionalRequestWorkflow
   end
 
   def university_admin?
-    University.current&.administrator_user_ids&.include?(current_subject)
+    global_platform_admin?
   end
 
   def validated_request_payload

@@ -107,6 +107,8 @@ class EngagementEndpointTest {
 
     @BeforeEach
     void clearEvents() {
+        when(this.campusOrganizerClient.getContexts(any(String.class)))
+                .thenReturn(new EventOrganizerContextsResponse(List.of()));
         this.jdbcTemplate.update("DELETE FROM event_cancellation_refunds");
         this.jdbcTemplate.update("DELETE FROM processed_refund_results");
         this.jdbcTemplate.update("DELETE FROM payment_compensation_cases");
@@ -282,6 +284,54 @@ class EngagementEndpointTest {
 
         this.mockMvc.perform(get("/api/v1/events/{eventId}", UUID.randomUUID()).with(userJwt()))
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.status").value(404));
+    }
+
+    @Test
+    void onlyOffersManagementActionsForActiveEventsInTheVerifiedOrganizerContext() throws Exception {
+        UUID organizerId = UUID.randomUUID();
+        Instant start = Instant.now().plus(Duration.ofDays(3));
+        Event authorizedEvent = new Event(UUID.randomUUID(), "Evento institucional", "Descrição", "DEPARTMENT",
+                organizerId, null, "Auditório", start, start.plusSeconds(3600), "ACADEMIC", 20,
+                start.minusSeconds(3600), RegistrationMode.INTERNAL_FREE, null, null, false, null, EventStatus.ACTIVE,
+                Instant.now());
+        Event otherOrganizerEvent = new Event(UUID.randomUUID(), "Evento da comunidade", "Descrição", "COMMUNITY",
+                organizerId, null, "Auditório", start, start.plusSeconds(3600), "ACADEMIC", 20,
+                start.minusSeconds(3600), RegistrationMode.INTERNAL_FREE, null, null, false, null, EventStatus.ACTIVE,
+                Instant.now());
+        this.eventRepository.saveAllAndFlush(List.of(authorizedEvent, otherOrganizerEvent));
+        when(this.campusOrganizerClient.getContexts("organizer-token")).thenReturn(new EventOrganizerContextsResponse(
+                List.of(new EventOrganizerContext("DEPARTMENT", organizerId, "DCC"))));
+        when(this.campusOrganizerClient.getContexts("unavailable-token"))
+                .thenThrow(new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
+
+        var organizer = userJwtWithToken("organizer-user", "organizer-token");
+        UUID eventId = authorizedEvent.getId();
+        this.mockMvc.perform(get("/api/v1/events/{id}", eventId).with(organizer)).andExpect(status().isOk())
+                .andExpect(jsonPath("$._links.update.method").value("PATCH"))
+                .andExpect(jsonPath("$._links.cancel.method").value("DELETE"));
+        this.mockMvc.perform(get("/api/v1/events/{id}", otherOrganizerEvent.getId()).with(organizer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$._links.update").doesNotExist())
+                .andExpect(jsonPath("$._links.cancel").doesNotExist());
+        this.mockMvc.perform(get("/api/v1/events/managed?size=1").with(organizer)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(eventId.toString()))
+                .andExpect(jsonPath("$.items[0]._links.cancel.method").value("DELETE"));
+        this.mockMvc.perform(get("/api/v1/events").with(organizer)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0]._links.cancel").doesNotExist());
+        this.mockMvc.perform(get("/api/v1/events/{id}", eventId).with(userJwt())).andExpect(status().isOk())
+                .andExpect(jsonPath("$._links.cancel").doesNotExist());
+        this.mockMvc
+                .perform(get("/api/v1/events/{id}", eventId)
+                        .with(userJwtWithToken("organizer-user", "unavailable-token")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$._links.cancel").doesNotExist());
+
+        var staleView = EventView.from(EventProjectionPayload.from(authorizedEvent));
+        when(this.eventProjectionStore.findById(eventId.toString())).thenReturn(java.util.Optional.of(staleView));
+        this.mockMvc.perform(delete("/api/v1/events/{id}", eventId).with(organizer)).andExpect(status().isOk())
+                .andExpect(jsonPath("$._links.cancel").doesNotExist());
+        this.mockMvc.perform(get("/api/v1/events/{id}", eventId).with(organizer)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE")).andExpect(jsonPath("$._links.cancel").doesNotExist());
     }
 
     @Test
@@ -472,6 +522,16 @@ class EngagementEndpointTest {
         this.paymentConfirmationService.consume(body);
         this.paymentConfirmationService.consume(body);
 
+        this.mockMvc.perform(get("/api/v1/registrations/me").with(userJwt("kc-paid-user"))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].canCancel").value(false))
+                .andExpect(jsonPath("$.items[0].cancellationBlockedReason")
+                        .value("ONLY_FREE_REGISTRATIONS_CAN_BE_CANCELLED"));
+        this.mockMvc
+                .perform(delete("/api/v1/registrations/{registrationId}", registration.getId())
+                        .with(userJwt("kc-paid-user")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("ONLY_FREE_REGISTRATIONS_CAN_BE_CANCELLED"));
+
         Registration confirmed = this.registrationRepository.findById(registration.getId()).orElseThrow();
         org.junit.jupiter.api.Assertions.assertEquals(RegistrationStatus.CONFIRMED, confirmed.getStatus());
         org.junit.jupiter.api.Assertions.assertEquals(paidAt, confirmed.getConfirmedAt());
@@ -584,6 +644,17 @@ class EngagementEndpointTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.items[0].userId").value("kc-user-a"))
                 .andExpect(jsonPath("$.items[0].event.id").value(event.getId().toString()));
+        String date = event.getStartsAt().atOffset(java.time.ZoneOffset.UTC).toLocalDate().toString();
+        this.mockMvc
+                .perform(get("/api/v1/registrations/me").with(userJwt("kc-user-a"))
+                        .param("eventId", event.getId().toString()).param("startOn", date).param("endOn", date)
+                        .param("agenda", "upcoming").param("size", "1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1));
+        this.mockMvc.perform(get("/api/v1/registrations/me").with(userJwt("kc-user-a")).param("agenda", "past"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(0));
+        this.mockMvc.perform(get("/api/v1/events/{id}", event.getId()).with(userJwt("kc-user-a")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.registrationBlockedReason").value("ALREADY_REGISTERED"));
     }
 
     @Test
@@ -591,14 +662,14 @@ class EngagementEndpointTest {
         Event event = futureFreeEvent(2, Duration.ofDays(3));
         this.eventRepository.saveAndFlush(event);
         this.mockMvc.perform(post("/api/v1/events/{eventId}/registrations", event.getId()).with(userJwt("kc-user-a")))
-                .andExpect(status().isCreated());
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.canCancel").value(true));
         Registration registration = this.registrationRepository.findAll().getFirst();
 
         this.mockMvc
                 .perform(delete("/api/v1/registrations/{registrationId}", registration.getId())
                         .with(userJwt("kc-user-a")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELLED_BY_USER"))
-                .andExpect(jsonPath("$.cancelledAt").isNotEmpty());
+                .andExpect(jsonPath("$.cancelledAt").isNotEmpty()).andExpect(jsonPath("$.canCancel").value(false));
         org.junit.jupiter.api.Assertions.assertEquals(1, this.registrationRepository.count());
         OutboxEvent accessCancellation = this.outboxRepository
                 .findByAggregateIdOrderByCreatedAtAsc(registration.getId()).stream()
@@ -618,7 +689,8 @@ class EngagementEndpointTest {
         Event soon = futureFreeEvent(2, Duration.ofHours(23));
         this.eventRepository.saveAndFlush(soon);
         this.mockMvc.perform(post("/api/v1/events/{eventId}/registrations", soon.getId()).with(userJwt("kc-user-b")))
-                .andExpect(status().isCreated());
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.canCancel").value(false))
+                .andExpect(jsonPath("$.cancellationBlockedReason").value("CANCELLATION_WINDOW_CLOSED"));
         Registration soonRegistration = this.registrationRepository
                 .findByUserIdOrderByRegisteredAtDesc("kc-user-b", org.springframework.data.domain.PageRequest.of(0, 1))
                 .getContent().getFirst();
@@ -675,6 +747,13 @@ class EngagementEndpointTest {
         when(this.campusOrganizerClient.getContexts("regular-token"))
                 .thenReturn(new EventOrganizerContextsResponse(List.of()));
 
+        this.mockMvc
+                .perform(get("/api/v1/events/organizer-contexts")
+                        .with(userJwtWithToken("organizer-user", "organizer-token")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].paidRegistrationMode").value("INTERNAL_PAID"))
+                .andExpect(jsonPath("$.items[1].paidRegistrationMode").value("EXTERNAL_PAID"));
+
         String departmentInternalPaidBody = """
                 {
                   "title": "Workshop de Sistemas Distribuídos",
@@ -694,6 +773,18 @@ class EngagementEndpointTest {
                 }
                 """.formatted(departmentId, startsAt, endsAt, deadline);
 
+        for (var invalid : java.util.Map.of("EVENT_END_NOT_AFTER_START",
+                departmentInternalPaidBody.replace(endsAt, startsAt), "EVENT_DEADLINE_AFTER_END",
+                departmentInternalPaidBody.replace(deadline, now.plus(Duration.ofDays(6)).toString()),
+                "EVENT_DEADLINE_NOT_FUTURE",
+                departmentInternalPaidBody.replace(deadline, now.minusSeconds(60).toString())).entrySet()) {
+            this.mockMvc
+                    .perform(post("/api/v1/events").with(userJwtWithToken("organizer-user", "organizer-token"))
+                            .contentType(MediaType.APPLICATION_JSON).content(invalid.getValue()))
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value(invalid.getKey()));
+        }
+        org.junit.jupiter.api.Assertions.assertEquals(0, this.eventRepository.count());
+
         String createdResponse = this.mockMvc
                 .perform(post("/api/v1/events").with(userJwtWithToken("organizer-user", "organizer-token"))
                         .contentType(MediaType.APPLICATION_JSON).content(departmentInternalPaidBody))
@@ -710,14 +801,14 @@ class EngagementEndpointTest {
         this.mockMvc
                 .perform(post("/api/v1/events").with(userJwtWithToken("organizer-user", "organizer-token"))
                         .contentType(MediaType.APPLICATION_JSON).content(departmentInvalidExternalBody))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("EVENT_UNSUPPORTED_PAID_MODE"));
 
         String communityInvalidInternalPaidBody = departmentInternalPaidBody.replace("\"DEPARTMENT\"", "\"COMMUNITY\"")
                 .replace(departmentId.toString(), communityId.toString());
         this.mockMvc
                 .perform(post("/api/v1/events").with(userJwtWithToken("organizer-user", "organizer-token"))
                         .contentType(MediaType.APPLICATION_JSON).content(communityInvalidInternalPaidBody))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("EVENT_UNSUPPORTED_PAID_MODE"));
 
         String communityExternalPaidBody = """
                 {
@@ -745,6 +836,12 @@ class EngagementEndpointTest {
 
         this.mockMvc.perform(get("/api/v1/events/managed").with(userJwtWithToken("organizer-user", "organizer-token")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2));
+
+        this.mockMvc
+                .perform(patch("/api/v1/events/{eventId}", departmentEventId)
+                        .with(userJwtWithToken("organizer-user", "organizer-token"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"endsAt\":\"" + startsAt + "\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("EVENT_END_NOT_AFTER_START"));
 
         this.mockMvc.perform(patch("/api/v1/events/{eventId}", departmentEventId)
                 .with(userJwtWithToken("organizer-user", "organizer-token")).contentType(MediaType.APPLICATION_JSON)

@@ -1,3 +1,5 @@
+import { parseApiError } from "../utils/apiError.js";
+
 export interface University {
   id: string;
   name: string;
@@ -9,6 +11,7 @@ export interface University {
   bannerUrl: string | null;
   links: unknown[];
   viewerCanManage?: boolean;
+  viewerCanEditProfile?: boolean;
   administratorUserIds?: string[] | null;
 }
 
@@ -24,6 +27,7 @@ export interface Department {
   sourceUrl: string | null;
   courses?: CatalogCourse[];
   viewerCanManage?: boolean;
+  viewerCanEditProfile?: boolean;
   administratorUserIds?: string[] | null;
 }
 
@@ -39,6 +43,7 @@ export interface AcademicUnit {
   sourceUrl: string | null;
   referenceOnly: boolean;
   viewerCanManage?: boolean;
+  viewerCanEditProfile?: boolean;
   administratorUserIds?: string[] | null;
 }
 
@@ -70,6 +75,7 @@ export interface AcademicEntity {
   sourceAffiliationText: string | null;
   referenceOnly: boolean;
   viewerCanManage?: boolean;
+  viewerCanEditProfile?: boolean;
   administratorUserIds?: string[] | null;
 }
 
@@ -84,6 +90,7 @@ export interface Community {
   bannerUrl: string | null;
   links: unknown[];
   viewerCanManage?: boolean;
+  viewerCanEditProfile?: boolean;
   administratorUserIds?: string[] | null;
 }
 
@@ -103,8 +110,11 @@ export interface Semester {
 }
 
 export class CampusApiError extends Error {
-  constructor(public readonly status: number) {
-    super(`Gateway respondeu com status ${status}.`);
+  constructor(
+    public readonly status: number,
+    message?: string,
+  ) {
+    super(message ?? `Gateway respondeu com status ${status}.`);
     this.name = "CampusApiError";
   }
 }
@@ -122,7 +132,10 @@ async function mutate<T>(
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!response.ok) throw new CampusApiError(response.status);
+  if (!response.ok) {
+    const parsed = await parseApiError(response);
+    throw new CampusApiError(response.status, parsed.message);
+  }
   return (await response.json()) as T;
 }
 
@@ -136,7 +149,10 @@ async function request<T>(
     method: "GET",
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!response.ok) throw new CampusApiError(response.status);
+  if (!response.ok) {
+    const parsed = await parseApiError(response);
+    throw new CampusApiError(response.status, parsed.message);
+  }
   return (await response.json()) as T;
 }
 
@@ -156,69 +172,21 @@ export function getSemesters(
   return request<CampusPage<Semester>>("/api/v1/web/semesters?page=0&size=100", token, gatewayUrl, fetchImpl);
 }
 
-export function createSemester(
-  token: string,
-  input: Pick<Semester, "name" | "startOn" | "endOn">,
-  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<Semester> {
-  return mutate("/api/v1/web/semesters", token, "POST", input, gatewayUrl, fetchImpl);
-}
-
-export function updateSemester(
-  token: string,
-  semesterId: string,
-  input: Pick<Semester, "name" | "startOn" | "endOn">,
-  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<Semester> {
-  return mutate(
-    `/api/v1/web/semesters/${encodeURIComponent(semesterId)}`,
-    token,
-    "PATCH",
-    input,
-    gatewayUrl,
-    fetchImpl,
-  );
-}
-
 export function updateInstitutionalProfile(
   token: string,
-  type: "UNIVERSITY" | "ACADEMIC_UNIT" | "DEPARTMENT" | "ACADEMIC_ENTITY" | "COMMUNITY",
+  type: "ACADEMIC_UNIT" | "DEPARTMENT" | "ACADEMIC_ENTITY" | "COMMUNITY",
   profileId: string,
   input: Record<string, unknown>,
   gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<unknown> {
   const paths = {
-    UNIVERSITY: "/api/v1/web/university",
     ACADEMIC_UNIT: `/api/v1/web/academic-units/${encodeURIComponent(profileId)}`,
     DEPARTMENT: `/api/v1/web/departments/${encodeURIComponent(profileId)}`,
     ACADEMIC_ENTITY: `/api/v1/web/entities/${encodeURIComponent(profileId)}`,
     COMMUNITY: `/api/v1/web/communities/${encodeURIComponent(profileId)}`,
   };
   return mutate(paths[type], token, "PATCH", input, gatewayUrl, fetchImpl);
-}
-
-export function createUniversityProfile(
-  token: string,
-  type: "ACADEMIC_UNIT" | "DEPARTMENT",
-  input: Record<string, unknown>,
-  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<unknown> {
-  const path = type === "ACADEMIC_UNIT" ? "/api/v1/web/academic-units" : "/api/v1/web/departments";
-  return mutate(path, token, "POST", input, gatewayUrl, fetchImpl);
-}
-
-export function createDepartmentCourse(
-  token: string,
-  departmentId: string,
-  name: string,
-  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<CatalogCourse> {
-  return mutate("/api/v1/web/courses", token, "POST", { departmentId, name }, gatewayUrl, fetchImpl);
 }
 
 export function getDepartments(
@@ -351,22 +319,4 @@ export function getCommunity(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<Community> {
   return request<Community>(`/api/v1/web/communities/${encodeURIComponent(communityId)}`, token, gatewayUrl, fetchImpl);
-}
-
-export interface DirectoryUser {
-  id: string;
-  keycloakUserId: string;
-  name: string;
-  registrationCode: string;
-  userType: string;
-}
-
-export function searchCampusUsers(
-  token: string,
-  query = "",
-  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<{ items: DirectoryUser[] }> {
-  const qs = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
-  return request<{ items: DirectoryUser[] }>(`/api/v1/web/users${qs}`, token, gatewayUrl, fetchImpl);
 }

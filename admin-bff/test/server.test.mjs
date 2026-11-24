@@ -127,6 +127,76 @@ test("GET /api/v1/admin/overview aggregates the administration view in one respo
   assert.equal(response.json().pendingRequests.totalElements, 0);
 });
 
+test("admin BFF aggregates the sports catalog and routes edits to their owning services", async (t) => {
+  const forwarded = [];
+  const server = createServer({
+    campusUrl: "http://campus:3000",
+    engagementServiceUrl: "http://engagement:8080",
+    fetch: async (url, init) => {
+      const parsed = new URL(String(url));
+      forwarded.push({
+        url: String(url),
+        method: init.method,
+        authorization: init.headers.authorization,
+        body: init.body,
+      });
+      const body = parsed.pathname.endsWith("organizer-contexts")
+        ? { items: [{ organizerType: "UNIVERSITY", organizerId: "university-1", name: "UFLA" }] }
+        : { items: [], page: 0, size: 100, totalElements: 0, totalPages: 0 };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  t.after(() => server.close());
+
+  const headers = { authorization: "Bearer global-admin-token", "content-type": "application/json" };
+  const catalog = await server.inject({ method: "GET", url: "/api/v1/admin/sports/catalog", headers });
+  const createdSport = await server.inject({
+    method: "POST",
+    url: "/api/v1/admin/sports",
+    headers,
+    payload: { name: "Futsal" },
+  });
+  const semester = await server.inject({
+    method: "PATCH",
+    url: "/api/v1/admin/semesters/semester-1",
+    headers,
+    payload: { name: "2027/1", startOn: "2027-01-01", endOn: "2027-06-30" },
+  });
+
+  const champion = await server.inject({
+    method: "PATCH",
+    url: "/api/v1/admin/sports-events/SEASON/season-1",
+    headers,
+    payload: { championTeamId: "team-1" },
+  });
+
+  assert.equal(catalog.statusCode, 200);
+  assert.deepEqual(catalog.json().organizerContexts.items, [
+    { organizerType: "UNIVERSITY", organizerId: "university-1", name: "UFLA" },
+  ]);
+  assert.equal(createdSport.statusCode, 200);
+  assert.equal(semester.statusCode, 200);
+  assert.equal(champion.statusCode, 200);
+  assert.deepEqual(
+    forwarded.map(({ url, method, authorization }) => [url, method, authorization]),
+    [
+      ["http://engagement:8080/api/v1/sports?page=0&size=100", "GET", "Bearer global-admin-token"],
+      ["http://engagement:8080/api/v1/sports/organizer-contexts", "GET", "Bearer global-admin-token"],
+      ["http://engagement:8080/api/v1/competitions?page=0&size=100", "GET", "Bearer global-admin-token"],
+      ["http://engagement:8080/api/v1/seasons?page=0&size=100", "GET", "Bearer global-admin-token"],
+      ["http://engagement:8080/api/v1/sports", "POST", "Bearer global-admin-token"],
+      ["http://campus:3000/semesters/semester-1", "PATCH", "Bearer global-admin-token"],
+      ["http://engagement:8080/api/v1/sports-events/SEASON/season-1", "PATCH", "Bearer global-admin-token"],
+    ],
+  );
+  assert.deepEqual(JSON.parse(forwarded[4].body), { name: "Futsal" });
+  assert.deepEqual(JSON.parse(forwarded[5].body), { name: "2027/1", startOn: "2027-01-01", endOn: "2027-06-30" });
+  assert.deepEqual(JSON.parse(forwarded[6].body), { championTeamId: "team-1" });
+});
+
 test("POST /api/v1/admin/requests/:id/approve forwards the decision to Campus", async (t) => {
   let forwarded;
   const server = createServer({

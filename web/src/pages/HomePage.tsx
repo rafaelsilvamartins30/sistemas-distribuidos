@@ -3,6 +3,7 @@ import { Link, useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { FollowedFeed } from "../components/CampusSocial";
 import { Icon } from "../components/Icon";
+import { useToast } from "../contexts/ToastContext";
 import {
   getAcademicEntities,
   getAcademicUnits,
@@ -112,6 +113,7 @@ function mapHomeProfiles(
 
 export function HomePage() {
   const { keycloak } = useOutletContext<WebContext>();
+  const toast = useToast();
   const [profiles, setProfiles] = useState<HomeProfile[]>([]);
   const [campusLoading, setCampusLoading] = useState(true);
   const [campusError, setCampusError] = useState(false);
@@ -132,6 +134,7 @@ export function HomePage() {
         (result) => result.status === "rejected",
       ).length;
       setCampusError(failed === 5);
+      if (failed === 5) toast.error("Não foi possível carregar os perfis do campus.");
       setProfiles(
         mapHomeProfiles(
           university.status === "fulfilled" ? university.value : null,
@@ -147,13 +150,16 @@ export function HomePage() {
     return () => {
       active = false;
     };
-  }, [keycloak]);
+  }, [keycloak, toast]);
 
   return (
     <div className="home-page">
       <div className="home-feed-layout">
         <section className="home-feed-main" aria-label="Publicações institucionais e conversas das comunidades">
-          <FollowedFeed token={keycloak.token ?? ""} />
+          <FollowedFeed
+            token={keycloak.token ?? ""}
+            viewerName={String(keycloak.tokenParsed?.name || keycloak.tokenParsed?.preferred_username || "Você")}
+          />
         </section>
 
         <aside className="home-side-column" aria-label="Explorar o Campus">
@@ -177,11 +183,7 @@ export function HomePage() {
               <p className="notice" role="status">
                 Carregando perfis…
               </p>
-            ) : campusError ? (
-              <p className="notice notice-error" role="alert">
-                Não foi possível carregar os perfis.
-              </p>
-            ) : profiles.length ? (
+            ) : !campusError && profiles.length ? (
               <div className="home-record-list">
                 {profiles.slice(0, 4).map((profile) => (
                   <Link

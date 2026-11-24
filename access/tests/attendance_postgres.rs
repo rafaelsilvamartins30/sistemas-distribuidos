@@ -1,7 +1,8 @@
 use access::attendance::{
-    confirm_organizer_check_in, get_my_attendance, get_my_tickets, issue_event_qr_token,
-    issue_participant_qr, preview_organizer_check_in, process_message, record_participant_check_in,
-    CheckInError,
+    confirm_organizer_check_in, event_attendance_review, get_my_attendance, get_my_tickets,
+    get_organizer_action, issue_event_qr_for_creator, issue_event_qr_token, issue_participant_qr,
+    preview_organizer_check_in, process_message, record_participant_check_in, CheckInError,
+    OrganizerAction, ParticipantAction,
 };
 use serde_json::{json, Value};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
@@ -319,6 +320,15 @@ async fn organizer_qr_requires_event_owner_and_explicit_confirmation() {
     let (event_id, _, entry_id) =
         organizer_check_in_fixture(&pool, &participant_id, &organizer_id).await;
 
+    let attendance = get_my_attendance(&pool, event_id, &participant_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        attendance.action,
+        Some(ParticipantAction::GenerateParticipantQr)
+    );
+
     let qr = issue_participant_qr(&pool, event_id, &participant_id)
         .await
         .unwrap();
@@ -349,7 +359,105 @@ async fn organizer_qr_requires_event_owner_and_explicit_confirmation() {
     .await
     .unwrap();
     assert_eq!(status, "ATTENDED");
+    assert_eq!(
+        get_my_tickets(&pool, &participant_id).await.unwrap()[0].action,
+        None
+    );
     assert_eq!(validator.as_deref(), Some(organizer_id.as_str()));
+    assert!(matches!(
+        event_attendance_review(&pool, event_id, &organizer_id, true).await,
+        Err(CheckInError::SessionUnavailable)
+    ));
+    let end = OffsetDateTime::now_utc() - TimeDuration::seconds(1);
+    sqlx::query("UPDATE attendance_sessions SET check_in_closes_at = $2 WHERE source_id = $1")
+        .bind(event_id)
+        .bind(end)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        get_organizer_action(&pool, event_id, &organizer_id)
+            .await
+            .unwrap(),
+        Some(OrganizerAction::ReviewAttendance)
+    );
+    assert!(matches!(
+        event_attendance_review(&pool, event_id, &participant_id, false).await,
+        Err(CheckInError::NotEventCreator)
+    ));
+    let review = event_attendance_review(&pool, event_id, &organizer_id, true)
+        .await
+        .unwrap();
+    let json = serde_json::to_value(review).unwrap();
+    assert_eq!(json["entries"][0]["userId"], participant_id);
+    assert!(json["closedAt"].is_string());
+    let repeated = event_attendance_review(&pool, event_id, &organizer_id, true)
+        .await
+        .unwrap();
+    assert_eq!(serde_json::to_value(repeated).unwrap(), json);
+    cleanup(&pool, Uuid::nil(), event_id).await;
+}
+
+#[tokio::test]
+#[ignore = "requires ACCESS_TEST_DATABASE_URL pointing to an isolated PostgreSQL database"]
+async fn organizer_action_uses_the_creator_mode_and_status_stored_by_access() {
+    let pool = test_pool().await;
+    let (event_id, _, _) = organizer_check_in_fixture(&pool, "participant", "creator").await;
+
+    assert_eq!(
+        get_organizer_action(&pool, event_id, "creator")
+            .await
+            .unwrap(),
+        Some(OrganizerAction::ScanParticipantQr)
+    );
+    assert_eq!(
+        get_organizer_action(&pool, event_id, "participant")
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        get_organizer_action(&pool, Uuid::new_v4(), "creator")
+            .await
+            .unwrap(),
+        None
+    );
+    assert!(matches!(
+        issue_event_qr_for_creator(&pool, event_id, "creator").await,
+        Err(CheckInError::SessionUnavailable)
+    ));
+
+    sqlx::query(
+        "UPDATE attendance_sessions SET mode = 'PARTICIPANT_SCANS_EVENT' WHERE source_id = $1",
+    )
+    .bind(event_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        get_organizer_action(&pool, event_id, "creator")
+            .await
+            .unwrap(),
+        Some(OrganizerAction::GenerateEventQr)
+    );
+    assert!(issue_event_qr_for_creator(&pool, event_id, "creator")
+        .await
+        .is_ok());
+    assert!(matches!(
+        issue_event_qr_for_creator(&pool, event_id, "participant").await,
+        Err(CheckInError::NotEventCreator)
+    ));
+    sqlx::query("UPDATE attendance_sessions SET status = 'CANCELLED' WHERE source_id = $1")
+        .bind(event_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        get_organizer_action(&pool, event_id, "creator")
+            .await
+            .unwrap(),
+        None
+    );
     cleanup(&pool, Uuid::nil(), event_id).await;
 }
 
