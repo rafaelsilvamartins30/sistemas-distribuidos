@@ -89,7 +89,6 @@ class EventCancellationLiveIntegrationTest {
         registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
         registry.add("spring.datasource.username", () -> environment("UNIR_TEST_DB_USERNAME", "unir"));
         registry.add("spring.datasource.password", () -> environment("UNIR_TEST_DB_PASSWORD", ""));
-        registry.add("spring.flyway.target", () -> "13");
         registry.add("spring.flyway.locations", () -> "classpath:db/migration");
         registry.add("engagement.outbox.enabled", () -> "false");
         registry.add("spring.rabbitmq.host", () -> environment("UNIR_RABBITMQ_HOST", "localhost"));

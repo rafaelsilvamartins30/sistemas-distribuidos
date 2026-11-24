@@ -28,12 +28,13 @@ module KeycloakJwtTestHelpers
     }
   end
 
-  def create_profile(subject: SUBJECT, institutional_id: '12345')
+  def create_profile(subject: SUBJECT, institutional_id: '12345', roles: nil)
+    resolved_roles = roles || (institutional_id == 'ADMIN-0001' ? ['PLATFORM_ADMIN'] : [])
     ensure_profile_catalog!
     with_jwks do
       post '/users',
            params: valid_profile.merge(institutionalId: institutional_id),
-           headers: bearer_headers(subject: subject),
+           headers: bearer_headers(subject: subject, roles: resolved_roles),
            as: :json
     end
     assert_response :created

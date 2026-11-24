@@ -1,3 +1,5 @@
+import { parseApiError } from "../utils/apiError.js";
+
 export type AffiliationStatus = "STUDENT" | "PROFESSOR" | "ALUMNI";
 export type AcademicLevel = "UNDERGRADUATE" | "MASTERS" | "DOCTORATE";
 
@@ -67,11 +69,12 @@ export async function fetchAdminProfile(
   }
 
   if (response.status === 403) {
-    throw new AdminApiError(403, "Acesso negado (403): papel PLATFORM_ADMIN é obrigatório.");
+    throw new AdminApiError(403, "Você não tem permissão para acessar este painel.");
   }
 
   if (!response.ok) {
-    throw new AdminApiError(response.status, `Falha ao consultar perfil administrativo (${response.status})`);
+    const parsed = await parseApiError(response, `Falha ao consultar perfil administrativo (${response.status})`);
+    throw new AdminApiError(response.status, parsed.message);
   }
 
   return (await response.json()) as AdminProfile;

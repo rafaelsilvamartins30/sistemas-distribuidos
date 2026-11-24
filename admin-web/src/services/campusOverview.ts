@@ -1,10 +1,15 @@
+import { parseApiError } from "../utils/apiError.js";
+
 export interface UniversitySummary {
   id: string;
   name: string;
   acronym: string;
   description: string;
   currentTerm: string;
+  generalInfoMarkdown?: string;
+  links?: unknown[];
   administratorUserIds?: string[];
+  protectedAdministratorUserId?: string | null;
 }
 
 export interface DepartmentSummary {
@@ -77,6 +82,7 @@ interface Page<T> {
 }
 
 export interface CampusOverview {
+  unavailableSections?: string[];
   university: UniversitySummary;
   academicUnits: Page<AcademicUnitSummary>;
   departments: Page<DepartmentSummary>;
@@ -88,16 +94,16 @@ export interface CampusOverview {
   users?: { items: CampusUserSummary[] };
 }
 
-export type PermissionTargetKind = "university" | "academic-units" | "departments" | "entities" | "communities";
-export type DeletableStructureKind =
-  "academic-units" | "departments" | "courses" | "semesters" | "entities" | "communities";
+export type PermissionTargetKind = "academic-units" | "departments" | "entities" | "communities";
+export type DeletableStructureKind = "academic-units" | "departments" | "courses" | "entities" | "communities";
 
 export class CampusOverviewError extends Error {
   constructor(
     public readonly status: number,
     public readonly path: string,
+    message?: string,
   ) {
-    super(`Falha ao consultar ${path} (${status}).`);
+    super(message ?? `Falha ao consultar ${path} (${status}).`);
     this.name = "CampusOverviewError";
   }
 }
@@ -117,7 +123,10 @@ async function request<T>(
     headers,
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  if (!response.ok) throw new CampusOverviewError(response.status, path);
+  if (!response.ok) {
+    const parsed = await parseApiError(response, `Falha ao consultar ${path} (${response.status}).`);
+    throw new CampusOverviewError(response.status, path, parsed.message);
+  }
   return (await response.json()) as T;
 }
 
@@ -141,7 +150,10 @@ export async function reviewInstitutionalRequest(
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!response.ok) throw new CampusOverviewError(response.status, path);
+  if (!response.ok) {
+    const parsed = await parseApiError(response, `Falha ao revisar solicitação (${response.status}).`);
+    throw new CampusOverviewError(response.status, path, parsed.message);
+  }
 }
 
 export async function createAcademicUnit(
@@ -180,6 +192,23 @@ export async function createSemester(
   return request<SemesterSummary>(gatewayUrl, "/api/v1/admin/semesters", token, fetchImpl, "POST", payload);
 }
 
+export async function updateSemester(
+  gatewayUrl: string,
+  token: string,
+  semesterId: string,
+  payload: { name: string; startOn: string; endOn: string },
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<SemesterSummary> {
+  return request<SemesterSummary>(
+    gatewayUrl,
+    `/api/v1/admin/semesters/${encodeURIComponent(semesterId)}`,
+    token,
+    fetchImpl,
+    "PATCH",
+    payload,
+  );
+}
+
 export async function updateProfileAdministrators(
   gatewayUrl: string,
   token: string,
@@ -188,15 +217,21 @@ export async function updateProfileAdministrators(
   administratorUserIds: string[],
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<void> {
-  const path =
-    kind === "university" ? "/api/v1/admin/university" : `/api/v1/admin/${kind}/${encodeURIComponent(id ?? "")}`;
+  const path = `/api/v1/admin/${kind}/${encodeURIComponent(id ?? "")}`;
   await request<unknown>(gatewayUrl, path, token, fetchImpl, "PATCH", { administratorUserIds });
 }
 
 export async function updateUniversityProfile(
   gatewayUrl: string,
   token: string,
-  payload: { name: string; acronym: string; description: string; currentTerm: string },
+  payload: {
+    name: string;
+    acronym: string;
+    description: string;
+    currentTerm: string;
+    generalInfoMarkdown: string;
+    links: unknown[];
+  },
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<UniversitySummary> {
   return request<UniversitySummary>(gatewayUrl, "/api/v1/admin/university", token, fetchImpl, "PATCH", payload);
@@ -214,5 +249,8 @@ export async function deleteCampusStructure(
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!response.ok) throw new CampusOverviewError(response.status, path);
+  if (!response.ok) {
+    const parsed = await parseApiError(response, `Não foi possível apagar a estrutura (${response.status}).`);
+    throw new CampusOverviewError(response.status, path, parsed.message);
+  }
 }

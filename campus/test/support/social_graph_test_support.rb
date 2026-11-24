@@ -7,6 +7,7 @@ module SocialGraphTestSupport
   private
 
   def create_university
+    create_profile(subject: 'global-admin-sub', institutional_id: 'ADMIN-0001')
     University.create!(id: University::SINGLETON_ID, name: 'Universidade de Teste', acronym: 'UT',
                        description: 'Descrição.', general_info_markdown: 'Informações.', current_term: '2026/2',
                        links: [], administrator_user_ids: ['university-admin'])
@@ -49,15 +50,15 @@ module SocialGraphTestSupport
   def publish_institutional_post(term:, body:)
     with_jwks do
       post "/profiles/UNIVERSITY/#{University::SINGLETON_ID}/posts",
-           params: { body: body, term: term }, headers: bearer_headers(subject: 'university-admin'), as: :json
+           params: { body: body, term: term },
+           headers: bearer_headers(subject: 'global-admin-sub', roles: ['PLATFORM_ADMIN']), as: :json
     end
     assert_response :created
     response.parsed_body
   end
 
-  def request_profile_posts(term:, include_expired: false)
+  def request_profile_posts(term:)
     query = "term=#{CGI.escape(term)}"
-    query += '&includeExpired=true' if include_expired
     with_jwks do
       get "/profiles/UNIVERSITY/#{University::SINGLETON_ID}/posts?#{query}",
           headers: bearer_headers(subject: 'student')

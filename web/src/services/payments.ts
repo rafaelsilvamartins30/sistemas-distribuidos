@@ -1,6 +1,12 @@
+import { parseApiError } from "../utils/apiError.js";
+
 export interface PaymentCharge {
   chargeId: string;
   referenceType: string;
+  origin?: "EVENT" | "SPORTS_TEAM" | "SPORTS_FREE_AGENT" | "UNKNOWN";
+  title?: string;
+  subtitle?: string;
+  targetPath?: string;
   referenceId: string;
   payerUserId: string;
   amountMinor: number;
@@ -46,14 +52,8 @@ async function request<T>(
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
   if (!response.ok) {
-    let message: string | undefined;
-    try {
-      const payload = (await response.json()) as { error?: string; message?: string };
-      message = payload.error ?? payload.message;
-    } catch {
-      // Ignore non-JSON body
-    }
-    throw new PaymentApiError(response.status, message);
+    const parsed = await parseApiError(response);
+    throw new PaymentApiError(response.status, parsed.message);
   }
   return (await response.json()) as T;
 }
@@ -80,4 +80,26 @@ export function confirmSimulatedPayment(
     "POST",
     {},
   );
+}
+
+export async function findPendingPaymentCharge(
+  token: string,
+  matcher: { referenceId?: string | null; targetPath?: string | null },
+  attempts = 5,
+  delayMs = 500,
+): Promise<PaymentCharge | null> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const response = await getMyPayments(token);
+    const match = response.items.find(
+      (charge) =>
+        charge.status === "PENDING" &&
+        ((matcher.referenceId && charge.referenceId === matcher.referenceId) ||
+          (matcher.targetPath && charge.targetPath === matcher.targetPath)),
+    );
+    if (match) return match;
+    if (attempt < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return null;
 }

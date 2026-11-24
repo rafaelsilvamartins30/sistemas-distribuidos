@@ -137,9 +137,15 @@ SAMPLE_OPPORTUNITIES: list[dict[str, Any]] = [
 
 
 class FakeTokenValidator:
-    """Accept only the opaque user token selected for these endpoint tests."""
+    """Accept only the opaque user/admin tokens selected for these endpoint tests."""
 
     def verify(self, token: str) -> dict[str, Any]:
+        if token == "valid.admin.token":
+            return {
+                "sub": "admin-1",
+                "azp": "unir-web",
+                "realm_access": {"roles": ["USER", "PLATFORM_ADMIN"]},
+            }
         if token != "valid.jwt.token":
             raise InvalidAccessToken("invalid test token")
         return {"sub": "user-1", "azp": "unir-web", "realm_access": {"roles": ["USER"]}}
@@ -486,10 +492,12 @@ def test_gemini_unavailability_triggers_explicit_fallback_with_retrieved_sources
 def test_academic_evaluation_compares_five_questions_baseline_vs_rag() -> None:
     client, _ = build_test_client()
     sync_headers = {"X-RAG-Sync-Token": "test-sync-token"}
-    headers = {"Authorization": "Bearer valid.jwt.token"}
+    user_headers = {"Authorization": "Bearer valid.jwt.token"}
+    admin_headers = {"Authorization": "Bearer valid.admin.token"}
 
     client.post("/api/v1/rag/ingest", headers=sync_headers)
-    eval_resp = client.post("/api/v1/rag/evaluate", headers=headers)
+    assert client.post("/api/v1/rag/evaluate", headers=user_headers).status_code == 403
+    eval_resp = client.post("/api/v1/rag/evaluate", headers=admin_headers)
     assert eval_resp.status_code == 200
     report = eval_resp.json()
     assert report["questionCount"] == 5

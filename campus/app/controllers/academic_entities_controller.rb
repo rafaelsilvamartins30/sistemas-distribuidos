@@ -32,6 +32,16 @@ class AcademicEntitiesController < ApplicationController
     update_entity_profile(entity)
   end
 
+  def destroy
+    return unless require_university_admin
+
+    entity = AcademicEntity.find_by(id: params[:id])
+    return render_problem(:not_found, 'Academic entity not found') unless entity
+
+    entity.destroy!
+    head :no_content
+  end
+
   private
 
   def update_entity_profile(entity)
@@ -39,9 +49,23 @@ class AcademicEntitiesController < ApplicationController
                                  entityType departmentId])
     return unless payload
     return unless authorize_profile_update?(entity, payload)
+    return unless valid_department_change?(entity, payload)
 
     assign_entity_fields(entity, payload)
     save_entity(entity)
+  end
+
+  def valid_department_change?(entity, payload)
+    return true unless payload.key?('departmentId') && payload['departmentId'] != entity.department_id
+
+    unless global_platform_admin?
+      render_problem(:forbidden, 'Only the platform administrator can move an academic entity between departments')
+      return false
+    end
+    return true if payload['departmentId'].nil? || Department.exists?(id: payload['departmentId'])
+
+    render_problem(:unprocessable_entity, 'Target department not found')
+    false
   end
 
   def assign_entity_fields(entity, payload)
@@ -54,16 +78,6 @@ class AcademicEntitiesController < ApplicationController
     return render(json: entity_response(entity)) if entity.save
 
     render_problem(:unprocessable_entity, "Invalid fields: #{entity.errors.attribute_names.uniq.sort.join(', ')}")
-  end
-
-  def destroy
-    return unless require_university_admin
-
-    entity = AcademicEntity.find_by(id: params[:id])
-    return render_problem(:not_found, 'Academic entity not found') unless entity
-
-    entity.destroy!
-    head :no_content
   end
 
   def pagination_parameters

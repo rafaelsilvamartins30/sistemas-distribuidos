@@ -1191,6 +1191,9 @@ html { scroll-behavior: smooth; scroll-padding-top: 92px; }
 .registration-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 13px; }
 .registration-filters button { min-height: 34px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); background: var(--surface); font: inherit; font-size: 10px; cursor: pointer; }
 .registration-filters button.is-active { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
+.semester-filter { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; font-weight: 680; white-space: nowrap; }
+.semester-filter select { min-height: 39px; padding: 0 30px 0 13px; border: 1px solid var(--field-border); border-radius: 11px; color: var(--text); background: var(--surface-muted); font: inherit; cursor: pointer; }
+.semester-filter-row { display: flex; justify-content: flex-end; margin-bottom: 13px; }
 .registration-list { display: grid; gap: 9px; }
 .registration-card { display: grid; grid-template-columns: 43px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 13px; border: 1px solid var(--border); }
 .registration-card-copy { display: grid; gap: 5px; min-width: 0; }
@@ -1293,6 +1296,7 @@ html { scroll-behavior: smooth; scroll-padding-top: 92px; }
 .sports-filter select, .sports-inline-filter select { min-height: 46px; padding: 0 13px; border: 1px solid var(--field-border); border-radius: 11px; color: var(--text); background: var(--surface-muted); font: inherit; }
 .sports-section { display: grid; gap: 15px; }
 .sports-section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 15px; }
+.sports-heading-tools { display: flex; align-items: center; gap: 12px; }
 .sports-section-heading h2 { margin: 0; color: var(--text); font-size: clamp(22px, 2.3vw, 30px); letter-spacing: -.035em; }
 .sports-section-heading .sports-kicker { margin-bottom: 5px; }
 .sports-count { padding: 8px 12px; border-radius: 999px; color: var(--accent-strong); background: var(--accent-soft); font-size: 11px; font-weight: 700; white-space: nowrap; }
@@ -1798,6 +1802,9 @@ body { background: var(--page); }
 .campus-space-links { display: grid; gap: 7px; margin: 0; padding-left: 20px; }
 .campus-institution-heading { display: flex; align-items: center; gap: 16px; }
 .campus-institution-heading > div { flex: 1; min-width: 0; }
+.campus-profile-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-left: auto; }
+.institutional-profile-editor-trigger { display: flex; align-items: center; }
+.institutional-profile-editor-trigger .button { white-space: nowrap; }
 .campus-institution-heading h1 { margin: 0 0 8px; overflow-wrap: anywhere; }
 .campus-institution-heading .eyebrow { margin: 0 0 7px; }
 .campus-institution-heading .detail-lead { margin: 0; }
@@ -1809,8 +1816,6 @@ body { background: var(--page); }
 .campus-term-filter { display: flex; align-items: end; gap: 7px; }
 .campus-term-filter label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 650; }
 .campus-term-filter input, .campus-term-filter select { min-width: 105px; height: 38px; padding: 0 10px; border: 1px solid var(--border); border-radius: 9px; color: var(--text); background: var(--surface-muted); font: inherit; }
-.campus-history-toggle { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
-.campus-history-toggle input { accent-color: var(--accent); }
 .campus-social-list { display: grid; gap: 12px; }
 .campus-post-card { display: grid; gap: 12px; padding: 17px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
 .campus-post-card > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -2989,3 +2994,242 @@ dialog.opportunity-compose-dialog { width: min(740px, calc(100vw - 32px)); max-w
   .rag-modal-backdrop { padding: 10px; }
   .rag-modal-card { height: 92vh; }
 }
+
+main select:not([multiple]):not([size]) {
+  box-sizing: border-box;
+  height: 46px;
+  min-height: 46px;
+  max-width: 100%;
+  appearance: none;
+  padding-inline: 12px 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%23656b80' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px;
+}
+
+.semester-filter select { min-width: 110px; font-size: 14px; }
+
+.registration-payment-actions { display: grid; justify-items: start; gap: 12px; }
+.registration-payment-actions .payment-status-panel { width: 100%; }
+.payment-status-copy .button { white-space: normal; text-align: center; }
+
+.toast-viewport {
+  position: fixed;
+  z-index: 10000;
+  inset: 18px 18px auto auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+  display: grid;
+  gap: 10px;
+  width: min(410px, calc(100vw - 28px));
+  pointer-events: none;
+}
+
+.toast-viewport:popover-open {
+  display: grid;
+}
+
+.toast-card {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  align-items: start;
+  gap: 11px;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+  animation: toast-slide-in 180ms ease-out;
+}
+
+.toast-error { border-left-color: var(--danger); }
+.toast-success { border-left-color: var(--success); }
+.toast-info { border-left-color: var(--accent); }
+
+.toast-icon {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.toast-error .toast-icon { color: var(--danger); background: var(--danger-soft); }
+.toast-success .toast-icon { color: var(--success); background: var(--success-soft); }
+.toast-info .toast-icon { color: var(--accent); background: var(--accent-soft); }
+
+.toast-body { display: grid; gap: 3px; min-width: 0; }
+.toast-title { font-size: 13px; font-weight: 700; line-height: 1.3; }
+.toast-message { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; word-break: break-word; }
+
+.toast-close {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.toast-close:hover { background: var(--surface-hover); color: var(--text); }
+
+@keyframes toast-slide-in {
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Unified Modal, Attendance, and Payment Checkout styles */
+.modal-header-copy { display: grid; gap: 4px; min-width: 0; }
+.modal-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.modal-subtitle { margin: 2px 0 0; color: var(--muted); font-size: 13.5px; line-height: 1.45; }
+
+.attendance-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.attendance-status-pill.is-open { color: var(--accent-strong); background: var(--accent-soft); }
+.attendance-status-pill.is-review { color: #92610a; background: #fff1c5; }
+.attendance-status-pill.is-closed { color: var(--success); background: var(--success-soft); }
+
+.attendance-qr-center { display: grid; justify-items: center; gap: 14px; text-align: center; }
+.attendance-qr-card { display: grid; justify-items: center; gap: 12px; width: 100%; padding: 18px; }
+.attendance-qr-image { width: 210px; height: 210px; border-radius: 12px; background: #fff; padding: 8px; border: 1px solid var(--border); }
+.attendance-code-pill {
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  word-break: break-all;
+}
+.attendance-qr-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.attendance-empty-qr { display: grid; justify-items: center; gap: 14px; padding: 18px 0; }
+.attendance-hint { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+.attendance-closed-box {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 24px 18px;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  background: var(--surface-muted);
+  text-align: center;
+}
+.attendance-closed-box p { margin: 0; max-width: 420px; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+.attendance-confirmed-box { text-align: center; padding: 20px 0; }
+.attendance-list-panel { display: grid; gap: 14px; }
+.attendance-list-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.attendance-list-summary { color: var(--muted); font-size: 13.5px; }
+.attendance-list-summary strong { color: var(--text); }
+.attendance-list-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.attendance-empty-box {
+  margin: 0;
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 13.5px;
+  text-align: center;
+}
+.attendance-entries-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.attendance-entries-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-muted);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.attendance-entries-list li small { color: var(--muted); font-size: 12px; font-weight: 500; }
+.attendance-list-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.attendance-list-footer .registration-confirmed { margin: 0; }
+
+.payment-notice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.payment-modal-stack { display: grid; gap: 16px; }
+.payment-modal-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-muted);
+}
+.payment-modal-summary > div { display: grid; gap: 4px; }
+.payment-modal-summary span { color: var(--muted); font-size: 12px; font-weight: 600; }
+.payment-modal-summary strong { font-size: 26px; letter-spacing: -.03em; color: var(--text); }
+.payment-modal-summary small { color: var(--text); font-size: 13.5px; font-weight: 600; }
+.payment-modal-pix { display: grid; gap: 8px; }
+.payment-modal-pix label { color: var(--muted); font-size: 12.5px; font-weight: 650; }
+.payment-modal-pix-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.payment-modal-pix-row input {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+}
+.payment-modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; padding-top: 4px; }
+.payment-modal-loading,
+.payment-modal-confirmed {
+  display: grid;
+  gap: 12px;
+  padding: 14px 4px;
+  text-align: center;
+  justify-items: center;
+}
+.payment-modal-confirmed strong { font-size: 18px; color: var(--text); }
+.payment-modal-confirmed p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; max-width: 400px; }
+.payment-card-subtitle { margin: -4px 0 6px; color: var(--muted); font-size: 13px; }
+.payment-card-price { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -.03em; color: var(--text); }
+.payment-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.payment-history-title { display: grid; gap: 2px; min-width: 0; }
+.payment-history-title small { color: var(--muted); font-size: 12.5px; }

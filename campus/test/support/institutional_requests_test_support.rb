@@ -38,9 +38,9 @@ module InstitutionalRequestsTestSupport
     response.parsed_body.fetch('id')
   end
 
-  def review_request(request_id, decision, subject:)
+  def review_request(request_id, decision, subject:, roles: [])
     with_jwks do
-      post "/requests/#{request_id}/#{decision}", headers: bearer_headers(subject: subject)
+      post "/requests/#{request_id}/#{decision}", headers: bearer_headers(subject: subject, roles: roles)
     end
   end
 

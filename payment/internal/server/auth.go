@@ -25,12 +25,19 @@ const (
 
 var (
 	ErrInvalidAccessToken          = errors.New("invalid access token")
+	ErrForbiddenAccessToken        = errors.New("access token does not carry an allowed role")
 	ErrIdentityProviderUnavailable = errors.New("identity provider unavailable")
 )
 
 // SubjectVerifier authenticates a bearer token and returns its trusted subject.
 type SubjectVerifier interface {
 	VerifySubject(ctx context.Context, token string) (string, error)
+}
+
+// RoleVerifier extends SubjectVerifier with verified global realm roles.
+type RoleVerifier interface {
+	SubjectVerifier
+	VerifyToken(ctx context.Context, token string) (string, []string, error)
 }
 
 // KeycloakTokenVerifier validates Keycloak RS256 access tokens using the configured JWKS.
@@ -50,11 +57,16 @@ type jwtHeader struct {
 	KeyID     string `json:"kid"`
 }
 
+type realmAccessClaims struct {
+	Roles []string `json:"roles"`
+}
+
 type jwtClaims struct {
-	Issuer    string      `json:"iss"`
-	Subject   string      `json:"sub"`
-	Expires   json.Number `json:"exp"`
-	NotBefore json.Number `json:"nbf"`
+	Issuer      string            `json:"iss"`
+	Subject     string            `json:"sub"`
+	Expires     json.Number       `json:"exp"`
+	NotBefore   json.Number       `json:"nbf"`
+	RealmAccess realmAccessClaims `json:"realm_access"`
 }
 
 type jwksDocument struct {
@@ -98,58 +110,85 @@ func NewKeycloakTokenVerifier(issuer, jwksURL string) (*KeycloakTokenVerifier, e
 	}, nil
 }
 
-// VerifySubject checks the signature, issuer, expiry, not-before claim, and subject.
+// VerifySubject checks the signature, issuer, expiry, not-before claim, allowed role, and subject.
 func (v *KeycloakTokenVerifier) VerifySubject(ctx context.Context, token string) (string, error) {
+	subject, _, err := v.VerifyToken(ctx, token)
+	return subject, err
+}
+
+// VerifyToken validates signature, issuer, expiry, not-before, allowed UNIR role, and returns subject + roles.
+func (v *KeycloakTokenVerifier) VerifyToken(ctx context.Context, token string) (string, []string, error) {
 	segments := strings.Split(token, ".")
 	if len(segments) != 3 || segments[0] == "" || segments[1] == "" || segments[2] == "" {
-		return "", ErrInvalidAccessToken
+		return "", nil, ErrInvalidAccessToken
 	}
 
 	headerBytes, err := base64.RawURLEncoding.DecodeString(segments[0])
 	if err != nil {
-		return "", ErrInvalidAccessToken
+		return "", nil, ErrInvalidAccessToken
 	}
 	var header jwtHeader
 	if err := json.Unmarshal(headerBytes, &header); err != nil || header.Algorithm != "RS256" || header.KeyID == "" {
-		return "", ErrInvalidAccessToken
+		return "", nil, ErrInvalidAccessToken
 	}
 
 	key, err := v.keyForID(ctx, header.KeyID)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(segments[2])
 	if err != nil {
-		return "", ErrInvalidAccessToken
+		return "", nil, ErrInvalidAccessToken
 	}
 	digest := sha256.Sum256([]byte(segments[0] + "." + segments[1]))
 	if err := rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature); err != nil {
-		return "", ErrInvalidAccessToken
+		return "", nil, ErrInvalidAccessToken
 	}
 
 	claimsBytes, err := base64.RawURLEncoding.DecodeString(segments[1])
 	if err != nil {
-		return "", ErrInvalidAccessToken
+		return "", nil, ErrInvalidAccessToken
 	}
 	var claims jwtClaims
 	if err := json.Unmarshal(claimsBytes, &claims); err != nil {
-		return "", ErrInvalidAccessToken
+		return "", nil, ErrInvalidAccessToken
 	}
 	if claims.Issuer != v.issuer || strings.TrimSpace(claims.Subject) == "" || len(claims.Subject) > 255 {
-		return "", ErrInvalidAccessToken
+		return "", nil, ErrInvalidAccessToken
 	}
 
 	expiresAt, err := claims.Expires.Int64()
 	if err != nil || expiresAt <= v.now().Unix() {
-		return "", ErrInvalidAccessToken
+		return "", nil, ErrInvalidAccessToken
 	}
 	if claims.NotBefore != "" {
 		notBefore, err := claims.NotBefore.Int64()
 		if err != nil || notBefore > v.now().Unix() {
-			return "", ErrInvalidAccessToken
+			return "", nil, ErrInvalidAccessToken
 		}
 	}
-	return claims.Subject, nil
+	if !hasAllowedRole(claims.RealmAccess.Roles) {
+		return "", nil, ErrForbiddenAccessToken
+	}
+	return claims.Subject, claims.RealmAccess.Roles, nil
+}
+
+func hasAllowedRole(roles []string) bool {
+	for _, role := range roles {
+		if role == "USER" || role == "PLATFORM_ADMIN" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRole(roles []string, target string) bool {
+	for _, role := range roles {
+		if role == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *KeycloakTokenVerifier) keyForID(ctx context.Context, keyID string) (*rsa.PublicKey, error) {

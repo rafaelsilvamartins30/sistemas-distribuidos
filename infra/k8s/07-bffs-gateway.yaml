@@ -118,6 +118,11 @@ spec:
                 configMapKeyRef:
                   name: unir-common-config
                   key: CAMPUS_URL
+            - name: ENGAGEMENT_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: unir-common-config
+                  key: ENGAGEMENT_SERVICE_URL
           readinessProbe:
             httpGet:
               path: /health

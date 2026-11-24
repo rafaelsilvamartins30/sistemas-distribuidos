@@ -123,3 +123,8 @@ includes the department name. A user with no verified publisher context sees no
 publish action. The page offers the teacher verification request and, for
 department administrators, pending request review. No internal opportunity
 application or submission record is created.
+
+Opportunity details and managed lists expose `available`, `canManage`, `canClose` and
+`canReactivate`. PATCH accepts `{ "reactivate": true }` to publish again and clears an
+expired deadline on the service. A future deadline is preserved. All writes recheck
+publisher authorization against Campus.

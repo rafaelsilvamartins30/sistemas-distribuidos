@@ -4,6 +4,7 @@ import type Keycloak from "keycloak-js";
 import { Icon } from "../components/Icon";
 import { OpportunityCard } from "../components/OpportunityCard";
 import { PaginationControls } from "../components/PaginationControls";
+import { useToast } from "../contexts/ToastContext";
 import {
   OpportunityApiError,
   closeOpportunity,
@@ -20,6 +21,7 @@ import {
   type Opportunity,
   type OpportunityPage,
 } from "../services/opportunities.js";
+import { extractErrorMessage } from "../utils/apiError.js";
 
 interface WebContext {
   keycloak: Keycloak;
@@ -61,20 +63,14 @@ function toDateTimeLocalValue(iso?: string | null): string {
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 }
 
-function isAvailable(opportunity: Opportunity): boolean {
-  return (
-    opportunity.status === "ACTIVE" && (!opportunity.deadline || new Date(opportunity.deadline).getTime() > Date.now())
-  );
-}
-
 export function OpportunitiesPage() {
   const { keycloak } = useOutletContext<WebContext>();
+  const toast = useToast();
   const [page, setPage] = useState(0);
   const [results, setResults] = useState<OpportunityPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [workflowLoading, setWorkflowLoading] = useState(true);
-  const [workflowError, setWorkflowError] = useState(false);
   const [publisherContexts, setPublisherContexts] = useState<OpportunityPublisherContext[]>([]);
   const [managedOpportunities, setManagedOpportunities] = useState<Opportunity[]>([]);
   const [reviewQueues, setReviewQueues] = useState<
@@ -89,18 +85,14 @@ export function OpportunitiesPage() {
   const [opportunityCategory, setOpportunityCategory] = useState("");
   const [deadline, setDeadline] = useState("");
   const [externalUrl, setExternalUrl] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
   const [otherCategory, setOtherCategory] = useState("");
   const [publishing, setPublishing] = useState(false);
-  const [publishingMessage, setPublishingMessage] = useState("");
-  const [reviewMessage, setReviewMessage] = useState("");
   const [editingOpportunity, setEditingOpportunity] = useState<Opportunity | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editCategory, setEditCategory] = useState("");
   const [editDeadline, setEditDeadline] = useState("");
   const [editExternalUrl, setEditExternalUrl] = useState("");
-  const [editImageUrl, setEditImageUrl] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
   const publishDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -126,8 +118,11 @@ export function OpportunitiesPage() {
           size: pageSize,
         });
         if (active) setResults(response);
-      } catch {
-        if (active) setError(true);
+      } catch (err) {
+        if (active) {
+          setError(true);
+          toast.error(extractErrorMessage(err, "Não foi possível carregar as oportunidades."));
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -137,12 +132,11 @@ export function OpportunitiesPage() {
     return () => {
       active = false;
     };
-  }, [keycloak, opportunityReload, page]);
+  }, [keycloak, opportunityReload, page, toast]);
 
   useEffect(() => {
     let active = true;
     setWorkflowLoading(true);
-    setWorkflowError(false);
 
     async function loadPublisherWorkflow() {
       try {
@@ -173,8 +167,15 @@ export function OpportunitiesPage() {
                 : "",
           );
         }
-      } catch {
-        if (active) setWorkflowError(true);
+      } catch (err) {
+        if (active) {
+          toast.error(
+            extractErrorMessage(
+              err,
+              "Não foi possível confirmar os acessos no Campus. A publicação está temporariamente indisponível.",
+            ),
+          );
+        }
       } finally {
         if (active) setWorkflowLoading(false);
       }
@@ -184,7 +185,7 @@ export function OpportunitiesPage() {
     return () => {
       active = false;
     };
-  }, [keycloak, opportunityReload, workflowReload]);
+  }, [keycloak, opportunityReload, workflowReload, toast]);
 
   const selectedPublisher = publisherContexts.find(
     (context) => `${context.publisherType}:${context.publisherId}` === publisherKey,
@@ -197,8 +198,6 @@ export function OpportunitiesPage() {
     setEditCategory(opportunity.category);
     setEditDeadline(toDateTimeLocalValue(opportunity.deadline));
     setEditExternalUrl(opportunity.externalUrl);
-    setEditImageUrl(opportunity.imageUrl ?? "");
-    setPublishingMessage("");
     setPublishOpen(true);
   }
 
@@ -207,11 +206,10 @@ export function OpportunitiesPage() {
     if (!selectedPublisher) return;
     const category = opportunityCategory === "Outra" ? otherCategory.trim() : opportunityCategory;
     if (!category) {
-      setPublishingMessage("Escolha o tipo da oportunidade para continuar.");
+      toast.error("Escolha o tipo da oportunidade para continuar.");
       return;
     }
     setPublishing(true);
-    setPublishingMessage("");
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
@@ -223,23 +221,24 @@ export function OpportunitiesPage() {
         category,
         deadline: deadline ? new Date(deadline).toISOString() : null,
         externalUrl,
-        imageUrl: imageUrl.trim() || null,
       });
-      setPublishingMessage("Oportunidade publicada. Ela já está disponível no mural.");
+      toast.success("Oportunidade publicada. Ela já está disponível no mural.");
       setTitle("");
       setDescription("");
       setOpportunityCategory("");
       setOtherCategory("");
       setDeadline("");
       setExternalUrl("");
-      setImageUrl("");
       setOpportunityReload((value) => value + 1);
       setPublishOpen(false);
     } catch (requestError) {
-      setPublishingMessage(
+      toast.error(
         requestError instanceof OpportunityApiError && requestError.status === 403
           ? "O Campus não confirmou esse vínculo para publicação. Atualize a página e confira seus acessos."
-          : "Não foi possível publicar. Confira os campos e a data de disponibilidade.",
+          : extractErrorMessage(
+              requestError,
+              "Não foi possível publicar. Confira os campos e a data de disponibilidade.",
+            ),
       );
     } finally {
       setPublishing(false);
@@ -250,7 +249,6 @@ export function OpportunitiesPage() {
     event.preventDefault();
     if (!editingOpportunity) return;
     setSavingEdit(true);
-    setPublishingMessage("");
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
@@ -261,17 +259,17 @@ export function OpportunitiesPage() {
         deadline: editDeadline ? new Date(editDeadline).toISOString() : null,
         clearDeadline: !editDeadline,
         externalUrl: editExternalUrl,
-        imageUrl: editImageUrl.trim() || null,
-        clearImageUrl: !editImageUrl.trim(),
-        status: "ACTIVE",
       });
-      setPublishingMessage("Oportunidade atualizada com sucesso.");
+      toast.success("Oportunidade atualizada com sucesso.");
       setEditingOpportunity(null);
       setPublishOpen(false);
       setOpportunityReload((value) => value + 1);
-    } catch {
-      setPublishingMessage(
-        "Não foi possível atualizar a oportunidade. Verifique se a data de disponibilidade é futura.",
+    } catch (requestError) {
+      toast.error(
+        extractErrorMessage(
+          requestError,
+          "Não foi possível atualizar a oportunidade. Verifique se a data de disponibilidade é futura.",
+        ),
       );
     } finally {
       setSavingEdit(false);
@@ -279,7 +277,6 @@ export function OpportunitiesPage() {
   }
 
   async function handleRemoveOpportunity(opportunityId: string) {
-    setPublishingMessage("");
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
@@ -287,27 +284,24 @@ export function OpportunitiesPage() {
       if (editingOpportunity?.id === opportunityId) {
         setEditingOpportunity(null);
       }
-      setPublishingMessage("Oportunidade removida do mural ativo.");
+      toast.success("Oportunidade removida do mural ativo.");
       setOpportunityReload((value) => value + 1);
-    } catch {
-      setPublishingMessage("Não foi possível remover a oportunidade.");
+    } catch (requestError) {
+      toast.error(extractErrorMessage(requestError, "Não foi possível remover a oportunidade."));
     }
   }
 
   async function handleReactivateOpportunity(opportunity: Opportunity) {
-    setPublishingMessage("");
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
-      const deadlineExpired = opportunity.deadline != null && new Date(opportunity.deadline).getTime() <= Date.now();
-      await updateOpportunity(keycloak.token, opportunity.id, {
-        status: "ACTIVE",
-        ...(deadlineExpired ? { clearDeadline: true } : {}),
-      });
-      setPublishingMessage("Oportunidade reativada no mural.");
+      await updateOpportunity(keycloak.token, opportunity.id, { reactivate: true });
+      toast.success("Oportunidade reativada no mural.");
       setOpportunityReload((value) => value + 1);
-    } catch {
-      setPublishingMessage("Não foi possível reativar. Ajuste a data de disponibilidade em Editar.");
+    } catch (requestError) {
+      toast.error(
+        extractErrorMessage(requestError, "Não foi possível reativar. Ajuste a data de disponibilidade em Editar."),
+      );
     }
   }
 
@@ -316,10 +310,12 @@ export function OpportunitiesPage() {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
       await reviewProfessorVerificationRequest(keycloak.token, requestId, decision);
-      setReviewMessage(decision === "approve" ? "Afiliação aprovada e ativada." : "Solicitação recusada.");
+      toast.success(decision === "approve" ? "Afiliação aprovada e ativada." : "Solicitação recusada.");
       setWorkflowReload((value) => value + 1);
-    } catch {
-      setReviewMessage("Campus não autorizou a revisão ou a solicitação já foi processada.");
+    } catch (requestError) {
+      toast.error(
+        extractErrorMessage(requestError, "Campus não autorizou a revisão ou a solicitação já foi processada."),
+      );
     }
   }
 
@@ -347,7 +343,7 @@ export function OpportunitiesPage() {
         </div>
       </header>
 
-      {(!workflowLoading || publisherContexts.length > 0 || workflowError) && (
+      {(!workflowLoading || publisherContexts.length > 0) && (
         <section className="opportunity-publishing-tools" aria-labelledby="opportunity-publishing-title">
           <div className="opportunity-publishing-heading">
             <span className="opportunity-publishing-icon" aria-hidden="true">
@@ -373,7 +369,6 @@ export function OpportunitiesPage() {
                     type="button"
                     onClick={() => {
                       setEditingOpportunity(null);
-                      setPublishingMessage("");
                       setPublishOpen(true);
                     }}
                   >
@@ -387,18 +382,6 @@ export function OpportunitiesPage() {
               )}
             </div>
           </div>
-
-          {workflowError && (
-            <p className="notice notice-error" role="alert">
-              Não foi possível confirmar os acessos no Campus. A publicação está temporariamente indisponível.
-            </p>
-          )}
-
-          {publishingMessage && !publishOpen && (
-            <p className="notice" role="status">
-              {publishingMessage}
-            </p>
-          )}
 
           <dialog
             aria-labelledby="opportunity-compose-title"
@@ -514,21 +497,7 @@ export function OpportunitiesPage() {
                       required
                     />
                   </label>
-                  <label className="field opportunity-publish-wide">
-                    Imagem (opcional)
-                    <input
-                      type="url"
-                      value={imageUrl}
-                      onChange={(event) => setImageUrl(event.target.value)}
-                      placeholder="https://…"
-                    />
-                  </label>
                 </div>
-                {publishingMessage && (
-                  <p className="notice notice-error" role="alert">
-                    {publishingMessage}
-                  </p>
-                )}
                 <div className="social-composer-actions">
                   <button className="button button-secondary" type="button" onClick={() => setPublishOpen(false)}>
                     Cancelar
@@ -578,21 +547,7 @@ export function OpportunitiesPage() {
                       required
                     />
                   </label>
-                  <label className="field opportunity-publish-wide">
-                    Imagem (opcional)
-                    <input
-                      type="url"
-                      value={editImageUrl}
-                      onChange={(event) => setEditImageUrl(event.target.value)}
-                      placeholder="https://…"
-                    />
-                  </label>
                 </div>
-                {publishingMessage && (
-                  <p className="notice notice-error" role="alert">
-                    {publishingMessage}
-                  </p>
-                )}
                 <div className="social-composer-actions">
                   <button
                     className="button button-secondary"
@@ -617,7 +572,7 @@ export function OpportunitiesPage() {
               <summary>Minhas publicações ({managedOpportunities.length})</summary>
               <div className="opportunity-review-queues">
                 {managedOpportunities.map((item) => {
-                  const activeNow = isAvailable(item);
+                  const activeNow = item.available;
                   return (
                     <article className="opportunity-review-item" key={item.id}>
                       <div>
@@ -631,7 +586,7 @@ export function OpportunitiesPage() {
                         <button className="button button-secondary" type="button" onClick={() => startEditing(item)}>
                           Editar / Data
                         </button>
-                        {item.status === "ACTIVE" ? (
+                        {item.canClose && (
                           <button
                             className="button button-secondary"
                             type="button"
@@ -639,7 +594,8 @@ export function OpportunitiesPage() {
                           >
                             Apagar do mural
                           </button>
-                        ) : (
+                        )}
+                        {item.canReactivate && (
                           <button
                             className="button button-primary"
                             type="button"
@@ -656,7 +612,7 @@ export function OpportunitiesPage() {
             </details>
           )}
 
-          {publisherContexts.length === 0 && !workflowError && (
+          {publisherContexts.length === 0 && (
             <p className="opportunity-access-note">
               A solicitação de vínculo usa o departamento e a matrícula/SIAPE do seu perfil acadêmico.
             </p>
@@ -665,7 +621,6 @@ export function OpportunitiesPage() {
           {reviewQueues.length > 0 && (
             <details className="opportunity-management-disclosure">
               <summary>Solicitações de afiliação docente</summary>
-              {reviewMessage && <p role="status">{reviewMessage}</p>}
               <div className="opportunity-review-queues">
                 {reviewQueues.map(({ context, items }) => (
                   <section key={context.publisherId} aria-label={`Pedidos de ${context.name}`}>
@@ -723,11 +678,7 @@ export function OpportunitiesPage() {
           <p className="notice" role="status">
             Carregando oportunidades…
           </p>
-        ) : error ? (
-          <p className="notice notice-error" role="alert">
-            Não foi possível carregar as oportunidades. Verifique a conexão e tente novamente.
-          </p>
-        ) : results?.items.length ? (
+        ) : !error && results?.items.length ? (
           <div className="opportunity-list">
             {results.items.map((opportunity) => (
               <OpportunityCard key={opportunity.id} opportunity={opportunity} />
@@ -751,9 +702,9 @@ export function OpportunitiesPage() {
 
 export function OpportunityDetailPage() {
   const { keycloak } = useOutletContext<WebContext>();
+  const toast = useToast();
   const { opportunityId = "" } = useParams();
   const [opportunity, setOpportunity] = useState<Opportunity | null>(null);
-  const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<"not-found" | "unavailable" | null>(null);
   const [editing, setEditing] = useState(false);
@@ -762,9 +713,7 @@ export function OpportunityDetailPage() {
   const [editCategory, setEditCategory] = useState("");
   const [editDeadline, setEditDeadline] = useState("");
   const [editExternalUrl, setEditExternalUrl] = useState("");
-  const [editImageUrl, setEditImageUrl] = useState("");
   const [busy, setBusy] = useState(false);
-  const [feedback, setFeedback] = useState("");
 
   useEffect(() => {
     document.title = "UNIR — Detalhes da oportunidade";
@@ -774,27 +723,20 @@ export function OpportunityDetailPage() {
       try {
         await keycloak.updateToken(30);
         if (!keycloak.token || !opportunityId) throw new Error("Oportunidade indisponível.");
-        const [response, contextsResponse] = await Promise.all([
-          getOpportunity(keycloak.token, opportunityId),
-          getOpportunityPublisherContexts(keycloak.token).catch(() => ({ items: [] })),
-        ]);
+        const response = await getOpportunity(keycloak.token, opportunityId);
         if (!active) return;
         setOpportunity(response);
-        const isManager = contextsResponse.items.some(
-          (ctx) => ctx.publisherType === response.publisherType && ctx.publisherId === response.publisherId,
-        );
-        setCanManage(isManager);
         setEditTitle(response.title);
         setEditDescription(response.description);
         setEditCategory(response.category);
         setEditDeadline(toDateTimeLocalValue(response.deadline));
         setEditExternalUrl(response.externalUrl);
-        setEditImageUrl(response.imageUrl ?? "");
       } catch (requestError) {
         if (!active) return;
         setFailure(
           requestError instanceof OpportunityApiError && requestError.status === 404 ? "not-found" : "unavailable",
         );
+        toast.error(extractErrorMessage(requestError, "Não foi possível carregar a oportunidade."));
       } finally {
         if (active) setLoading(false);
       }
@@ -804,13 +746,12 @@ export function OpportunityDetailPage() {
     return () => {
       active = false;
     };
-  }, [keycloak, opportunityId]);
+  }, [keycloak, opportunityId, toast]);
 
   async function handleSaveEdit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!opportunity) return;
     setBusy(true);
-    setFeedback("");
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token indisponível.");
@@ -821,15 +762,17 @@ export function OpportunityDetailPage() {
         deadline: editDeadline ? new Date(editDeadline).toISOString() : null,
         clearDeadline: !editDeadline,
         externalUrl: editExternalUrl,
-        imageUrl: editImageUrl.trim() || null,
-        clearImageUrl: !editImageUrl.trim(),
-        status: "ACTIVE",
       });
       setOpportunity(updated);
       setEditing(false);
-      setFeedback("Oportunidade atualizada.");
-    } catch {
-      setFeedback("Não foi possível salvar. Confira se a data de disponibilidade está no futuro.");
+      toast.success("Oportunidade atualizada.");
+    } catch (requestError) {
+      toast.error(
+        extractErrorMessage(
+          requestError,
+          "Não foi possível salvar. Confira se a data de disponibilidade está no futuro.",
+        ),
+      );
     } finally {
       setBusy(false);
     }
@@ -838,15 +781,14 @@ export function OpportunityDetailPage() {
   async function handleClose() {
     if (!opportunity) return;
     setBusy(true);
-    setFeedback("");
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token indisponível.");
       const updated = await closeOpportunity(keycloak.token, opportunity.id);
       setOpportunity(updated);
-      setFeedback("Oportunidade removida do mural ativo.");
-    } catch {
-      setFeedback("Não foi possível remover a oportunidade.");
+      toast.success("Oportunidade removida do mural ativo.");
+    } catch (requestError) {
+      toast.error(extractErrorMessage(requestError, "Não foi possível remover a oportunidade."));
     } finally {
       setBusy(false);
     }
@@ -878,7 +820,7 @@ export function OpportunityDetailPage() {
     );
   }
 
-  const available = isAvailable(opportunity);
+  const available = opportunity.available;
 
   return (
     <div className="detail-page opportunity-detail-page">
@@ -954,7 +896,7 @@ export function OpportunityDetailPage() {
           )}
         </div>
 
-        {canManage && (
+        {opportunity.canManage && (
           <section className="opportunity-publishing-tools" aria-label="Administrar esta oportunidade">
             <div className="opportunity-publishing-heading">
               <span className="opportunity-publishing-icon" aria-hidden="true">
@@ -968,7 +910,7 @@ export function OpportunityDetailPage() {
                 <button className="button button-primary" type="button" onClick={() => setEditing(true)}>
                   Editar / Alterar data
                 </button>
-                {opportunity.status === "ACTIVE" && (
+                {opportunity.canClose && (
                   <button
                     className="button button-secondary"
                     type="button"
@@ -980,11 +922,6 @@ export function OpportunityDetailPage() {
                 )}
               </div>
             </div>
-            {feedback && (
-              <p className="notice" role="status" style={{ marginTop: "0.75rem" }}>
-                {feedback}
-              </p>
-            )}
             {editing && (
               <div
                 className="sports-modal-backdrop"
@@ -1047,15 +984,6 @@ export function OpportunityDetailPage() {
                             value={editExternalUrl}
                             onChange={(event) => setEditExternalUrl(event.target.value)}
                             required
-                          />
-                        </label>
-                        <label className="opportunity-publish-wide">
-                          Imagem (opcional)
-                          <input
-                            type="url"
-                            value={editImageUrl}
-                            onChange={(event) => setEditImageUrl(event.target.value)}
-                            placeholder="https://…"
                           />
                         </label>
                       </div>

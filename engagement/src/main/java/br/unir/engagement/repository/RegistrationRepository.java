@@ -16,6 +16,12 @@ import jakarta.persistence.LockModeType;
 
 public interface RegistrationRepository extends JpaRepository<Registration, UUID> {
 
+    @Query("select r.id from Registration r where r.userId = :userId")
+    List<UUID> findPaymentReferences(@Param("userId") String userId);
+
+    @Query("select r.id, e.id, e.title from Registration r, Event e where r.eventId = e.id and r.userId = :userId")
+    List<Object[]> findPaymentReferenceDetails(@Param("userId") String userId);
+
     Optional<Registration> findFirstByEventIdAndUserIdAndStatusInOrderByRegisteredAtDesc(UUID eventId, String userId,
             List<RegistrationStatus> activeStatuses);
 
@@ -48,6 +54,21 @@ public interface RegistrationRepository extends JpaRepository<Registration, UUID
             @Param("pendingPayment") RegistrationStatus pendingPayment, @Param("now") Instant now);
 
     Page<Registration> findByUserIdOrderByRegisteredAtDesc(String userId, Pageable pageable);
+
+    @Query("""
+            select r from Registration r, Event e
+            where r.eventId = e.id and r.userId = :userId
+              and (cast(:eventId as uuid) is null or r.eventId = :eventId)
+              and (cast(:startsFrom as timestamp) is null or e.startsAt >= :startsFrom)
+              and (cast(:startsBefore as timestamp) is null or e.startsAt < :startsBefore)
+              and (cast(:agenda as string) is null or (:agenda = 'upcoming' and e.endsAt >= :now)
+                   or (:agenda = 'past' and e.endsAt < :now))
+            order by case when :agenda = 'upcoming' then e.startsAt end asc,
+                     case when :agenda = 'past' then e.startsAt end desc, r.registeredAt desc, r.id asc
+            """)
+    Page<Registration> findAgenda(@Param("userId") String userId, @Param("eventId") UUID eventId,
+            @Param("startsFrom") Instant startsFrom, @Param("startsBefore") Instant startsBefore,
+            @Param("agenda") String agenda, @Param("now") Instant now, Pageable pageable);
 
     @Query("select registration.eventId from Registration registration "
             + "where registration.id = :registrationId and registration.userId = :userId")

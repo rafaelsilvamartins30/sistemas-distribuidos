@@ -14,6 +14,10 @@ class InvalidAccessToken(Exception):
     """Raised when a token is invalid or is not a UNIR browser-user token."""
 
 
+class ForbiddenAccessToken(InvalidAccessToken):
+    """Raised when a valid token does not carry the required UNIR role."""
+
+
 class IdentityProviderUnavailable(Exception):
     """Raised when Keycloak cannot be reached to validate or mint a token."""
 
@@ -59,7 +63,7 @@ class KeycloakTokenValidator:
         realm_access = claims.get("realm_access")
         roles = realm_access.get("roles", []) if isinstance(realm_access, dict) else []
         if not {"USER", "PLATFORM_ADMIN"}.intersection(roles):
-            raise InvalidAccessToken("Access token has no UNIR user role")
+            raise ForbiddenAccessToken("Access token has no UNIR user role")
         return claims
 
 

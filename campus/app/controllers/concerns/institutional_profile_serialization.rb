@@ -28,9 +28,26 @@ module InstitutionalProfileSerialization
   end
 
   def profile_administrator_fields(profile)
-    can_manage = Array(profile.administrator_user_ids).include?(current_subject)
-    { viewerCanManage: can_manage,
-      administratorUserIds: can_manage ? profile.administrator_user_ids : nil }
+    return university_administrator_fields if profile.is_a?(University)
+
+    administrators = effective_profile_administrators(profile)
+    can_manage = global_platform_admin? || administrators.include?(current_subject)
+    { viewerCanManage: can_manage, viewerCanEditProfile: can_manage,
+      administratorUserIds: can_manage ? administrators : nil }
+  end
+
+  def university_administrator_fields
+    can_manage = global_platform_admin?
+    protected_id = global_administrator_subject if can_manage
+    { viewerCanManage: can_manage, viewerCanEditProfile: false,
+      protectedAdministratorUserId: protected_id,
+      administratorUserIds: can_manage ? [protected_id].compact : nil }
+  end
+
+  def effective_profile_administrators(profile)
+    administrators = Array(profile.administrator_user_ids)
+    global_admin_id = global_administrator_subject
+    global_admin_id.present? ? (administrators + [global_admin_id]).compact.uniq : administrators
   end
 
   def profile_payload(fields)

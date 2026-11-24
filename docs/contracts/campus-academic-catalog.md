@@ -10,9 +10,10 @@ The catalog JSON retains source URLs. Its 107 extension entities and five comple
 
 ## Permissions and profile lifecycle
 
-- A University administrator can edit the singleton and create AcademicUnits and Departments. The creator is added to each new profile's administrator list.
+- Only the global platform administrator can edit the singleton University and create AcademicUnits and Departments. Department and other profile administrators remain contextual.
 - Department administrators can edit that Department and its Courses.
 - AcademicUnit, Department, AcademicEntity, Community, and University share description, contact links, Markdown, and administrator IDs. Only an administrator listed on that profile can edit it or change its administrator list. Campus returns that list only to the profile's administrators; the Web BFF removes it from other viewers' responses.
+- The global administrator account (`ADMIN-0001`) has access to every institutional profile, even when an older record does not yet list it. Campus always includes it in administrator responses and re-adds it when a profile is saved; Administration does not expose a removal action for it. University contextual administrator assignment is rejected.
 - AcademicEntity and Community are created through institutional requests. An entity/community request targets a Department or the University (a missing/null `targetDepartmentId`). An administrator of that target may approve or reject it. Approval creates the profile and adds the requester as its initial administrator.
 - A professor request uses the Department saved on the user's Campus profile. Only approval by an administrator of that Department creates or activates `ProfessorAffiliation`; the self-declared profile value is not authorization.
 
@@ -34,7 +35,7 @@ All routes below require an authenticated Keycloak bearer token through the Gate
 | `POST /requests/{id}/approve`, `POST /requests/{id}/reject` | Review a request as an administrator of its target |
 | `/professor-verification-requests...` | Existing professor verification request and affiliation review flow |
 
-List APIs use `items`, `page`, `size`, `totalElements`, and `totalPages`; size is limited to 100. The course list requires an existing `departmentId` and omits `referenceOnly` rows. Profile edits and reviews are authorized again inside Campus using the JWT `sub` and stored administrator IDs.
+List APIs use `items`, `page`, `size`, `totalElements`, and `totalPages`; size is limited to 100. The course list requires an existing `departmentId` and omits `referenceOnly` rows. Profile edits and reviews are authorized again inside Campus using the JWT `sub` and stored administrator IDs; the global account also needs both the `PLATFORM_ADMIN` role and the `ADMIN-0001` Campus profile.
 
 The self-service user-profile API accepts `courseId` and `departmentId`; Campus verifies that the selected Course belongs to that Department. The public response keeps the display names `course` and `department`, along with their IDs. `institutionalId`, affiliation status, and academic level retain their existing public contract. `PROFESSOR` in that profile remains self-declared; it never creates an affiliation by itself.
 

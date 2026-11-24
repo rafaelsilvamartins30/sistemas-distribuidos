@@ -2,6 +2,8 @@
 
 # Communities may belong to a department or the university; admins are Keycloak subjects.
 class Community < ApplicationRecord
+  include ProtectGlobalAdministrator
+
   belongs_to :department, optional: true
   has_many :community_space_posts, dependent: :restrict_with_error
 

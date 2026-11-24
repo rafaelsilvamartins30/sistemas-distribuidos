@@ -6,6 +6,9 @@ import org.springframework.cloud.gateway.server.mvc.handler.GatewayRouterFunctio
 import org.springframework.cloud.gateway.server.mvc.handler.HandlerFunctions;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.BufferingClientHttpRequestFactory;
+import org.springframework.http.client.ClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.servlet.function.RequestPredicates;
 import org.springframework.web.servlet.function.RouterFunction;
 import org.springframework.web.servlet.function.ServerResponse;
@@ -20,6 +23,11 @@ public class RouteConfiguration {
     private String adminBffUrl;
 
     @Bean
+    public ClientHttpRequestFactory gatewayClientHttpRequestFactory() {
+        return new BufferingClientHttpRequestFactory(new JdkClientHttpRequestFactory());
+    }
+
+    @Bean
     public RouterFunction<ServerResponse> webBffRoute() {
         return GatewayRouterFunctions.route("web-bff")
                 .route(RequestPredicates.GET("/api/v1/me"), HandlerFunctions.http())
@@ -30,8 +38,6 @@ public class RouteConfiguration {
                 .route(RequestPredicates.GET("/api/v1/web/users"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/semesters"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/semesters/{semesterId}"), HandlerFunctions.http())
-                .route(RequestPredicates.POST("/api/v1/web/semesters"), HandlerFunctions.http())
-                .route(RequestPredicates.PATCH("/api/v1/web/semesters/{semesterId}"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/academic-units"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/academic-units/{unitId}"), HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/academic-units"), HandlerFunctions.http())
@@ -101,20 +107,13 @@ public class RouteConfiguration {
                         HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/sports"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/sports/organizer-contexts"), HandlerFunctions.http())
-                .route(RequestPredicates.POST("/api/v1/web/sports"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/sports/{sportId}"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/competitions"), HandlerFunctions.http())
-                .route(RequestPredicates.POST("/api/v1/web/competitions"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/competitions/{competitionId}"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/seasons"), HandlerFunctions.http())
-                .route(RequestPredicates.POST("/api/v1/web/seasons"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/seasons/{seasonId}"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/sports-events/me"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/sports-events/{contextType}/{contextId}/overview"),
-                        HandlerFunctions.http())
-                .route(RequestPredicates.PATCH("/api/v1/web/sports-events/{contextType}/{contextId}"),
-                        HandlerFunctions.http())
-                .route(RequestPredicates.POST("/api/v1/web/sports-events/{contextType}/{contextId}/cancel"),
                         HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/sports-events/{contextType}/{contextId}/teams"),
                         HandlerFunctions.http())
@@ -122,19 +121,20 @@ public class RouteConfiguration {
                         HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/sports-events/{contextType}/{contextId}/free-agents"),
                         HandlerFunctions.http())
-                .route(RequestPredicates.POST("/api/v1/web/sports-events/{contextType}/{contextId}/matches/generate"),
-                        HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/sports-matches/me"), HandlerFunctions.http())
-                .route(RequestPredicates.PATCH("/api/v1/web/sports-matches/{matchId}/score"), HandlerFunctions.http())
-                .route(RequestPredicates.POST("/api/v1/web/sports-matches/{matchId}/checkin-token"),
-                        HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/sports-matches/{matchId}/checkins"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/payments/me"), HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/payments/{registrationId}/confirm"), HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/events/{eventId}/registrations"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/me/activities"), HandlerFunctions.http())
                 .route(RequestPredicates.DELETE("/api/v1/web/registrations/{registrationId}"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/attendance/events/{eventId}/attendance-review"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/web/attendance/events/{eventId}/attendance-review"),
+                        HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/attendance/me"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/web/attendance/events/{eventId}/organizer-action"),
+                        HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/attendance/check-ins"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/web/me/tickets"), HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/web/attendance/events/{eventId}/qr"), HandlerFunctions.http())
@@ -151,6 +151,26 @@ public class RouteConfiguration {
         return GatewayRouterFunctions.route("admin-bff")
                 .route(RequestPredicates.GET("/api/v1/admin/me"), HandlerFunctions.http())
                 .route(RequestPredicates.GET("/api/v1/admin/overview"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/admin/sports-matches/{matchId}/attendance"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/sports-matches/{matchId}/attendance"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/admin/sports/catalog"), HandlerFunctions.http())
+                .route(RequestPredicates.GET("/api/v1/admin/sports-events/{contextType}/{contextId}/overview"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/sports"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/competitions"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/seasons"), HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/admin/sports-events/{contextType}/{contextId}"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/sports-events/{contextType}/{contextId}/cancel"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/sports-events/{contextType}/{contextId}/matches/generate"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/admin/sports-matches/{matchId}/score"), HandlerFunctions.http())
+                .route(RequestPredicates.POST("/api/v1/admin/sports-matches/{matchId}/checkin-token"),
+                        HandlerFunctions.http())
+                .route(RequestPredicates.PATCH("/api/v1/admin/semesters/{semesterId}"), HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/admin/academic-units"), HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/admin/departments"), HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/admin/courses"), HandlerFunctions.http())
@@ -163,7 +183,6 @@ public class RouteConfiguration {
                 .route(RequestPredicates.DELETE("/api/v1/admin/academic-units/{unitId}"), HandlerFunctions.http())
                 .route(RequestPredicates.DELETE("/api/v1/admin/departments/{departmentId}"), HandlerFunctions.http())
                 .route(RequestPredicates.DELETE("/api/v1/admin/courses/{courseId}"), HandlerFunctions.http())
-                .route(RequestPredicates.DELETE("/api/v1/admin/semesters/{semesterId}"), HandlerFunctions.http())
                 .route(RequestPredicates.DELETE("/api/v1/admin/entities/{entityId}"), HandlerFunctions.http())
                 .route(RequestPredicates.DELETE("/api/v1/admin/communities/{communityId}"), HandlerFunctions.http())
                 .route(RequestPredicates.POST("/api/v1/admin/requests/{requestId}/approve"), HandlerFunctions.http())

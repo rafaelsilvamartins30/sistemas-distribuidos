@@ -10,8 +10,15 @@ import org.springframework.data.repository.query.Param;
 
 public interface SportsMatchRepository extends JpaRepository<SportsMatch, UUID> {
 
+    java.util.Optional<SportsMatch> findFirstByContextTypeAndContextIdOrderByScheduledAtAsc(String contextType,
+            UUID contextId);
+
     List<SportsMatch> findByContextTypeAndContextIdOrderByRoundNumberAscScheduledAtAsc(String contextType,
             UUID contextId);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select m from SportsMatch m where m.id = :id")
+    java.util.Optional<SportsMatch> lockMatch(@Param("id") UUID id);
 
     boolean existsByContextTypeAndContextId(String contextType, UUID contextId);
 

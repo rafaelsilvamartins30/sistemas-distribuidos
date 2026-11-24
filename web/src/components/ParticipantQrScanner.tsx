@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useToast } from "../contexts/ToastContext";
 
 interface DetectedBarcode {
   rawValue: string;
@@ -27,6 +28,7 @@ export function ParticipantQrScanner({
   submitLabel,
   onToken,
 }: ParticipantQrScannerProps) {
+  const toast = useToast();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | null>(null);
@@ -55,7 +57,7 @@ export function ParticipantQrScanner({
   async function startCamera() {
     setMessage(null);
     if (!navigator.mediaDevices?.getUserMedia || !window.BarcodeDetector) {
-      setMessage("Este navegador não oferece leitura de QR pela câmera. Você ainda pode colar o token abaixo.");
+      toast.info("Este navegador não oferece leitura de QR pela câmera. Você ainda pode colar o token abaixo.");
       return;
     }
 
@@ -83,13 +85,13 @@ export function ParticipantQrScanner({
               setMessage("QR lido. Registrando sua presença…");
               onTokenRef.current(token);
             } else {
-              setMessage("QR lido. Confira os dados antes de confirmar.");
+              toast.info("QR lido. Confira os dados antes de confirmar.");
             }
             return;
           }
         } catch {
           stopCamera();
-          setMessage("Não foi possível ler o QR. Você pode colar o token abaixo.");
+          toast.error("Não foi possível ler o QR. Você pode colar o token abaixo.");
           return;
         }
         timerRef.current = window.setTimeout(() => void scanFrame(), 300);
@@ -97,7 +99,7 @@ export function ParticipantQrScanner({
       void scanFrame();
     } catch {
       stopCamera();
-      setMessage("Não foi possível abrir a câmera. Você pode colar o token abaixo.");
+      toast.error("Não foi possível abrir a câmera. Você pode colar o token abaixo.");
     }
   }
 
@@ -110,13 +112,13 @@ export function ParticipantQrScanner({
   async function pasteFromClipboard() {
     setMessage(null);
     if (!navigator.clipboard?.readText) {
-      setMessage("Cole o código manualmente no campo abaixo (Ctrl+V / Cmd+V).");
+      toast.info("Cole o código manualmente no campo abaixo (Ctrl+V / Cmd+V).");
       return;
     }
     try {
       const text = (await navigator.clipboard.readText()).trim();
       if (!text) {
-        setMessage("A área de transferência está vazia. Copie o código do QR primeiro.");
+        toast.info("A área de transferência está vazia. Copie o código do QR primeiro.");
         return;
       }
       setManualToken(text);
@@ -124,10 +126,10 @@ export function ParticipantQrScanner({
         setMessage("Código colado. Registrando presença…");
         onToken(text);
       } else {
-        setMessage("Código do QR colado. Clique no botão abaixo para confirmar.");
+        toast.info("Código do QR colado. Clique no botão abaixo para confirmar.");
       }
     } catch {
-      setMessage("Permissão de área de transferência negada. Cole o código no campo abaixo (Ctrl+V / Cmd+V).");
+      toast.error("Permissão de área de transferência negada. Cole o código no campo abaixo (Ctrl+V / Cmd+V).");
     }
   }
 

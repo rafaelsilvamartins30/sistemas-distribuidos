@@ -1,8 +1,8 @@
 use crate::{
     attendance::{
-        confirm_organizer_check_in, get_my_attendance, get_my_tickets, issue_event_qr_for_creator,
-        issue_participant_qr, preview_organizer_check_in, record_participant_check_in,
-        CheckInError,
+        confirm_organizer_check_in, event_attendance_review, get_my_attendance, get_my_tickets,
+        get_organizer_action, issue_event_qr_for_creator, issue_participant_qr,
+        preview_organizer_check_in, record_participant_check_in, CheckInError,
     },
     auth::{JwtError, JwtVerifier},
 };
@@ -330,6 +330,55 @@ async fn route_request(pool: &PgPool, verifier: &JwtVerifier, request: &HttpRequ
             match confirm_organizer_check_in(pool, &body.token, &authenticated_subject).await {
                 Ok(result) => Response::json(200, "OK", &result),
                 Err(error) => check_in_error(error),
+            }
+        }
+        ("GET" | "POST", _)
+            if path.starts_with("/api/v1/attendance/events/")
+                && path.ends_with("/attendance-review") =>
+        {
+            let Some(event_id) =
+                path_uuid(path, "/api/v1/attendance/events/", "/attendance-review")
+            else {
+                return Response::problem(
+                    400,
+                    "Bad Request",
+                    "Bad Request",
+                    "eventId must be a UUID",
+                );
+            };
+            match event_attendance_review(
+                pool,
+                event_id,
+                &authenticated_subject,
+                request.method == "POST",
+            )
+            .await
+            {
+                Ok(review) => Response::json(200, "OK", &review),
+                Err(error) => check_in_error(error),
+            }
+        }
+        ("GET", _)
+            if path.starts_with("/api/v1/attendance/events/")
+                && path.ends_with("/organizer-action") =>
+        {
+            let Some(event_id) = path_uuid(path, "/api/v1/attendance/events/", "/organizer-action")
+            else {
+                return Response::problem(
+                    400,
+                    "Bad Request",
+                    "Bad Request",
+                    "eventId must be a UUID",
+                );
+            };
+            match get_organizer_action(pool, event_id, &authenticated_subject).await {
+                Ok(action) => Response::json(200, "OK", &serde_json::json!({ "action": action })),
+                Err(_) => Response::problem(
+                    503,
+                    "Service Unavailable",
+                    "Service Unavailable",
+                    "Attendance is unavailable",
+                ),
             }
         }
         ("POST", _) if path.starts_with("/api/v1/attendance/events/") && path.ends_with("/qr") => {

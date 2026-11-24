@@ -100,16 +100,9 @@ public class SecurityConfiguration {
                                 "/api/v1/web/sports-events/*/*/overview", "/api/v1/web/sports-matches/me",
                                 "/api/v1/web/payments/me")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/web/sports", "/api/v1/web/competitions",
-                                "/api/v1/web/seasons", "/api/v1/web/sports-events/*/*/cancel",
-                                "/api/v1/web/sports-events/*/*/teams", "/api/v1/web/sports-events/*/*/teams/join",
-                                "/api/v1/web/sports-events/*/*/free-agents",
-                                "/api/v1/web/sports-events/*/*/matches/generate",
-                                "/api/v1/web/sports-matches/*/checkin-token", "/api/v1/web/sports-matches/*/checkins",
-                                "/api/v1/web/payments/*/confirm")
-                        .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                        .requestMatchers(HttpMethod.PATCH, "/api/v1/web/sports-matches/*/score",
-                                "/api/v1/web/sports-events/*/*")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/web/sports-events/*/*/teams",
+                                "/api/v1/web/sports-events/*/*/teams/join", "/api/v1/web/sports-events/*/*/free-agents",
+                                "/api/v1/web/sports-matches/*/checkins", "/api/v1/web/payments/*/confirm")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/web/events/*/registrations")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
@@ -117,7 +110,9 @@ public class SecurityConfiguration {
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/web/registrations/*")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/web/attendance/me")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/web/attendance/me",
+                                "/api/v1/web/attendance/events/*/organizer-action",
+                                "/api/v1/web/attendance/events/*/attendance-review")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/web/attendance/check-ins")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
@@ -125,9 +120,22 @@ public class SecurityConfiguration {
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/web/attendance/events/*/qr",
                                 "/api/v1/web/attendance/tickets/*/qr",
+                                "/api/v1/web/attendance/events/*/attendance-review",
                                 "/api/v1/web/attendance/organizer-check-ins/preview",
                                 "/api/v1/web/attendance/organizer-check-ins/confirm")
                         .hasAnyRole(GlobalRoles.USER, GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/sports/catalog",
+                                "/api/v1/admin/sports-events/*/*/overview", "/api/v1/admin/sports-matches/*/attendance")
+                        .hasRole(GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/admin/sports", "/api/v1/admin/competitions",
+                                "/api/v1/admin/seasons", "/api/v1/admin/sports-events/*/*/cancel",
+                                "/api/v1/admin/sports-events/*/*/matches/generate",
+                                "/api/v1/admin/sports-matches/*/checkin-token",
+                                "/api/v1/admin/sports-matches/*/attendance")
+                        .hasRole(GlobalRoles.PLATFORM_ADMIN)
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/admin/sports-events/*/*",
+                                "/api/v1/admin/sports-matches/*/score", "/api/v1/admin/semesters/*")
+                        .hasRole(GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/me", "/api/v1/admin/overview")
                         .hasRole(GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/admin/academic-units", "/api/v1/admin/departments",
@@ -139,8 +147,8 @@ public class SecurityConfiguration {
                                 "/api/v1/admin/communities/*")
                         .hasRole(GlobalRoles.PLATFORM_ADMIN)
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/admin/academic-units/*",
-                                "/api/v1/admin/departments/*", "/api/v1/admin/courses/*", "/api/v1/admin/semesters/*",
-                                "/api/v1/admin/entities/*", "/api/v1/admin/communities/*")
+                                "/api/v1/admin/departments/*", "/api/v1/admin/courses/*", "/api/v1/admin/entities/*",
+                                "/api/v1/admin/communities/*")
                         .hasRole(GlobalRoles.PLATFORM_ADMIN).anyRequest().denyAll())
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(this.jwtAuthenticationConverter())))

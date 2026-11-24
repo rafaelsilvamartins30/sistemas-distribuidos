@@ -39,4 +39,60 @@ class UniversitiesControllerTest < ActionDispatch::IntegrationTest
     assert_response :not_found
     assert_equal 'application/problem+json', response.media_type
   end
+
+  test 'only the global administrator can edit the university and cannot assign contextual administrators' do
+    create_profile(subject: 'global-admin-sub', institutional_id: 'ADMIN-0001')
+    university = create_test_university(administrators: ['university-admin'])
+
+    assert_university_organizer_access
+    assert_university_edit_restrictions(university)
+    assert_university_global_admin_update(university)
+  end
+
+  private
+
+  def create_test_university(administrators:)
+    University.create!(
+      id: University::SINGLETON_ID, name: 'Universidade de Teste', acronym: 'UT',
+      description: 'Descrição.', general_info_markdown: 'Informações.',
+      current_term: '2026/2', links: [], administrator_user_ids: administrators
+    )
+  end
+
+  def assert_university_organizer_access
+    assert_not_includes organizer_types(bearer_headers(subject: 'university-admin')), 'UNIVERSITY'
+    assert_includes organizer_types(global_admin_headers), 'UNIVERSITY'
+  end
+
+  def organizer_types(headers)
+    with_jwks { get '/internal/v1/event-organizers', headers: headers }
+    assert_response :success
+    response.parsed_body.fetch('items').pluck('organizerType')
+  end
+
+  def assert_university_edit_restrictions(university)
+    patch_university({ name: 'Nome alterado' }, bearer_headers(subject: 'university-admin'))
+    assert_response :forbidden
+    patch_university({ name: 'Nome alterado' }, bearer_headers(subject: 'platform-only', roles: ['PLATFORM_ADMIN']))
+    assert_response :forbidden
+    assert_equal 'Universidade de Teste', university.reload.name
+  end
+
+  def assert_university_global_admin_update(university)
+    patch_university({ administratorUserIds: ['another-admin'] }, global_admin_headers)
+    assert_response :bad_request
+    assert_equal %w[university-admin global-admin-sub], university.reload.administrator_user_ids
+
+    patch_university({ name: 'Universidade Atualizada' }, global_admin_headers)
+    assert_response :success
+    assert_equal 'Universidade Atualizada', university.reload.name
+  end
+
+  def patch_university(params, headers)
+    with_jwks { patch '/university', params: params, headers: headers, as: :json }
+  end
+
+  def global_admin_headers
+    bearer_headers(subject: 'global-admin-sub', roles: ['PLATFORM_ADMIN'])
+  end
 end

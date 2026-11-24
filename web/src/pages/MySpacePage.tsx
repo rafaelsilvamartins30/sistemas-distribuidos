@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { RegistrationRefundPolicy } from "../components/RegistrationRefundPolicy";
+import { useEffect, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { Icon } from "../components/Icon";
+import { SemesterSelector } from "../components/SemesterSelector";
 import { UniversalAttendanceModal } from "../components/UniversalAttendanceModal";
+import { useToast } from "../contexts/ToastContext";
 import {
   AttendanceApiError,
   checkInWithEventQr,
@@ -14,6 +17,8 @@ import {
   type TicketRegistration,
 } from "../services/attendance";
 import { cancelRegistration, RegistrationApiError } from "../services/registrations";
+import { useSemesterFilter } from "../hooks/useSemesterFilter";
+import { extractErrorMessage } from "../utils/apiError.js";
 
 type TicketFilter = "upcoming" | "past";
 
@@ -46,10 +51,6 @@ function statusLabel(ticket: TicketRegistration): string {
   }
 }
 
-function canCancel(ticket: TicketRegistration): boolean {
-  return ticket.status === "CONFIRMED" && Date.now() <= new Date(ticket.event.startsAt).getTime() - 24 * 60 * 60 * 1000;
-}
-
 function toTicketPage(value: TicketPage, ticket: TicketRegistration, attendance: MyTicket): TicketPage {
   return {
     ...value,
@@ -59,16 +60,17 @@ function toTicketPage(value: TicketPage, ticket: TicketRegistration, attendance:
 
 export function MySpacePage() {
   const { keycloak } = useOutletContext<{ keycloak: Keycloak }>();
+  const toast = useToast();
   const [filter, setFilter] = useState<TicketFilter>("upcoming");
+  const [pageNumber, setPageNumber] = useState(0);
   const [page, setPage] = useState<TicketPage | null>(null);
   const [loading, setLoading] = useState(true);
-  const [failure, setFailure] = useState("");
   const [busyId, setBusyId] = useState("");
+  const { semesters, selectedTerm, selectedSemester, setSelectedTerm } = useSemesterFilter(keycloak.token ?? "");
   const [attendanceModal, setAttendanceModal] = useState<{
     ticket: TicketRegistration;
-    mode: "participant" | "organizer";
+    mode: "participant" | "participant-ticket";
     qr?: QrArtifact | null;
-    error?: string | null;
     feedback?: string | null;
   } | null>(null);
 
@@ -76,14 +78,18 @@ export function MySpacePage() {
     let active = true;
     async function loadTickets() {
       setLoading(true);
-      setFailure("");
       try {
         await keycloak.updateToken(30);
         if (!keycloak.token) throw new Error("Token de acesso indisponível.");
-        const result = await getMyTickets(keycloak.token);
+        const result = await getMyTickets(keycloak.token, {
+          page: pageNumber,
+          agenda: filter,
+          startOn: selectedSemester?.startOn,
+          endOn: selectedSemester?.endOn,
+        });
         if (active) setPage(result);
-      } catch {
-        if (active) setFailure("Não foi possível carregar seus tickets. Tente novamente mais tarde.");
+      } catch (err) {
+        if (active) toast.error(extractErrorMessage(err, "Não foi possível carregar seus tickets."));
       } finally {
         if (active) setLoading(false);
       }
@@ -92,26 +98,12 @@ export function MySpacePage() {
     return () => {
       active = false;
     };
-  }, [keycloak]);
+  }, [keycloak, filter, pageNumber, selectedSemester, toast]);
 
-  const visibleTickets = useMemo(() => {
-    const now = Date.now();
-    return (page?.items ?? [])
-      .filter((ticket) =>
-        filter === "past"
-          ? new Date(ticket.event.endsAt).getTime() < now
-          : new Date(ticket.event.endsAt).getTime() >= now,
-      )
-      .sort((left, right) =>
-        filter === "past"
-          ? new Date(right.event.startsAt).getTime() - new Date(left.event.startsAt).getTime()
-          : new Date(left.event.startsAt).getTime() - new Date(right.event.startsAt).getTime(),
-      );
-  }, [filter, page]);
+  const visibleTickets = page?.items ?? [];
 
   async function cancel(ticket: TicketRegistration) {
     setBusyId(ticket.id);
-    setFailure("");
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
@@ -126,18 +118,22 @@ export function MySpacePage() {
                       ...item,
                       status: updated.status,
                       cancelledAt: updated.cancelledAt,
-                      attendance: item.attendance ? { ...item.attendance, status: "CANCELLED" } : null,
+                      canCancel: updated.canCancel,
+                      cancellationBlockedReason: updated.cancellationBlockedReason,
                     }
                   : item,
               ),
             }
           : current,
       );
+      toast.success("Inscrição cancelada.");
     } catch (error) {
-      setFailure(
+      toast.error(
         error instanceof RegistrationApiError && error.detail === "CANCELLATION_WINDOW_CLOSED"
           ? "O prazo para cancelar esta inscrição terminou."
-          : "Não foi possível cancelar o ticket. Tente novamente.",
+          : error instanceof RegistrationApiError && error.detail === "ONLY_FREE_REGISTRATIONS_CAN_BE_CANCELLED"
+            ? "Inscrições pagas não podem ser canceladas pelo participante."
+            : extractErrorMessage(error, "Não foi possível cancelar o ticket. Tente novamente."),
       );
     } finally {
       setBusyId("");
@@ -146,22 +142,23 @@ export function MySpacePage() {
 
   async function scanEventQr(ticket: TicketRegistration, token: string) {
     setBusyId(ticket.id);
-    setAttendanceModal((prev) => (prev ? { ...prev, error: null, feedback: null } : prev));
+    setAttendanceModal((prev) => (prev ? { ...prev, feedback: null } : prev));
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
       const result = await checkInWithEventQr(keycloak.token, token);
       if (ticket.attendance) {
-        const attendance = { ...ticket.attendance, status: "ATTENDED" as const, checkedAt: result.checkedAt };
+        const attendance = { ...ticket.attendance, status: result.status, action: null, checkedAt: result.checkedAt };
         setPage((current) => (current ? toTicketPage(current, ticket, attendance) : current));
       }
       setAttendanceModal(null);
+      toast.success("Presença confirmada com sucesso!");
     } catch (error) {
       const message =
         error instanceof AttendanceApiError
           ? `Não foi possível registrar a presença: ${error.detail}.`
-          : "Não foi possível registrar a presença. Tente novamente.";
-      setAttendanceModal((prev) => (prev ? { ...prev, error: message } : prev));
+          : extractErrorMessage(error, "Não foi possível registrar a presença. Tente novamente.");
+      toast.error(message);
     } finally {
       setBusyId("");
     }
@@ -169,24 +166,24 @@ export function MySpacePage() {
 
   async function openMyQr(ticket: TicketRegistration) {
     setBusyId(ticket.id);
-    setAttendanceModal({ ticket, mode: "organizer", qr: null, error: null, feedback: null });
+    setAttendanceModal({ ticket, mode: "participant-ticket", qr: null, feedback: null });
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
       const issued = await issueMyTicketQr(keycloak.token, ticket.eventId);
       setAttendanceModal({
         ticket,
-        mode: "organizer",
+        mode: "participant-ticket",
         qr: issued,
-        error: null,
         feedback: "Apresente este QR ou código ao organizador na entrada do evento.",
       });
     } catch (error) {
       const message =
         error instanceof AttendanceApiError
           ? `Não foi possível abrir seu QR: ${error.detail}.`
-          : "Não foi possível abrir seu QR. Tente novamente.";
-      setAttendanceModal({ ticket, mode: "organizer", qr: null, error: message, feedback: null });
+          : extractErrorMessage(error, "Não foi possível abrir seu QR. Tente novamente.");
+      toast.error(message);
+      setAttendanceModal(null);
     } finally {
       setBusyId("");
     }
@@ -211,15 +208,36 @@ export function MySpacePage() {
           <h2 id="my-space-tickets-title">Sua agenda</h2>
           <p>Eventos futuros e anteriores, com o estado atual da inscrição e da presença.</p>
         </div>
+        <div className="semester-filter-row">
+          <SemesterSelector
+            id="my-tickets-semester"
+            value={selectedTerm}
+            semesters={semesters}
+            onChange={(term) => {
+              setPageNumber(0);
+              setSelectedTerm(term);
+            }}
+          />
+        </div>
         <div className="registration-filters" role="group" aria-label="Filtrar tickets">
           <button
             type="button"
             className={filter === "upcoming" ? "is-active" : ""}
-            onClick={() => setFilter("upcoming")}
+            onClick={() => {
+              setPageNumber(0);
+              setFilter("upcoming");
+            }}
           >
             Próximos eventos
           </button>
-          <button type="button" className={filter === "past" ? "is-active" : ""} onClick={() => setFilter("past")}>
+          <button
+            type="button"
+            className={filter === "past" ? "is-active" : ""}
+            onClick={() => {
+              setPageNumber(0);
+              setFilter("past");
+            }}
+          >
             Eventos anteriores
           </button>
         </div>
@@ -228,22 +246,13 @@ export function MySpacePage() {
           <p className="notice" role="status">
             Carregando seus tickets…
           </p>
-        ) : failure && !page ? (
-          <p className="notice notice-error" role="alert">
-            {failure}
-          </p>
         ) : (
           <>
-            {failure && (
-              <p className="notice notice-error" role="alert">
-                {failure}
-              </p>
-            )}
             {visibleTickets.length ? (
               <div className="registration-list">
                 {visibleTickets.map((ticket) => {
                   const attendance = ticket.attendance;
-                  const upcoming = new Date(ticket.event.endsAt).getTime() >= Date.now();
+                  const upcoming = filter === "upcoming";
                   const confirmed = ticket.status === "CONFIRMED";
                   return (
                     <article className="registration-card" key={ticket.id}>
@@ -266,44 +275,47 @@ export function MySpacePage() {
                         {ticket.status.startsWith("CANCELLED_") && ticket.cancelledAt && (
                           <span>Cancelado em {dateTime(ticket.cancelledAt)}</span>
                         )}
-                        {confirmed &&
-                          ticket.event.attendanceEnabled &&
-                          upcoming &&
-                          attendance?.status === "ELIGIBLE" && (
-                            <div className="ticket-actions">
-                              {attendance.mode === "PARTICIPANT_SCANS_EVENT" ? (
-                                <button
-                                  className="button button-primary"
-                                  type="button"
-                                  disabled={busyId === ticket.id}
-                                  onClick={() =>
-                                    setAttendanceModal({
-                                      ticket,
-                                      mode: "participant",
-                                      qr: null,
-                                      error: null,
-                                      feedback: null,
-                                    })
-                                  }
-                                >
-                                  Confirmar Presença
-                                </button>
-                              ) : (
-                                <button
-                                  className="button button-primary"
-                                  type="button"
-                                  disabled={busyId === ticket.id}
-                                  onClick={() => void openMyQr(ticket)}
-                                >
-                                  {busyId === ticket.id ? "Gerando QR…" : "Abrir meu QR de entrada"}
-                                </button>
-                              )}
-                            </div>
-                          )}
+                        {attendance?.action && (
+                          <div className="ticket-actions">
+                            {attendance.action === "SCAN_EVENT_QR" ? (
+                              <button
+                                className="button button-primary"
+                                type="button"
+                                disabled={busyId === ticket.id}
+                                onClick={() =>
+                                  setAttendanceModal({
+                                    ticket,
+                                    mode: "participant",
+                                    qr: null,
+                                    feedback: null,
+                                  })
+                                }
+                              >
+                                Confirmar Presença
+                              </button>
+                            ) : (
+                              <button
+                                className="button button-primary"
+                                type="button"
+                                disabled={busyId === ticket.id}
+                                onClick={() => void openMyQr(ticket)}
+                              >
+                                {busyId === ticket.id ? "Gerando QR…" : "Abrir meu QR de entrada"}
+                              </button>
+                            )}
+                          </div>
+                        )}
                         {confirmed && ticket.event.attendanceEnabled && !attendance && upcoming && (
                           <p className="notice" role="status">
                             Seu ticket está sendo sincronizado…
                           </p>
+                        )}
+                        {upcoming &&
+                          ticket.cancellationBlockedReason === "ONLY_FREE_REGISTRATIONS_CAN_BE_CANCELLED" && (
+                            <RegistrationRefundPolicy origin="eventos" />
+                          )}
+                        {upcoming && ticket.cancellationBlockedReason === "CANCELLATION_WINDOW_CLOSED" && (
+                          <p>O prazo para cancelamento (24 horas antes do evento) terminou.</p>
                         )}
                         {confirmed && !ticket.event.attendanceEnabled && upcoming && (
                           <p>Este evento não habilitou controle de presença pelo Access.</p>
@@ -313,7 +325,7 @@ export function MySpacePage() {
                         <Link className="button button-secondary" to={`/eventos/${ticket.event.id}`}>
                           Ver evento
                         </Link>
-                        {upcoming && canCancel(ticket) && (
+                        {ticket.canCancel && (
                           <button
                             className="button button-secondary"
                             type="button"
@@ -345,6 +357,29 @@ export function MySpacePage() {
             )}
           </>
         )}
+        {!loading && page && page.totalPages > 1 && (
+          <div className="registration-card-actions" aria-label="Paginação de tickets">
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={pageNumber === 0}
+              onClick={() => setPageNumber((current) => current - 1)}
+            >
+              Anterior
+            </button>
+            <span>
+              Página {pageNumber + 1} de {page.totalPages}
+            </span>
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={pageNumber + 1 >= page.totalPages}
+              onClick={() => setPageNumber((current) => current + 1)}
+            >
+              Próxima
+            </button>
+          </div>
+        )}
       </section>
 
       {attendanceModal && (
@@ -356,7 +391,6 @@ export function MySpacePage() {
           token={attendanceModal.qr?.token ?? null}
           qrSvg={attendanceModal.qr?.qrSvg ?? null}
           checkedIn={attendanceModal.ticket.attendance?.status === "ATTENDED"}
-          error={attendanceModal.error}
           feedback={attendanceModal.feedback}
           onSubmitToken={
             attendanceModal.mode === "participant"
@@ -364,7 +398,7 @@ export function MySpacePage() {
               : undefined
           }
           onGenerateToken={
-            attendanceModal.mode === "organizer" ? () => void openMyQr(attendanceModal.ticket) : undefined
+            attendanceModal.mode === "participant-ticket" ? () => void openMyQr(attendanceModal.ticket) : undefined
           }
           onClose={() => setAttendanceModal(null)}
         />

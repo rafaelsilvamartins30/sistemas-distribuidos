@@ -6,10 +6,10 @@ Institutional detail screens share a `Perfil` and `Publicações` tab. Communiti
 
 ## Profile publications and feed
 
-- `GET /profiles/{profileType}/{profileId}/posts?term={term}` lists institutional posts for a profile and semester. The active term hides expired posts by default; `includeExpired=true` shows them in the profile history. `POST` on the same route publishes for the authenticated administrator of the profile.
+- `GET /profiles/{profileType}/{profileId}/posts?term={term}` lists the complete institutional post history for a profile and semester, including posts past their display deadline. `POST` on the same route publishes for the authenticated administrator of the profile.
 - The profile type is one of the existing Campus profile classes: University, AcademicUnit, Department, AcademicEntity, or Community. The active semester defaults to `University.current_term`.
 - A post can contain text, image URLs, an external URL, an `availableUntil` timestamp, and optionally a poll. A poll needs a question and at least two option strings. There are no likes or internal applications.
-- `GET /feed?term={term}` returns current, non-expired institutional posts from profiles the authenticated user follows. Posts remain queryable in profile history after `availableUntil`; expiration hides a post from the active-semester view without deleting the stored record. Social responses use author display names without exposing Keycloak subjects.
+- `GET /feed?term={term}` returns current, non-expired institutional posts from profiles the authenticated user follows. Posts remain queryable in profile history after `availableUntil`; expiration hides a post from the followed feed without deleting the stored record. Social responses use author display names without exposing Keycloak subjects.
 - `POST /polls/{pollId}/votes` records one vote per authenticated subject. Campus rejects a second vote and votes after the poll's `closesAt`.
 
 ## Follows and community space
@@ -27,3 +27,8 @@ Institutional detail screens share a `Perfil` and `Publicações` tab. Communiti
 - Request decisions, new posts to followed profiles, community posts, and direct comment/reply recipients create in-app notifications. Profile notifications carry the profile type and ID as their navigation target; community activity opens its Community profile. Notifications are retained in Campus and are not sent through an external messaging service in this change.
 
 The database keeps publication, request, vote, follow, and notification history. Follow removal and post expiry do not delete historical records. No changes are made to Payment, Access, Event Saga, or Engagement ownership.
+
+Poll results are visible only after the caller votes or the poll closes. Campus
+returns null for option `votes` and `totalVotes` while results are hidden.
+GET `/follows` accepts `targetType` and `targetId` together to limit the caller's
+follow list to one profile. The feed's ordering is provided by Campus.

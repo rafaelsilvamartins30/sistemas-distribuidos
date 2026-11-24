@@ -13,6 +13,6 @@ Each semester belongs to the singleton University and contains `id`, `name`, `st
 - `POST /semesters` creates `{ "name", "startOn", "endOn" }`.
 - `PATCH /semesters/:id` updates any of those fields.
 
-Every request requires a valid Keycloak bearer token. Reads are available to authenticated users. Campus checks the University's `administrator_user_ids` against the authenticated `sub` on each create or update; a platform role or client-provided user ID does not authorize the write.
+Every request requires a valid Keycloak bearer token. Reads are available to authenticated users. Only the global account, verified by both the `PLATFORM_ADMIN` role and the Campus profile with registration code `ADMIN-0001`, can create or update semesters. There is no delete endpoint so historical references remain valid.
 
 The Web consumes the catalog through Web BFF and Gateway. It uses semester names in feed and institutional-post filters. Campus preserves the existing `currentTerm` profile field for compatibility; calendar upload and additional term lifecycle rules are out of scope.

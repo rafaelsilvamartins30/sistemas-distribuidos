@@ -7,7 +7,7 @@ require_relative '../support/social_graph_test_support'
 class SocialGraphControllerTest < ActionDispatch::IntegrationTest
   include SocialGraphTestSupport
 
-  test 'following a profile drives its current-term feed and expired posts remain in term history' do
+  test 'following a profile drives its current-term feed and selected term history includes expired posts' do
     university = create_university
     create_post(university, term: '2026/2', body: 'Aviso atual')
     expired = create_post(university, term: '2026/2', body: 'Aviso expirado', available_until: 1.day.ago)
@@ -22,8 +22,7 @@ class SocialGraphControllerTest < ActionDispatch::IntegrationTest
     assert_official_notification('student')
     assert_equal ['Aviso do semestre anterior'], profile_post_bodies('2026/1')
     assert_equal ['Aviso atual', 'Aviso expirado'].sort,
-                 profile_post_bodies('2026/2', include_expired: true).sort
-    assert_rejects_invalid_expiry_filter
+                 profile_post_bodies('2026/2').sort
     assert_not_nil expired.id
     assert_equal [University::SINGLETON_ID], followed_targets('student')
   end
@@ -54,16 +53,8 @@ class SocialGraphControllerTest < ActionDispatch::IntegrationTest
     assert_equal University::SINGLETON_ID, notification.resource_id
   end
 
-  def profile_post_bodies(term, include_expired: false)
-    request_profile_posts(term: term, include_expired: include_expired).map { |item| item.fetch('body') }
-  end
-
-  def assert_rejects_invalid_expiry_filter
-    with_jwks do
-      get "/profiles/UNIVERSITY/#{University::SINGLETON_ID}/posts?term=2026%2F2&includeExpired=perhaps",
-          headers: bearer_headers(subject: 'student')
-    end
-    assert_response :bad_request
+  def profile_post_bodies(term)
+    request_profile_posts(term: term).map { |item| item.fetch('body') }
   end
 
   def followed_targets(subject)

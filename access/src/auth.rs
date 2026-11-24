@@ -58,6 +58,7 @@ impl JwtVerifier {
         let key = DecodingKey::from_jwk(&jwk).map_err(|_| JwtError::Unauthorized)?;
         let mut validation = Validation::new(Algorithm::RS256);
         validation.set_issuer(&[self.issuer.as_str()]);
+        validation.validate_nbf = true;
         // The Gateway validates technical claims; this domain service verifies issuer/signature/expiry
         // and does not impose an audience that the existing Keycloak client contract does not define.
         validation.validate_aud = false;

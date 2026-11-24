@@ -78,4 +78,4 @@ make security
 
 - **Runtimes:** Java 21 + Maven 3.9, Node 22 + pnpm 11.25.0, Ruby 3.4.12 + Bundler, Go 1.27, Rust (`rust-toolchain.toml`), Python 3.12 + `uv`.
 - **CLIs de infra/segurança:** `actionlint`, `gitleaks`, `hadolint`, `osv-scanner` e `kubeconform` (no Linux x86-64 e macOS ARM64, `bash scripts/install-quality-tools.sh "$HOME/.local/bin" all` instala `hadolint`, `osv-scanner` e `kubeconform`).
-- Para apenas **executar a aplicação** via `make k8s-demo` ou `make k8s-clean`, nenhum desses runtimes precisa estar instalado no host — tudo roda em containers no Kubernetes.
+- Para apenas **executar a aplicação** via Kubernetes (`make k8s-demo` / `make k8s-clean`) ou Docker Compose (`make docker-demo` / `make docker-clean`), nenhum desses runtimes precisa estar instalado no host — tudo roda em containers.

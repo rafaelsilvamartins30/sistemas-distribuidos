@@ -1,3 +1,5 @@
+import { parseApiError } from "../utils/apiError.js";
+
 export interface Opportunity {
   id: string;
   title: string;
@@ -10,6 +12,10 @@ export interface Opportunity {
   imageUrl?: string | null;
   createdAt: string;
   status: string;
+  available?: boolean;
+  canManage?: boolean;
+  canClose?: boolean;
+  canReactivate?: boolean;
 }
 
 export interface OpportunityPage {
@@ -53,7 +59,7 @@ export interface CreateOpportunityInput {
   category: string;
   deadline: string | null;
   externalUrl: string;
-  imageUrl: string | null;
+  imageUrl?: string | null;
 }
 
 export interface UpdateOpportunityInput {
@@ -66,11 +72,15 @@ export interface UpdateOpportunityInput {
   imageUrl?: string | null;
   clearImageUrl?: boolean;
   status?: "ACTIVE" | "CLOSED";
+  reactivate?: boolean;
 }
 
 export class OpportunityApiError extends Error {
-  constructor(public readonly status: number) {
-    super(`Gateway respondeu com status ${status}.`);
+  constructor(
+    public readonly status: number,
+    message?: string,
+  ) {
+    super(message ?? `Gateway respondeu com status ${status}.`);
     this.name = "OpportunityApiError";
   }
 }
@@ -91,7 +101,10 @@ async function request<T>(
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  if (!response.ok) throw new OpportunityApiError(response.status);
+  if (!response.ok) {
+    const parsed = await parseApiError(response);
+    throw new OpportunityApiError(response.status, parsed.message);
+  }
   return (await response.json()) as T;
 }
 

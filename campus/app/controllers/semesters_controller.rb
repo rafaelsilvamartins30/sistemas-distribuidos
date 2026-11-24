@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Lists university semesters; only university administrators may create or edit them.
+# Lists university semesters; only the global platform administrator may change them.
 class SemestersController < ApplicationController
   include KeycloakAuthenticated
   include InstitutionalProfileAuthorization
@@ -43,16 +43,6 @@ class SemestersController < ApplicationController
                                starts_on: payload.fetch('startOn', semester.starts_on),
                                ends_on: payload.fetch('endOn', semester.ends_on))
     save_semester(semester)
-  end
-
-  def destroy
-    return unless university_for_admin
-
-    semester = Semester.find_by(id: params[:id])
-    return render_problem(:not_found, 'Semester not found') unless semester
-
-    semester.destroy!
-    head :no_content
   end
 
   private
@@ -106,9 +96,9 @@ class SemestersController < ApplicationController
       render_problem(:not_found, 'University not found')
       return nil
     end
-    return university if university.administrator_user_ids.include?(current_subject)
+    return university if global_platform_admin?
 
-    render_problem(:forbidden, 'University administrator access is required')
+    render_problem(:forbidden, 'Global platform administrator access is required')
     nil
   end
 

@@ -23,9 +23,12 @@ class CommunityConversationsControllerTest < ActionDispatch::IntegrationTest
     follow_community(community, 'follower')
     poll_post = publish_community_poll(community)
     poll = poll_post.fetch('poll')
+    assert_nil poll.fetch('totalVotes')
+    assert(poll.fetch('options').all? { |option| option.fetch('votes').nil? })
 
     cast_poll_vote(poll.fetch('id'), poll.fetch('options').first.fetch('id'), 'follower')
     assert_response :created
+    assert_equal 1, response.parsed_body.fetch('totalVotes')
     cast_poll_vote(poll.fetch('id'), poll.fetch('options').first.fetch('id'), 'follower')
     assert_response :conflict
   end

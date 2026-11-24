@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { useToast } from "../contexts/ToastContext";
 import { getSemesters } from "../services/campus";
-import { campusProfilePath } from "../utils/profileRoutes";
+import { extractErrorMessage } from "../utils/apiError.js";
+import { campusProfilePath, communityCentralPath } from "../utils/profileRoutes";
 import {
   CampusSocialApiError,
   createCommunityComment,
@@ -42,11 +44,7 @@ function initials(value: string): string {
 
 function errorText(error: unknown): string {
   if (error instanceof CampusSocialApiError && error.status === 401) return "Sua sessão expirou. Entre novamente.";
-  if (error instanceof CampusSocialApiError && error.status === 403)
-    return "Siga a comunidade para participar desta conversa.";
-  if (error instanceof CampusSocialApiError && error.status === 409)
-    return "Esta ação já foi realizada ou não está mais disponível.";
-  return "Não foi possível concluir a ação. Tente novamente.";
+  return extractErrorMessage(error, "Não foi possível concluir a ação. Tente novamente.");
 }
 
 type SocialPostKind = "POST" | "POLL";
@@ -168,20 +166,20 @@ export function FollowControl({
   profileId: string;
   onChange?: (following: boolean) => void;
 }) {
+  const toast = useToast();
   const [follow, setFollow] = useState<CampusFollow | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
     try {
-      const { items } = await getFollowedProfiles(token);
-      const current = items.find((item) => item.targetType === type && item.targetId === profileId) ?? null;
+      const { items } = await getFollowedProfiles(token, { targetType: type, targetId: profileId });
+      const current = items[0] ?? null;
       setFollow(current);
       onChange?.(Boolean(current));
-    } catch {
-      setError("Não foi possível consultar quem você segue.");
+    } catch (requestError) {
+      toast.error(extractErrorMessage(requestError, "Não foi possível consultar quem você segue."));
     }
-  }, [onChange, profileId, token, type]);
+  }, [onChange, profileId, token, type, toast]);
 
   useEffect(() => {
     void refresh();
@@ -189,20 +187,21 @@ export function FollowControl({
 
   async function toggle() {
     setBusy(true);
-    setError("");
     try {
       if (follow) {
         const { unfollowProfile } = await import("../services/campusSocial");
         await unfollowProfile(token, follow.id);
         setFollow(null);
         onChange?.(false);
+        toast.info("Você deixou de seguir este perfil.");
       } else {
         const { followProfile } = await import("../services/campusSocial");
         setFollow(await followProfile(token, type, profileId));
         onChange?.(true);
+        toast.success("Agora você está seguindo este perfil.");
       }
     } catch (requestError) {
-      setError(errorText(requestError));
+      toast.error(errorText(requestError));
     } finally {
       setBusy(false);
     }
@@ -217,7 +216,6 @@ export function FollowControl({
       >
         {busy ? "Atualizando…" : follow ? "Seguindo" : "Seguir perfil"}
       </button>
-      {error && <small role="status">{error}</small>}
     </div>
   );
 }
@@ -231,17 +229,16 @@ function PollView({
   token: string;
   onUpdate: (poll: CampusPoll) => void;
 }) {
-  const [error, setError] = useState("");
+  const toast = useToast();
   const [busy, setBusy] = useState(false);
-  const totalVotes = poll.options.reduce((total, option) => total + option.votes, 0);
 
   async function vote(optionId: string) {
     setBusy(true);
-    setError("");
     try {
       onUpdate(await voteOnPoll(token, poll.id, optionId));
+      toast.success("Voto registrado.");
     } catch (requestError) {
-      setError(errorText(requestError));
+      toast.error(errorText(requestError));
     } finally {
       setBusy(false);
     }
@@ -261,15 +258,15 @@ function PollView({
               onClick={() => void vote(option.id)}
             >
               <span>{option.text}</span>
-              {(poll.myVoteOptionId || poll.closed) && <small>{option.votes} votos</small>}
+              {option.votes != null && <small>{option.votes} votos</small>}
             </button>
           );
         })}
       </div>
       <small>
-        {totalVotes} votos{poll.closed ? " · Enquete encerrada" : ""}
+        {poll.totalVotes != null && `${poll.totalVotes} votos`}
+        {poll.closed ? " · Enquete encerrada" : ""}
       </small>
-      {error && <small role="alert">{error}</small>}
     </section>
   );
 }
@@ -297,7 +294,7 @@ function PostCard({
           <div>
             <strong className="social-post-author">{post.authorName}</strong>
             <small className="social-post-community-context">
-              Na comunidade <Link to={profilePath(sourceType, sourceId)}>{source.name}</Link> ·{" "}
+              Na comunidade <Link to={communityCentralPath(sourceId)}>{source.name}</Link> ·{" "}
               {displayDate(post.createdAt)}
             </small>
           </div>
@@ -325,22 +322,24 @@ function PostCard({
   );
 }
 
-export function FollowedFeed({ token }: { token: string }) {
+export function FollowedFeed({ token, viewerName = "Você" }: { token: string; viewerName?: string }) {
+  const toast = useToast();
   const [result, setResult] = useState<CampusPage<FeedPost | CommunitySpacePost> | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError("");
+    setLoadFailed(false);
     try {
       setResult(await getCampusFeed(token));
-    } catch {
-      setError("Não foi possível carregar o mural de quem você segue.");
+    } catch (requestError) {
+      setLoadFailed(true);
+      toast.error(extractErrorMessage(requestError, "Não foi possível carregar o mural de quem você segue."));
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, toast]);
 
   useEffect(() => void load(), [load]);
 
@@ -350,6 +349,20 @@ export function FollowedFeed({ token }: { token: string }) {
         current && {
           ...current,
           items: current.items.map((post) => (post.id === postId ? { ...post, poll } : post)),
+        },
+    );
+  }
+
+  function updateCommentCount(postId: string) {
+    setResult(
+      (current) =>
+        current && {
+          ...current,
+          items: current.items.map((post) =>
+            post.id === postId && post.postType === "COMMUNITY_SPACE"
+              ? { ...post, commentsCount: post.commentsCount + 1 }
+              : post,
+          ),
         },
     );
   }
@@ -367,17 +380,23 @@ export function FollowedFeed({ token }: { token: string }) {
         <p className="notice" role="status">
           Carregando publicações…
         </p>
-      ) : error ? (
-        <p className="notice notice-error" role="alert">
-          {error}
-        </p>
-      ) : result?.items.length ? (
+      ) : !loadFailed && result?.items.length ? (
         <div className="campus-social-list">
-          {[...result.items]
-            .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
-            .map((post) => (
+          {result.items.map((post) =>
+            post.postType === "COMMUNITY_SPACE" ? (
+              <div className="campus-community-post" key={post.id}>
+                <PostCard post={post} token={token} onPollUpdate={(poll) => updatePoll(post.id, poll)} />
+                <CommunityPostThread
+                  token={token}
+                  post={post}
+                  viewerName={viewerName}
+                  onChanged={() => updateCommentCount(post.id)}
+                />
+              </div>
+            ) : (
               <PostCard key={post.id} post={post} token={token} onPollUpdate={(poll) => updatePoll(post.id, poll)} />
-            ))}
+            ),
+          )}
         </div>
       ) : (
         <div className="empty-state">
@@ -407,13 +426,12 @@ export function InstitutionalPostsPanel({
   currentTerm: string;
   canManage: boolean;
 }) {
+  const toast = useToast();
   const semesterNames = useSemesterNames(token, currentTerm);
   const [term, setTerm] = useState(currentTerm);
   const [draftTerm, setDraftTerm] = useState(currentTerm);
-  const [includeExpired, setIncludeExpired] = useState(false);
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [body, setBody] = useState("");
   const [availableUntil, setAvailableUntil] = useState("");
   const [pollQuestion, setPollQuestion] = useState("");
@@ -430,15 +448,14 @@ export function InstitutionalPostsPanel({
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError("");
     try {
-      setPosts((await getInstitutionalPosts(token, type, profileId, term, 0, 20, includeExpired)).items);
-    } catch {
-      setError("Não foi possível carregar as publicações deste perfil.");
+      setPosts((await getInstitutionalPosts(token, type, profileId, term, 0, 20)).items);
+    } catch (requestError) {
+      toast.error(extractErrorMessage(requestError, "Não foi possível carregar as publicações deste perfil."));
     } finally {
       setLoading(false);
     }
-  }, [includeExpired, profileId, term, token, type]);
+  }, [profileId, term, token, type, toast]);
 
   useEffect(() => void load(), [load]);
 
@@ -449,12 +466,11 @@ export function InstitutionalPostsPanel({
       .map((option) => option.trim())
       .filter(Boolean);
     if (postKind === "POLL" && (!pollQuestion.trim() || options.length < 2)) {
-      setError("Inclua pelo menos duas opções para publicar uma enquete.");
+      toast.error("Inclua pelo menos duas opções para publicar uma enquete.");
       return;
     }
     if (postKind === "POST" && !body.trim()) return;
     setPublishing(true);
-    setError("");
     try {
       await createInstitutionalPost(token, type, profileId, {
         body: body.trim(),
@@ -468,9 +484,10 @@ export function InstitutionalPostsPanel({
       setAvailableUntil("");
       setPostKind("POST");
       setComposerOpen(false);
+      toast.success("Publicação criada com sucesso.");
       await load();
     } catch (requestError) {
-      setError(errorText(requestError));
+      toast.error(errorText(requestError));
     } finally {
       setPublishing(false);
     }
@@ -512,17 +529,12 @@ export function InstitutionalPostsPanel({
           </label>
         </div>
       </header>
-      <label className="campus-history-toggle">
-        <input type="checkbox" checked={includeExpired} onChange={(event) => setIncludeExpired(event.target.checked)} />
-        Incluir publicações com prazo encerrado
-      </label>
       {canManage && (
         <>
           <button
             className="social-composer-trigger"
             type="button"
             onClick={() => {
-              setError("");
               setComposerOpen(true);
             }}
           >
@@ -544,7 +556,6 @@ export function InstitutionalPostsPanel({
                 value={postKind}
                 onChange={(next) => {
                   setPostKind(next);
-                  setError("");
                 }}
               />
               {postKind === "POST" ? (
@@ -601,11 +612,6 @@ export function InstitutionalPostsPanel({
                   onChange={(event) => setAvailableUntil(event.target.value)}
                 />
               </label>
-              {error && (
-                <p className="notice notice-error" role="alert">
-                  {error}
-                </p>
-              )}
               <div className="social-composer-actions">
                 <button className="button button-secondary" type="button" onClick={() => setComposerOpen(false)}>
                   Cancelar
@@ -621,11 +627,6 @@ export function InstitutionalPostsPanel({
             </form>
           </SocialDialog>
         </>
-      )}
-      {error && !composerOpen && (
-        <p className="notice notice-error" role="alert">
-          {error}
-        </p>
       )}
       {loading ? (
         <p className="notice" role="status">
@@ -657,11 +658,11 @@ function CommunityPostThread({
   viewerName: string;
   onChanged: () => void;
 }) {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [comments, setComments] = useState<CampusComment[]>([]);
   const [body, setBody] = useState("");
   const [replyTo, setReplyTo] = useState<CampusComment | null>(null);
-  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [commentsLoading, setCommentsLoading] = useState(false);
 
@@ -669,9 +670,8 @@ function CommunityPostThread({
     setCommentsLoading(true);
     try {
       setComments((await getCommunityComments(token, post.id)).items);
-      setError("");
     } catch (requestError) {
-      setError(errorText(requestError));
+      toast.error(errorText(requestError));
     } finally {
       setCommentsLoading(false);
     }
@@ -681,7 +681,6 @@ function CommunityPostThread({
     event.preventDefault();
     if (!body.trim()) return;
     setBusy(true);
-    setError("");
     try {
       await createCommunityComment(token, post.id, body.trim(), replyTo?.id);
       setBody("");
@@ -689,7 +688,7 @@ function CommunityPostThread({
       await loadComments();
       onChanged();
     } catch (requestError) {
-      setError(errorText(requestError));
+      toast.error(errorText(requestError));
     } finally {
       setBusy(false);
     }
@@ -734,7 +733,7 @@ function CommunityPostThread({
                 </div>
               </article>
             ))}
-            {!commentsLoading && comments.length === 0 && !error && (
+            {!commentsLoading && comments.length === 0 && (
               <p className="social-comment-loading">Seja a primeira pessoa a comentar.</p>
             )}
           </div>
@@ -763,11 +762,6 @@ function CommunityPostThread({
               </button>
             </div>
           </form>
-          {error && (
-            <p className="notice notice-error" role="alert">
-              {error}
-            </p>
-          )}
         </div>
       )}
     </div>
@@ -787,6 +781,7 @@ export function CommunitySpacePanel({
   viewerName?: string;
   following: boolean;
 }) {
+  const toast = useToast();
   const [posts, setPosts] = useState<CommunitySpacePost[]>([]);
   const [body, setBody] = useState("");
   const [availableUntil, setAvailableUntil] = useState("");
@@ -794,7 +789,6 @@ export function CommunitySpacePanel({
   const [pollOptions, setPollOptions] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
   const [composerOpen, setComposerOpen] = useState(false);
   const [postKind, setPostKind] = useState<SocialPostKind>("POST");
@@ -803,13 +797,12 @@ export function CommunitySpacePanel({
     setLoading(true);
     try {
       setPosts((await getCommunityPosts(token, communityId)).items);
-      setError("");
     } catch (requestError) {
-      setError(errorText(requestError));
+      toast.error(errorText(requestError));
     } finally {
       setLoading(false);
     }
-  }, [communityId, token]);
+  }, [communityId, token, toast]);
   useEffect(() => {
     if (reload >= 0) void load();
   }, [load, reload]);
@@ -821,12 +814,11 @@ export function CommunitySpacePanel({
       .map((option) => option.trim())
       .filter(Boolean);
     if (postKind === "POLL" && (!pollQuestion.trim() || options.length < 2)) {
-      setError("Inclua pelo menos duas opções para publicar uma enquete.");
+      toast.error("Inclua pelo menos duas opções para publicar uma enquete.");
       return;
     }
     if (postKind === "POST" && !body.trim()) return;
     setBusy(true);
-    setError("");
     try {
       await createCommunityPost(token, communityId, {
         body: body.trim(),
@@ -839,9 +831,10 @@ export function CommunitySpacePanel({
       setPollOptions("");
       setPostKind("POST");
       setComposerOpen(false);
+      toast.success("Publicação criada na comunidade.");
       setReload((value) => value + 1);
     } catch (requestError) {
-      setError(errorText(requestError));
+      toast.error(errorText(requestError));
     } finally {
       setBusy(false);
     }
@@ -866,7 +859,6 @@ export function CommunitySpacePanel({
             className="social-composer-trigger"
             type="button"
             onClick={() => {
-              setError("");
               setComposerOpen(true);
             }}
           >
@@ -888,7 +880,6 @@ export function CommunitySpacePanel({
                 value={postKind}
                 onChange={(next) => {
                   setPostKind(next);
-                  setError("");
                 }}
               />
               {postKind === "POST" ? (
@@ -945,11 +936,6 @@ export function CommunitySpacePanel({
                   onChange={(event) => setAvailableUntil(event.target.value)}
                 />
               </label>
-              {error && (
-                <p className="notice notice-error" role="alert">
-                  {error}
-                </p>
-              )}
               <div className="social-composer-actions">
                 <button className="button button-secondary" type="button" onClick={() => setComposerOpen(false)}>
                   Cancelar
@@ -967,11 +953,6 @@ export function CommunitySpacePanel({
         </>
       ) : (
         <p className="notice">Siga esta comunidade para publicar, comentar e responder.</p>
-      )}
-      {error && !composerOpen && (
-        <p className="notice notice-error" role="alert">
-          {error}
-        </p>
       )}
       {loading ? (
         <p className="notice" role="status">

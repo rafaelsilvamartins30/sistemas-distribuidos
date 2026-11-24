@@ -50,6 +50,30 @@ class OpportunityPublishersControllerTest < ActionDispatch::IntegrationTest
     assert_equal [department.id, entity.id], publisher_ids
   end
 
+  test 'global administrator can publish for older departments and entities without listed access' do
+    department = create_department(administrators: [])
+    entity = AcademicEntity.create!(
+      name: 'Laboratório legado',
+      description: 'Pesquisa em sistemas.',
+      general_info_markdown: 'Informações do laboratório.',
+      entity_type: 'RESEARCH_LAB',
+      department: department,
+      links: [],
+      administrator_user_ids: []
+    )
+    create_profile(subject: 'global-admin-sub', institutional_id: 'ADMIN-0001')
+
+    with_jwks do
+      get '/internal/v1/opportunity-publishers',
+          headers: bearer_headers(subject: 'global-admin-sub', roles: ['PLATFORM_ADMIN'])
+    end
+
+    assert_response :success
+    contexts = response.parsed_body.fetch('items')
+    assert_equal %w[DEPARTMENT ACADEMIC_ENTITY], contexts.pluck('publisherType')
+    assert_equal [department.id, entity.id], contexts.pluck('publisherId')
+  end
+
   private
 
   def request_contexts(subject)

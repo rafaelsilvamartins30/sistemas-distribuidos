@@ -6,12 +6,13 @@ require_relative '../support/keycloak_jwt_test_helpers'
 class SemestersControllerTest < ActionDispatch::IntegrationTest
   include KeycloakJwtTestHelpers
 
-  test 'university administrators create and edit semester date ranges' do
-    university = create_university(administrators: [KeycloakJwtTestHelpers::SUBJECT])
+  test 'global administrator creates and edits semester date ranges' do
+    create_global_admin_profile
+    university = create_university(administrators: [])
 
     with_jwks do
       post '/semesters', params: { name: '2026/2', startOn: '2026-08-01', endOn: '2026-12-20' },
-                         headers: bearer_headers, as: :json
+                         headers: global_admin_headers, as: :json
     end
 
     assert_response :created
@@ -20,7 +21,7 @@ class SemestersControllerTest < ActionDispatch::IntegrationTest
     assert_equal '2026-08-01', response.parsed_body.fetch('startOn')
 
     with_jwks do
-      patch "/semesters/#{semester_id}", params: { endOn: '2026-12-22' }, headers: bearer_headers, as: :json
+      patch "/semesters/#{semester_id}", params: { endOn: '2026-12-22' }, headers: global_admin_headers, as: :json
     end
 
     assert_response :success
@@ -33,21 +34,29 @@ class SemestersControllerTest < ActionDispatch::IntegrationTest
     assert_equal(['2026/2'], response.parsed_body.fetch('items').map { |item| item.fetch('name') })
   end
 
-  test 'semester writes require the university administrator subject and validate the simple name and dates' do
+  test 'platform role alone and contextual university admins cannot manage semesters' do
+    create_global_admin_profile
     create_university(administrators: ['university-admin'])
 
     with_jwks do
       post '/semesters', params: { name: '2026/2', startOn: '2026-08-01', endOn: '2026-12-20' },
-                         headers: bearer_headers(subject: KeycloakJwtTestHelpers::SUBJECT, roles: ['PLATFORM_ADMIN']),
+                         headers: bearer_headers(subject: 'platform-only', roles: ['PLATFORM_ADMIN']),
                          as: :json
     end
     assert_response :forbidden
 
     with_jwks do
       post '/semesters', params: { name: '2026-3', startOn: '2026-12-20', endOn: '2026-08-01' },
-                         headers: bearer_headers(subject: 'university-admin'), as: :json
+                         headers: bearer_headers(subject: 'global-admin-sub', roles: ['PLATFORM_ADMIN']), as: :json
     end
     assert_response :unprocessable_entity
+    assert_empty Semester.all
+
+    with_jwks do
+      post '/semesters', params: { name: '2026/2', startOn: '2026-08-01', endOn: '2026-12-20' },
+                         headers: bearer_headers(subject: 'university-admin'), as: :json
+    end
+    assert_response :forbidden
     assert_empty Semester.all
   end
 
@@ -57,5 +66,13 @@ class SemestersControllerTest < ActionDispatch::IntegrationTest
     University.create!(id: University::SINGLETON_ID, name: 'Universidade de Teste', acronym: 'UT',
                        description: 'Descrição.', general_info_markdown: 'Informações.', current_term: '2026/2',
                        links: [], administrator_user_ids: administrators)
+  end
+
+  def create_global_admin_profile
+    create_profile(subject: 'global-admin-sub', institutional_id: 'ADMIN-0001')
+  end
+
+  def global_admin_headers
+    bearer_headers(subject: 'global-admin-sub', roles: ['PLATFORM_ADMIN'])
   end
 end

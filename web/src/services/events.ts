@@ -1,3 +1,5 @@
+import { parseApiError } from "../utils/apiError.js";
+
 export type EventStatus = "ACTIVE" | "CANCELLED";
 export type RegistrationMode = "INTERNAL_FREE" | "INTERNAL_PAID" | "EXTERNAL_PAID";
 export type AttendanceMode = "PARTICIPANT_SCANS_EVENT" | "ORGANIZER_SCANS_PARTICIPANT";
@@ -26,6 +28,9 @@ export interface Event {
   attendanceMode?: AttendanceMode | null;
   status: EventStatus;
   createdAt: string;
+  viewerCanManage?: boolean;
+  registrationBlockedReason?: string | null;
+  _links?: Partial<Record<"update" | "cancel", { href: string; method: string }>>;
 }
 
 export interface EventPage {
@@ -40,6 +45,7 @@ export interface EventOrganizerContext {
   organizerType: OrganizerType;
   organizerId: string;
   name: string;
+  paidRegistrationMode: Exclude<RegistrationMode, "INTERNAL_FREE">;
 }
 
 export interface CreateEventInput {
@@ -82,13 +88,13 @@ export interface UpdateEventInput {
   attendanceMode?: AttendanceMode | null;
 }
 
-export function isExternalPaidOrganizer(organizerType: string): boolean {
-  return organizerType === "COMMUNITY" || organizerType === "ACADEMIC_ENTITY";
-}
-
 export class EventApiError extends Error {
-  constructor(public readonly status: number) {
-    super(`Gateway respondeu com status ${status}.`);
+  constructor(
+    public readonly status: number,
+    public readonly code?: string,
+    message?: string,
+  ) {
+    super(message ?? `Gateway respondeu com status ${status}.`);
     this.name = "EventApiError";
   }
 }
@@ -109,7 +115,10 @@ async function request<T>(
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  if (!response.ok) throw new EventApiError(response.status);
+  if (!response.ok) {
+    const parsed = await parseApiError(response);
+    throw new EventApiError(response.status, parsed.code, parsed.message);
+  }
   return (await response.json()) as T;
 }
 

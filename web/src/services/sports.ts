@@ -1,3 +1,5 @@
+import { parseApiError } from "../utils/apiError.js";
+
 export interface Page<T> {
   items: T[];
   page: number;
@@ -34,11 +36,9 @@ export interface Competition {
   targetTeamCount: number;
   rosterMin: number;
   rosterMax: number;
-  tieBreakers: string[];
   teamEntryPrice: number;
   freeAgentPrice: number;
   registrationDeadline: string;
-  drawSeed: number | null;
   status: string | null;
   format: string;
 }
@@ -54,7 +54,6 @@ export interface Season {
   targetTeamCount: number;
   rosterMin: number;
   rosterMax: number;
-  tieBreakers: string[];
   teamEntryPrice: number;
   freeAgentPrice: number;
   registrationDeadline: string;
@@ -63,12 +62,6 @@ export interface Season {
 }
 
 export type SportsContextType = "COMPETITION" | "SEASON";
-
-export interface SportsOrganizerContext {
-  organizerType: string;
-  organizerId: string;
-  name: string;
-}
 
 export interface SportsTeamMember {
   id: string;
@@ -88,6 +81,7 @@ export interface SportsTeam {
   inviteExpiresAt?: string | null;
   reservedPlayerCount?: number | null;
   inviteActive?: boolean;
+  placeholder?: boolean;
   members: SportsTeamMember[];
 }
 
@@ -109,6 +103,7 @@ export interface SportsFreeAgentRegistrationResult {
 export interface SportsMatch {
   id: string;
   roundNumber: number;
+  roundLabel?: string;
   homeTeamId: string;
   homeTeamName: string;
   awayTeamId: string;
@@ -123,7 +118,26 @@ export interface SportsMatch {
   checkinCount: number;
   viewerCheckedIn: boolean;
   hasCheckinToken: boolean;
+  viewerCanCheckIn?: boolean;
   checkinToken: string | null;
+}
+
+export interface SportsStandingGroup {
+  groupName: string;
+  rows: {
+    teamId: string;
+    teamName: string;
+    rank: number;
+    played: number;
+    wins: number;
+    draws: number;
+    losses: number;
+    goalsFor: number;
+    goalsAgainst: number;
+    goalDiff: number;
+    points: number;
+    qualified: boolean;
+  }[];
 }
 
 export interface SportsEventOverview {
@@ -140,16 +154,27 @@ export interface SportsEventOverview {
   freeAgentPrice: number;
   registrationDeadline: string;
   formatOrMode: string;
-  tieBreakers: string[];
   status: string | null;
   sport: Sport;
   teams: SportsTeam[];
   freeAgents: SportsFreeAgent[];
   matches: SportsMatch[];
+  standings: SportsStandingGroup[];
+  knockoutTies?: {
+    round: number;
+    firstMatchId: string;
+    secondMatchId: string | null;
+    homeAggregate: number;
+    awayAggregate: number;
+    winnerTeamId: string | null;
+  }[];
+  phase: "INSCRICAO" | "ROLANDO" | "FINALIZADO" | "CANCELADO";
+  championTeamId: string | null;
   viewerCanManage: boolean;
   viewerTeamId: string | null;
   viewerFreeAgentQueued: boolean;
   viewerPendingPayment: boolean;
+  viewerCanEnroll?: boolean;
 }
 
 export interface MySportsEnrollment {
@@ -161,6 +186,7 @@ export interface MySportsEnrollment {
   enrollmentRole: "TEAM" | "FREE_AGENT_QUEUED";
   teamName: string | null;
   registrationDeadline: string;
+  firstMatchAt?: string | null;
 }
 
 export interface MySportsMatch {
@@ -184,60 +210,15 @@ export interface MySportsMatch {
   viewerCheckedIn: boolean;
 }
 
-export interface CreateSportPayload {
-  name: string;
-  playersOnField: number;
-  minimumRoster: number;
-  maximumRoster: number;
-  allowsDraw: boolean;
-  winPoints: number;
-  drawPoints: number;
-  lossPoints: number;
-  defaultForfeitScore: number;
-  rulesMarkdown: string;
-  createdByType: string;
-  createdById: string;
-}
-
-export interface CreateCompetitionPayload {
-  title: string;
-  sportId: string;
-  skillLevel: "COMPETITIVE" | "RECREATIONAL";
-  organizerType: string;
-  organizerId: string;
-  targetTeamCount: 16 | 32;
-  rosterMin?: number;
-  rosterMax?: number;
-  tieBreakers?: string[];
-  teamEntryPrice: number;
-  freeAgentPrice: number;
-  registrationDeadline: string;
-}
-
-export interface CreateSeasonPayload {
-  title: string;
-  sportId: string;
-  skillLevel: "COMPETITIVE" | "RECREATIONAL";
-  organizerType: string;
-  organizerId: string;
-  targetTeamCount: 10 | 20;
-  rosterMin?: number;
-  rosterMax?: number;
-  tieBreakers?: string[];
-  teamEntryPrice: number;
-  freeAgentPrice: number;
-  registrationDeadline: string;
-}
-
 export interface SportsFilters {
-  page?: number;
-  size?: number;
   q?: string;
   sportId?: string;
   skillLevel?: string;
   organizerType?: string;
   organizerId?: string;
   targetTeamCount?: number;
+  page?: number;
+  size?: number;
 }
 
 export class SportsApiError extends Error {
@@ -280,14 +261,8 @@ async function request<T>(
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
   if (!response.ok) {
-    let message: string | undefined;
-    try {
-      const payload = (await response.json()) as { message?: string; detail?: string; error?: string };
-      message = payload.message ?? payload.detail ?? payload.error;
-    } catch {
-      // Ignore non-JSON error bodies
-    }
-    throw new SportsApiError(response.status, message);
+    const parsed = await parseApiError(response);
+    throw new SportsApiError(response.status, parsed.message);
   }
   return (await response.json()) as T;
 }
@@ -314,28 +289,6 @@ export function getSport(
   return request<Sport>(`/api/v1/web/sports/${encodeURIComponent(id)}`, token, gatewayUrl(baseUrl), fetchImpl);
 }
 
-export function getSportsOrganizerContexts(
-  token: string,
-  baseUrl?: string,
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<{ items: SportsOrganizerContext[] }> {
-  return request<{ items: SportsOrganizerContext[] }>(
-    "/api/v1/web/sports/organizer-contexts",
-    token,
-    gatewayUrl(baseUrl),
-    fetchImpl,
-  );
-}
-
-export function createSport(
-  token: string,
-  payload: CreateSportPayload,
-  baseUrl?: string,
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<Sport> {
-  return request<Sport>("/api/v1/web/sports", token, gatewayUrl(baseUrl), fetchImpl, "POST", payload);
-}
-
 export function getCompetitions(
   token: string,
   filters: SportsFilters = {},
@@ -348,15 +301,6 @@ export function getCompetitions(
     gatewayUrl(baseUrl),
     fetchImpl,
   );
-}
-
-export function createCompetition(
-  token: string,
-  payload: CreateCompetitionPayload,
-  baseUrl?: string,
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<Competition> {
-  return request<Competition>("/api/v1/web/competitions", token, gatewayUrl(baseUrl), fetchImpl, "POST", payload);
 }
 
 export function getCompetition(
@@ -380,15 +324,6 @@ export function getSeasons(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<Page<Season>> {
   return request<Page<Season>>(`/api/v1/web/seasons?${queryString(filters)}`, token, gatewayUrl(baseUrl), fetchImpl);
-}
-
-export function createSeason(
-  token: string,
-  payload: CreateSeasonPayload,
-  baseUrl?: string,
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<Season> {
-  return request<Season>("/api/v1/web/seasons", token, gatewayUrl(baseUrl), fetchImpl, "POST", payload);
 }
 
 export function getSeason(
@@ -469,62 +404,6 @@ export function registerSportsFreeAgent(
   );
 }
 
-export function generateSportsMatches(
-  token: string,
-  contextType: SportsContextType,
-  contextId: string,
-  payload: { firstMatchAt?: string; location?: string } = {},
-  baseUrl?: string,
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<SportsMatch[]> {
-  return request<SportsMatch[]>(
-    `/api/v1/web/sports-events/${encodeURIComponent(contextType)}/${encodeURIComponent(contextId)}/matches/generate`,
-    token,
-    gatewayUrl(baseUrl),
-    fetchImpl,
-    "POST",
-    payload,
-  );
-}
-
-export function recordSportsMatchScore(
-  token: string,
-  matchId: string,
-  payload: {
-    homeScore: number;
-    awayScore: number;
-    homePenaltyScore?: number | null;
-    awayPenaltyScore?: number | null;
-  },
-  baseUrl?: string,
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<SportsMatch> {
-  return request<SportsMatch>(
-    `/api/v1/web/sports-matches/${encodeURIComponent(matchId)}/score`,
-    token,
-    gatewayUrl(baseUrl),
-    fetchImpl,
-    "PATCH",
-    payload,
-  );
-}
-
-export function generateSportsMatchCheckInToken(
-  token: string,
-  matchId: string,
-  baseUrl?: string,
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<{ matchId: string; checkinToken: string }> {
-  return request<{ matchId: string; checkinToken: string }>(
-    `/api/v1/web/sports-matches/${encodeURIComponent(matchId)}/checkin-token`,
-    token,
-    gatewayUrl(baseUrl),
-    fetchImpl,
-    "POST",
-    {},
-  );
-}
-
 export function checkInSportsMatch(
   token: string,
   matchId: string,
@@ -560,47 +439,5 @@ export function getMySportsEnrollments(
     token,
     gatewayUrl(baseUrl),
     fetchImpl,
-  );
-}
-
-export function updateSportsEventDeadline(
-  token: string,
-  contextType: SportsContextType,
-  contextId: string,
-  registrationDeadline: string,
-  baseUrl?: string,
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<{ contextType: string; contextId: string; registrationDeadline: string; status: string }> {
-  return request<{ contextType: string; contextId: string; registrationDeadline: string; status: string }>(
-    `/api/v1/web/sports-events/${encodeURIComponent(contextType)}/${encodeURIComponent(contextId)}`,
-    token,
-    gatewayUrl(baseUrl),
-    fetchImpl,
-    "PATCH",
-    { registrationDeadline },
-  );
-}
-
-export function cancelSportsEvent(
-  token: string,
-  contextType: SportsContextType,
-  contextId: string,
-  baseUrl?: string,
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<{
-  contextType: string;
-  contextId: string;
-  status: string;
-  cancelledTeams: number;
-  cancelledFreeAgents: number;
-  refundsRequested: number;
-}> {
-  return request(
-    `/api/v1/web/sports-events/${encodeURIComponent(contextType)}/${encodeURIComponent(contextId)}/cancel`,
-    token,
-    gatewayUrl(baseUrl),
-    fetchImpl,
-    "POST",
-    {},
   );
 }

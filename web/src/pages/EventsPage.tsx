@@ -1,19 +1,30 @@
+import { formatBrl } from "../utils/currency.js";
+import { RegistrationRefundPolicy } from "../components/RegistrationRefundPolicy";
+import { RegistrationPaymentNotice } from "../components/RegistrationPaymentNotice";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { EventCard } from "../components/EventCard";
 import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
+import { PaymentCheckoutModal } from "../components/PaymentCheckoutModal";
 import { Section } from "../components/Section";
-import { ParticipantQrScanner } from "../components/ParticipantQrScanner";
 import { SearchField } from "../components/SearchField";
 import { UniversalAttendanceModal } from "../components/UniversalAttendanceModal";
+import { useToast } from "../contexts/ToastContext";
+import { findPendingPaymentCharge, type PaymentCharge } from "../services/payments.js";
+import { extractErrorMessage } from "../utils/apiError.js";
 import {
   AttendanceApiError,
   checkInWithEventQr,
   confirmOrganizerCheckIn,
   getMyAttendance,
+  getOrganizerAttendanceAction,
+  type OrganizerAttendanceAction,
   issueEventAttendanceQr,
+  reviewEventAttendance,
+  type EventAttendanceReview,
+  issueMyTicketQr,
   previewOrganizerCheckIn,
   type MyAttendance,
   type OrganizerCheckInPreview,
@@ -27,7 +38,6 @@ import {
   getEventOrganizerContexts,
   getEvents,
   getManagedEvents,
-  isExternalPaidOrganizer,
   updateEvent,
   type AttendanceMode,
   type Event,
@@ -36,7 +46,7 @@ import {
 } from "../services/events";
 import {
   cancelRegistration,
-  getMyRegistrations,
+  getMyEventRegistration,
   registerForEvent,
   RegistrationApiError,
   type Registration,
@@ -80,16 +90,44 @@ function registrationModeLabel(event: Event): string {
 function priceLabel(event: Event): string {
   if (event.registrationMode === "INTERNAL_FREE") return "Gratuito";
   if (event.price == null) return "Valor no link externo";
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(event.price / 100);
+  return formatBrl(event.price);
 }
 
-function canCancel(registration: Registration): boolean {
-  return Date.now() <= new Date(registration.event.startsAt).getTime() - 24 * 60 * 60 * 1000;
+function eventFormError(error: unknown, fallback: string): string {
+  if (!(error instanceof EventApiError)) return extractErrorMessage(error, fallback);
+  switch (error.code) {
+    case "EVENT_END_NOT_AFTER_START":
+      return "O término deve ser depois do início do evento.";
+    case "EVENT_DEADLINE_AFTER_END":
+      return "O prazo de inscrição deve terminar até o fim do evento.";
+    case "EVENT_DEADLINE_NOT_FUTURE":
+      return "Escolha um prazo de inscrição no futuro.";
+    case "EVENT_INVALID_CAPACITY":
+      return "Informe uma capacidade maior que zero ou deixe o campo vazio.";
+    case "EVENT_UNSUPPORTED_PAID_MODE":
+      return "A modalidade de pagamento mudou. Reabra o formulário para atualizar as opções.";
+    case "EVENT_PAID_PRICE_REQUIRED":
+      return "Informe um valor maior que zero para a inscrição paga por Pix.";
+    case "EVENT_NEGATIVE_PRICE":
+      return "Informe um valor igual ou maior que zero.";
+    case "EVENT_EXTERNAL_URL_REQUIRED":
+      return "Informe um link de inscrição válido, começando com http:// ou https://.";
+    default:
+      return error.status === 403
+        ? "Você não tem permissão para gerenciar este evento."
+        : extractErrorMessage(error, fallback);
+  }
 }
 
 function registrationErrorMessage(error: unknown): string {
-  if (!(error instanceof RegistrationApiError)) return "Não foi possível concluir a operação. Tente novamente.";
+  if (!(error instanceof RegistrationApiError)) {
+    return extractErrorMessage(error, "Não foi possível concluir a operação. Tente novamente.");
+  }
   switch (error.detail) {
+    case "EVENT_UNAVAILABLE":
+      return "As inscrições estão temporariamente indisponíveis.";
+    case "EVENT_PRICE_NOT_CONFIGURED":
+      return "O valor da inscrição ainda não está disponível.";
     case "EVENT_FULL":
       return "As vagas deste evento já foram preenchidas.";
     case "ALREADY_REGISTERED":
@@ -100,15 +138,18 @@ function registrationErrorMessage(error: unknown): string {
       return "O prazo de inscrição deste evento terminou.";
     case "CANCELLATION_WINDOW_CLOSED":
       return "O cancelamento só pode ser feito até 24 horas antes do evento.";
+    case "ONLY_FREE_REGISTRATIONS_CAN_BE_CANCELLED":
+      return "Inscrições pagas só são estornadas se a organização cancelar o evento.";
     case "REGISTRATION_NOT_ACTIVE":
       return "Esta inscrição não está mais ativa.";
     default:
-      return `Não foi possível concluir a operação (${error.status}).`;
+      return extractErrorMessage(error, `Não foi possível concluir a operação (${error.status}).`);
   }
 }
 
 export function EventsPage() {
   const { keycloak } = useOutletContext<WebContext>();
+  const toast = useToast();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -135,11 +176,9 @@ export function EventsPage() {
   const [isPaid, setIsPaid] = useState(false);
   const [priceBrl, setPriceBrl] = useState("");
   const [externalUrl, setExternalUrl] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
   const [attendanceEnabled, setAttendanceEnabled] = useState(true);
   const [attendanceMode, setAttendanceMode] = useState<AttendanceMode>("PARTICIPANT_SCANS_EVENT");
   const [submitting, setSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState("");
 
   const [editingEvent, setEditingEvent] = useState<Event | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -152,7 +191,6 @@ export function EventsPage() {
   const [editCapacity, setEditCapacity] = useState("");
   const [editPriceBrl, setEditPriceBrl] = useState("");
   const [editExternalUrl, setEditExternalUrl] = useState("");
-  const [editImageUrl, setEditImageUrl] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -165,8 +203,11 @@ export function EventsPage() {
         if (!keycloak.token) throw new Error("Token indisponível.");
         const page = await getEvents(keycloak.token);
         if (active) setEvents(page.items);
-      } catch {
-        if (active) setError(true);
+      } catch (err) {
+        if (active) {
+          setError(true);
+          toast.error(extractErrorMessage(err, "Não foi possível carregar os eventos."));
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -176,7 +217,7 @@ export function EventsPage() {
     return () => {
       active = false;
     };
-  }, [keycloak, reloadCount]);
+  }, [keycloak, reloadCount, toast]);
 
   useEffect(() => {
     let active = true;
@@ -250,22 +291,17 @@ export function EventsPage() {
   }, [keycloak, reloadCount]);
 
   const selectedOrganizer = organizerContexts.find((ctx) => `${ctx.organizerType}:${ctx.organizerId}` === organizerKey);
-  const externalPaidMode = selectedOrganizer ? isExternalPaidOrganizer(selectedOrganizer.organizerType) : false;
+  const externalPaidMode = selectedOrganizer?.paidRegistrationMode === "EXTERNAL_PAID";
 
   async function handleCreateEvent(formEvent: FormEvent<HTMLFormElement>) {
     formEvent.preventDefault();
     if (!selectedOrganizer) return;
     setSubmitting(true);
-    setFeedback("");
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token indisponível.");
 
-      const registrationMode: RegistrationMode = !isPaid
-        ? "INTERNAL_FREE"
-        : externalPaidMode
-          ? "EXTERNAL_PAID"
-          : "INTERNAL_PAID";
+      const registrationMode: RegistrationMode = isPaid ? selectedOrganizer.paidRegistrationMode : "INTERNAL_FREE";
 
       const parsedPriceMinor = isPaid && priceBrl.trim() ? Math.round(Number(priceBrl.replace(",", ".")) * 100) : null;
 
@@ -283,12 +319,11 @@ export function EventsPage() {
         registrationMode,
         price: isPaid ? parsedPriceMinor : null,
         externalUrl: registrationMode === "EXTERNAL_PAID" ? externalUrl.trim() : null,
-        imageUrl: imageUrl.trim() || null,
         attendanceEnabled: registrationMode !== "EXTERNAL_PAID" && attendanceEnabled,
         attendanceMode: registrationMode !== "EXTERNAL_PAID" && attendanceEnabled ? attendanceMode : null,
       });
 
-      setFeedback("Evento criado e publicado na programação.");
+      toast.success("Evento criado e publicado na programação.");
       setTitle("");
       setDescription("");
       setLocation("");
@@ -298,11 +333,10 @@ export function EventsPage() {
       setCapacity("");
       setPriceBrl("");
       setExternalUrl("");
-      setImageUrl("");
       setCreateOpen(false);
       setReloadCount((value) => value + 1);
-    } catch {
-      setFeedback("Não foi possível criar o evento. Confira as datas, o valor/link e seus acessos.");
+    } catch (error) {
+      toast.error(eventFormError(error, "Não foi possível criar o evento. Tente novamente."));
     } finally {
       setSubmitting(false);
     }
@@ -320,15 +354,12 @@ export function EventsPage() {
     setEditCapacity(item.capacity != null ? String(item.capacity) : "");
     setEditPriceBrl(item.price != null ? (item.price / 100).toFixed(2) : "");
     setEditExternalUrl(item.externalUrl ?? "");
-    setEditImageUrl(item.imageUrl ?? "");
-    setFeedback("");
   }
 
   async function handleSaveEdit(formEvent: FormEvent<HTMLFormElement>) {
     formEvent.preventDefault();
     if (!editingEvent) return;
     setSubmitting(true);
-    setFeedback("");
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token indisponível.");
@@ -351,22 +382,19 @@ export function EventsPage() {
         price: parsedPriceMinor,
         clearPrice: editingEvent.registrationMode === "INTERNAL_FREE" || !editPriceBrl.trim(),
         externalUrl: editingEvent.registrationMode === "EXTERNAL_PAID" ? editExternalUrl.trim() : null,
-        imageUrl: editImageUrl.trim() || null,
-        clearImageUrl: !editImageUrl.trim(),
       });
 
-      setFeedback("Evento atualizado com sucesso.");
+      toast.success("Evento atualizado com sucesso.");
       setEditingEvent(null);
       setReloadCount((value) => value + 1);
-    } catch {
-      setFeedback("Não foi possível atualizar o evento. Confira as datas e valores informados.");
+    } catch (error) {
+      toast.error(eventFormError(error, "Não foi possível atualizar o evento. Tente novamente."));
     } finally {
       setSubmitting(false);
     }
   }
 
   async function handleCancelManagedEvent(targetEventId: string) {
-    setFeedback("");
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token indisponível.");
@@ -374,10 +402,10 @@ export function EventsPage() {
       if (editingEvent?.id === targetEventId) {
         setEditingEvent(null);
       }
-      setFeedback("Evento cancelado. Inscrições vinculadas foram canceladas e eventuais estornos solicitados.");
+      toast.success("Evento cancelado. Inscrições vinculadas foram canceladas e eventuais estornos solicitados.");
       setReloadCount((value) => value + 1);
-    } catch {
-      setFeedback("Não foi possível cancelar o evento.");
+    } catch (err) {
+      toast.error(extractErrorMessage(err, "Não foi possível cancelar o evento."));
     }
   }
 
@@ -405,22 +433,22 @@ export function EventsPage() {
               <h2 id="event-organizing-title">Criar e gerenciar eventos</h2>
               <p>
                 Eventos pagos criados por <strong>Professor, Departamento ou Unidade Acadêmica</strong> usam pagamento
-                interno pela UNIR (Pix / Saga). Eventos pagos criados por{" "}
-                <strong>Comunidade ou Entidade Acadêmica</strong> usam inscrição externa.
+                interno pela UNIR (Pix). Eventos pagos criados por <strong>Comunidade ou Entidade Acadêmica</strong>{" "}
+                usam inscrição externa.
               </p>
             </div>
             <div className="opportunity-publishing-actions">
-              <button className="button button-primary" type="button" onClick={() => setCreateOpen(true)}>
+              <button
+                className="button button-primary"
+                type="button"
+                onClick={() => {
+                  setCreateOpen(true);
+                }}
+              >
                 + Novo evento
               </button>
             </div>
           </div>
-
-          {feedback && (
-            <p className="notice" role="status" style={{ marginTop: "0.75rem" }}>
-              {feedback}
-            </p>
-          )}
 
           {createOpen && selectedOrganizer && (
             <div
@@ -527,7 +555,7 @@ export function EventsPage() {
                           <option value="PAID">
                             {externalPaidMode
                               ? "Pago externo (Link da comunidade/entidade)"
-                              : "Pago interno (Cobrança Pix pela UNIR — Saga)"}
+                              : "Pago interno (Cobrança Pix pela UNIR)"}
                           </option>
                         </select>
                       </label>
@@ -601,16 +629,6 @@ export function EventsPage() {
                           )}
                         </>
                       )}
-
-                      <label className="opportunity-publish-wide">
-                        Imagem (opcional)
-                        <input
-                          type="url"
-                          value={imageUrl}
-                          onChange={(e) => setImageUrl(e.target.value)}
-                          placeholder="https://…"
-                        />
-                      </label>
                     </div>
 
                     <div className="sports-form-actions">
@@ -734,10 +752,6 @@ export function EventsPage() {
                           />
                         </label>
                       )}
-                      <label className="opportunity-publish-wide">
-                        Imagem (opcional)
-                        <input type="url" value={editImageUrl} onChange={(e) => setEditImageUrl(e.target.value)} />
-                      </label>
                     </div>
                     <div className="sports-form-actions">
                       <button className="button button-secondary" type="button" onClick={() => setEditingEvent(null)}>
@@ -766,18 +780,22 @@ export function EventsPage() {
                       {item.status === "ACTIVE" ? "Ativo" : "Cancelado"}
                     </span>
                   </div>
-                  {item.status === "ACTIVE" && (
+                  {item.viewerCanManage === true && (item._links?.update || item._links?.cancel) && (
                     <div className="opportunity-review-actions">
-                      <button className="button button-secondary" type="button" onClick={() => startEditing(item)}>
-                        Editar / Datas
-                      </button>
-                      <button
-                        className="button button-secondary"
-                        type="button"
-                        onClick={() => void handleCancelManagedEvent(item.id)}
-                      >
-                        Cancelar evento
-                      </button>
+                      {item._links.update && (
+                        <button className="button button-secondary" type="button" onClick={() => startEditing(item)}>
+                          Editar / Datas
+                        </button>
+                      )}
+                      {item._links.cancel && (
+                        <button
+                          className="button button-secondary"
+                          type="button"
+                          onClick={() => void handleCancelManagedEvent(item.id)}
+                        >
+                          Cancelar evento
+                        </button>
+                      )}
                     </div>
                   )}
                 </article>
@@ -824,11 +842,7 @@ export function EventsPage() {
           <p className="notice" role="status">
             Carregando eventos…
           </p>
-        ) : error ? (
-          <p className="notice notice-error" role="alert">
-            Não foi possível carregar os eventos. Verifique a conexão com a plataforma e tente novamente.
-          </p>
-        ) : visibleEvents.length ? (
+        ) : !error && visibleEvents.length ? (
           <div className="content-grid">
             {visibleEvents.map((event) => (
               <EventCard key={event.id} event={event} />
@@ -854,26 +868,35 @@ export function EventsPage() {
 
 export function EventDetailPage() {
   const { keycloak } = useOutletContext<WebContext>();
+  const toast = useToast();
   const { eventId } = useParams();
   const [event, setEvent] = useState<Event | null>(null);
-  const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<"not-found" | "unavailable" | null>(null);
   const [registration, setRegistration] = useState<Registration | null>(null);
   const [registrationLoading, setRegistrationLoading] = useState(true);
   const [registrationBusy, setRegistrationBusy] = useState(false);
-  const [registrationError, setRegistrationError] = useState<string | null>(null);
   const [attendance, setAttendance] = useState<MyAttendance | null>(null);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [attendanceBusy, setAttendanceBusy] = useState(false);
-  const [attendanceError, setAttendanceError] = useState<string | null>(null);
-  const [manageFeedback, setManageFeedback] = useState<string | null>(null);
+  const [organizerPermission, setOrganizerPermission] = useState<{
+    eventId: string;
+    action: OrganizerAttendanceAction | null;
+  } | null>(null);
+  const organizerAction = organizerPermission?.eventId === eventId ? organizerPermission?.action : null;
+  const [attendanceReview, setAttendanceReview] = useState<EventAttendanceReview | null>(null);
+  const [attendanceReviewLoading, setAttendanceReviewLoading] = useState(false);
   const [organizerBusy, setOrganizerBusy] = useState(false);
-  const [organizerError, setOrganizerError] = useState<string | null>(null);
+  const [participantQr, setParticipantQr] = useState<QrArtifact | null>(null);
   const [organizerQr, setOrganizerQr] = useState<QrArtifact | null>(null);
-  const [attendanceModalMode, setAttendanceModalMode] = useState<"participant" | "organizer" | null>(null);
+  const [attendanceModalMode, setAttendanceModalMode] = useState<
+    "participant" | "organizer" | "participant-ticket" | null
+  >(null);
   const [scannedTicketToken, setScannedTicketToken] = useState("");
   const [scannedTicket, setScannedTicket] = useState<OrganizerCheckInPreview | null>(null);
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [paymentCharge, setPaymentCharge] = useState<PaymentCharge | null>(null);
+  const [paymentChargeLoading, setPaymentChargeLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -882,31 +905,22 @@ export function EventDetailPage() {
       try {
         await keycloak.updateToken(30);
         if (!keycloak.token || !eventId) throw new Error("Evento indisponível.");
-        const [result, organizerContexts] = await Promise.all([
-          getEvent(keycloak.token, eventId),
-          getEventOrganizerContexts(keycloak.token).catch(() => ({ items: [] })),
-        ]);
-        if (active) {
-          setEvent(result);
-          setCanManage(
-            organizerContexts.items.some(
-              (ctx) => ctx.organizerType === result.organizerType && ctx.organizerId === result.organizerId,
-            ),
-          );
-        }
+        const result = await getEvent(keycloak.token, eventId);
+        if (active) setEvent(result);
         if (result.registrationMode !== "EXTERNAL_PAID") {
-          const page = await getMyRegistrations(keycloak.token);
-          const ownRegistration = page.items.find((item) => item.eventId === result.id) ?? null;
+          const ownRegistration = await getMyEventRegistration(keycloak.token, result.id);
           if (active) setRegistration(ownRegistration);
         }
       } catch (error) {
         if (active) {
           if (error instanceof EventApiError) {
             setFailure(error.status === 404 ? "not-found" : "unavailable");
+            toast.error(extractErrorMessage(error, "Não foi possível carregar o evento."));
           } else if (error instanceof RegistrationApiError) {
-            setRegistrationError("Não foi possível consultar sua inscrição neste momento.");
+            toast.error(extractErrorMessage(error, "Não foi possível consultar sua inscrição neste momento."));
           } else {
             setFailure("unavailable");
+            toast.error(extractErrorMessage(error, "Não foi possível carregar o evento."));
           }
         }
       } finally {
@@ -921,7 +935,7 @@ export function EventDetailPage() {
     return () => {
       active = false;
     };
-  }, [eventId, keycloak]);
+  }, [eventId, keycloak, toast]);
 
   useEffect(() => {
     let active = true;
@@ -936,7 +950,6 @@ export function EventDetailPage() {
 
     async function loadAttendance() {
       setAttendanceLoading(true);
-      setAttendanceError(null);
       try {
         await keycloak.updateToken(30);
         if (!keycloak.token) throw new Error("Token de acesso indisponível.");
@@ -947,7 +960,7 @@ export function EventDetailPage() {
         if (error instanceof AttendanceApiError && error.status === 404) {
           setAttendance(null);
         } else {
-          setAttendanceError("Não foi possível consultar sua presença. Tente novamente.");
+          toast.error(extractErrorMessage(error, "Não foi possível consultar sua presença. Tente novamente."));
         }
       } finally {
         if (active) setAttendanceLoading(false);
@@ -958,18 +971,84 @@ export function EventDetailPage() {
     return () => {
       active = false;
     };
-  }, [event?.attendanceEnabled, eventId, keycloak, registration?.status]);
+  }, [event?.attendanceEnabled, eventId, keycloak, registration?.status, toast]);
+
+  useEffect(() => {
+    let active = true;
+    setOrganizerPermission(null);
+    setAttendanceReview(null);
+    setOrganizerQr(null);
+    setAttendanceModalMode((current) => (current === "organizer" ? null : current));
+    setScannedTicket(null);
+    setScannedTicketToken("");
+    if (event?.id === eventId && event?.attendanceEnabled) {
+      void (async () => {
+        try {
+          await keycloak.updateToken(30);
+          if (!keycloak.token) return;
+          const result = await getOrganizerAttendanceAction(keycloak.token, event.id);
+          if (active) setOrganizerPermission({ eventId: event.id, action: result.action });
+        } catch {
+          if (active) setOrganizerPermission(null);
+        }
+      })();
+    }
+    return () => {
+      active = false;
+    };
+  }, [event?.id, event?.attendanceEnabled, event?.status, eventId, keycloak]);
+
+  async function openEventPaymentCheckout(registrationId: string) {
+    setPaymentModalOpen(true);
+    setPaymentChargeLoading(true);
+    setPaymentCharge(null);
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+      const charge = await findPendingPaymentCharge(keycloak.token, {
+        referenceId: registrationId,
+        targetPath: event ? `/eventos/${event.id}` : null,
+      });
+      setPaymentCharge(charge);
+    } catch (error) {
+      toast.error(extractErrorMessage(error, "Não foi possível carregar a cobrança Pix."));
+    } finally {
+      setPaymentChargeLoading(false);
+    }
+  }
+
+  async function refreshConfirmedRegistration() {
+    if (!event) return;
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) return;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const current = await getMyEventRegistration(keycloak.token, event.id);
+        setRegistration(current);
+        if (current?.status === "CONFIRMED") return;
+        if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    } catch {
+      // ignore transient refresh failure; user can still refresh manually
+    }
+  }
 
   async function handleRegister() {
     if (!event) return;
     setRegistrationBusy(true);
-    setRegistrationError(null);
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
-      setRegistration(await registerForEvent(keycloak.token, event.id));
+      const created = await registerForEvent(keycloak.token, event.id);
+      setRegistration(created);
+      if (created.status === "PENDING_PAYMENT") {
+        toast.info("Vaga reservada! Conclua o Pix para confirmar sua inscrição.");
+        void openEventPaymentCheckout(created.id);
+      } else {
+        toast.success("Inscrição confirmada com sucesso!");
+      }
     } catch (error) {
-      setRegistrationError(registrationErrorMessage(error));
+      toast.error(registrationErrorMessage(error));
     } finally {
       setRegistrationBusy(false);
     }
@@ -978,13 +1057,15 @@ export function EventDetailPage() {
   async function handleCancel() {
     if (!registration) return;
     setRegistrationBusy(true);
-    setRegistrationError(null);
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
       setRegistration(await cancelRegistration(keycloak.token, registration.id));
+      const updatedEvent = await getEvent(keycloak.token, registration.eventId).catch(() => null);
+      if (updatedEvent) setEvent(updatedEvent);
+      toast.success("Inscrição cancelada.");
     } catch (error) {
-      setRegistrationError(registrationErrorMessage(error));
+      toast.error(registrationErrorMessage(error));
     } finally {
       setRegistrationBusy(false);
     }
@@ -993,15 +1074,14 @@ export function EventDetailPage() {
   async function handleCancelEventByOrganizer() {
     if (!event) return;
     setRegistrationBusy(true);
-    setManageFeedback(null);
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token indisponível.");
       const updated = await cancelEvent(keycloak.token, event.id);
       setEvent(updated);
-      setManageFeedback("Evento cancelado com sucesso.");
-    } catch {
-      setManageFeedback("Não foi possível cancelar o evento.");
+      toast.success("Evento cancelado com sucesso.");
+    } catch (err) {
+      toast.error(extractErrorMessage(err, "Não foi possível cancelar o evento."));
     } finally {
       setRegistrationBusy(false);
     }
@@ -1010,14 +1090,17 @@ export function EventDetailPage() {
   async function handleRefreshRegistration() {
     if (!event) return;
     setRegistrationBusy(true);
-    setRegistrationError(null);
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
-      const page = await getMyRegistrations(keycloak.token);
-      setRegistration(page.items.find((item) => item.eventId === event.id) ?? null);
+      const [updatedEvent, updatedRegistration] = await Promise.all([
+        getEvent(keycloak.token, event.id),
+        getMyEventRegistration(keycloak.token, event.id),
+      ]);
+      setEvent(updatedEvent);
+      setRegistration(updatedRegistration);
     } catch (error) {
-      setRegistrationError(registrationErrorMessage(error));
+      toast.error(registrationErrorMessage(error));
     } finally {
       setRegistrationBusy(false);
     }
@@ -1025,16 +1108,19 @@ export function EventDetailPage() {
 
   async function handleCheckIn(qrToken: string) {
     setAttendanceBusy(true);
-    setAttendanceError(null);
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
       const result = await checkInWithEventQr(keycloak.token, qrToken);
-      setAttendance((current) => (current ? { ...current, status: "ATTENDED", checkedAt: result.checkedAt } : current));
+      setAttendance((current) =>
+        current ? { ...current, status: result.status, action: null, checkedAt: result.checkedAt } : current,
+      );
       setAttendanceModalMode(null);
+      toast.success("Presença confirmada com sucesso!");
     } catch (error) {
-      const detail = error instanceof AttendanceApiError ? error.detail : "Tente novamente mais tarde.";
-      setAttendanceError(`Não foi possível registrar sua presença: ${detail}`);
+      const detail =
+        error instanceof AttendanceApiError ? error.detail : extractErrorMessage(error, "Tente novamente mais tarde.");
+      toast.error(`Não foi possível registrar sua presença: ${detail}`);
     } finally {
       setAttendanceBusy(false);
     }
@@ -1043,7 +1129,6 @@ export function EventDetailPage() {
   async function handleRefreshAttendance() {
     if (!event || !keycloak.token) return;
     setAttendanceLoading(true);
-    setAttendanceError(null);
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
@@ -1052,24 +1137,66 @@ export function EventDetailPage() {
       if (error instanceof AttendanceApiError && error.status === 404) {
         setAttendance(null);
       } else {
-        setAttendanceError("Não foi possível atualizar sua presença.");
+        toast.error(extractErrorMessage(error, "Não foi possível atualizar sua presença."));
       }
     } finally {
       setAttendanceLoading(false);
     }
   }
 
+  async function handleIssueParticipantQr() {
+    if (!event) return;
+    setAttendanceBusy(true);
+    setAttendanceModalMode("participant-ticket");
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Token de acesso indisponível.");
+      setParticipantQr(await issueMyTicketQr(keycloak.token, event.id));
+    } catch (err) {
+      toast.error(extractErrorMessage(err, "Não foi possível gerar seu QR de entrada."));
+      setAttendanceModalMode(null);
+    } finally {
+      setAttendanceBusy(false);
+    }
+  }
+
+  async function handleAttendanceReview(close = false) {
+    if (!event) return;
+    if (close) setOrganizerBusy(true);
+    else setAttendanceReviewLoading(true);
+    try {
+      await keycloak.updateToken(30);
+      if (!keycloak.token) throw new Error("Sessão indisponível.");
+      setAttendanceReview(await reviewEventAttendance(keycloak.token, event.id, close));
+      if (close) toast.success("Lista de presença fechada.");
+    } catch (error) {
+      toast.error(extractErrorMessage(error, "Não foi possível consultar as presenças."));
+    } finally {
+      if (close) setOrganizerBusy(false);
+      else setAttendanceReviewLoading(false);
+    }
+  }
+
+  function handleOpenOrganizerAttendance() {
+    setAttendanceModalMode("organizer");
+    void handleAttendanceReview(false);
+    if (organizerAction === "GENERATE_EVENT_QR" && !organizerQr) {
+      void handleIssueEventQr();
+    }
+  }
+
   async function handleIssueEventQr() {
     if (!event) return;
     setOrganizerBusy(true);
-    setOrganizerError(null);
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
       setOrganizerQr(await issueEventAttendanceQr(keycloak.token, event.id));
+      toast.success("QR Code de presença liberado.");
     } catch (error) {
-      const detail = error instanceof AttendanceApiError ? error.detail : "Tente novamente mais tarde.";
-      setOrganizerError(`Não foi possível gerar o QR: ${detail}`);
+      const detail =
+        error instanceof AttendanceApiError ? error.detail : extractErrorMessage(error, "Tente novamente mais tarde.");
+      toast.error(`Não foi possível gerar o QR: ${detail}`);
     } finally {
       setOrganizerBusy(false);
     }
@@ -1077,15 +1204,15 @@ export function EventDetailPage() {
 
   async function handlePreviewOrganizerCheckIn(token: string) {
     setOrganizerBusy(true);
-    setOrganizerError(null);
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
       setScannedTicketToken(token);
       setScannedTicket(await previewOrganizerCheckIn(keycloak.token, token));
     } catch (error) {
-      const detail = error instanceof AttendanceApiError ? error.detail : "Tente novamente mais tarde.";
-      setOrganizerError(`Não foi possível validar o ticket: ${detail}`);
+      const detail =
+        error instanceof AttendanceApiError ? error.detail : extractErrorMessage(error, "Tente novamente mais tarde.");
+      toast.error(`Não foi possível validar o ticket: ${detail}`);
       setScannedTicket(null);
       setScannedTicketToken("");
     } finally {
@@ -1096,15 +1223,17 @@ export function EventDetailPage() {
   async function handleConfirmOrganizerCheckIn() {
     if (!scannedTicketToken) return;
     setOrganizerBusy(true);
-    setOrganizerError(null);
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
       await confirmOrganizerCheckIn(keycloak.token, scannedTicketToken);
       setScannedTicket((current) => (current ? { ...current, status: "ATTENDED" } : current));
+      toast.success("Presença do participante confirmada.");
+      void handleAttendanceReview(false);
     } catch (error) {
-      const detail = error instanceof AttendanceApiError ? error.detail : "Tente novamente mais tarde.";
-      setOrganizerError(`Não foi possível confirmar a presença: ${detail}`);
+      const detail =
+        error instanceof AttendanceApiError ? error.detail : extractErrorMessage(error, "Tente novamente mais tarde.");
+      toast.error(`Não foi possível confirmar a presença: ${detail}`);
     } finally {
       setOrganizerBusy(false);
     }
@@ -1199,10 +1328,9 @@ export function EventDetailPage() {
                 : "Este evento não terá registro de presença."}
             </p>
           </section>
-          {canManage && event.status === "ACTIVE" && (
+          {event.viewerCanManage === true && event._links?.cancel && (
             <section className="detail-copy-section">
               <h2>Administração do organizador</h2>
-              {manageFeedback && <p role="status">{manageFeedback}</p>}
               <button
                 className="button button-secondary"
                 type="button"
@@ -1227,7 +1355,7 @@ export function EventDetailPage() {
                   Inscrição confirmada
                 </p>
                 <p>Confirmada em {dateTime(registration.confirmedAt ?? registration.registeredAt)}.</p>
-                {event.registrationMode === "INTERNAL_FREE" && canCancel(registration) ? (
+                {registration.canCancel ? (
                   <button
                     className="button button-secondary"
                     type="button"
@@ -1236,32 +1364,28 @@ export function EventDetailPage() {
                   >
                     {registrationBusy ? "Cancelando…" : "Cancelar inscrição"}
                   </button>
-                ) : event.registrationMode === "INTERNAL_FREE" ? (
+                ) : registration.cancellationBlockedReason === "CANCELLATION_WINDOW_CLOSED" ? (
                   <p>O prazo para cancelamento (24 horas antes do evento) terminou.</p>
+                ) : registration.cancellationBlockedReason === "ONLY_FREE_REGISTRATIONS_CAN_BE_CANCELLED" ? (
+                  <RegistrationRefundPolicy origin="eventos" />
                 ) : null}
               </>
             ) : registration?.status === "PENDING_PAYMENT" ? (
-              <div className="payment-status-panel" role="status">
-                <span className="payment-status-icon" aria-hidden="true">
-                  <Icon name="clock" width="20" height="20" />
-                </span>
-                <div className="payment-status-copy">
-                  <strong>Pagamento em processamento</strong>
-                  <p>Seu lugar está reservado enquanto aguardamos a confirmação do Pix.</p>
-                  {registration.paymentDeadlineAt && (
-                    <p className="payment-status-deadline">
-                      Pague até <strong>{dateTime(registration.paymentDeadlineAt)}</strong>.
-                    </p>
-                  )}
-                  <button
-                    className="button button-secondary"
-                    type="button"
-                    disabled={registrationBusy}
-                    onClick={() => void handleRefreshRegistration()}
-                  >
-                    {registrationBusy ? "Atualizando…" : "Atualizar status"}
-                  </button>
-                </div>
+              <div className="registration-payment-actions">
+                <RegistrationPaymentNotice
+                  origin="eventos"
+                  deadline={registration.paymentDeadlineAt ? dateTime(registration.paymentDeadlineAt) : undefined}
+                  busy={paymentChargeLoading}
+                  onPayNow={() => void openEventPaymentCheckout(registration.id)}
+                />
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  disabled={registrationBusy}
+                  onClick={() => void handleRefreshRegistration()}
+                >
+                  {registrationBusy ? "Atualizando…" : "Atualizar status"}
+                </button>
               </div>
             ) : (
               <>
@@ -1278,12 +1402,18 @@ export function EventDetailPage() {
                 <p>
                   {event.registrationMode === "INTERNAL_FREE"
                     ? "Inscreva-se gratuitamente usando sua conta UNIR."
-                    : `Reserve sua vaga por ${priceLabel(event)}. A cobrança Pix será processada pela Saga da UNIR.`}
+                    : `Reserve sua vaga por ${priceLabel(event)}. Após reservar, conclua o Pix em Meus pagamentos.`}
                 </p>
+                {event.registrationMode === "INTERNAL_PAID" && <RegistrationRefundPolicy origin="eventos" />}
+                {event.registrationBlockedReason && (
+                  <p role="status">
+                    {registrationErrorMessage(new RegistrationApiError(409, event.registrationBlockedReason))}
+                  </p>
+                )}
                 <button
                   className="button button-primary"
                   type="button"
-                  disabled={registrationBusy || event.status !== "ACTIVE"}
+                  disabled={registrationBusy || event.registrationBlockedReason !== null}
                   onClick={() => void handleRegister()}
                 >
                   {registrationBusy
@@ -1294,11 +1424,6 @@ export function EventDetailPage() {
                 </button>
               </>
             )}
-            {registrationError && (
-              <p className="notice notice-error" role="alert">
-                {registrationError}
-              </p>
-            )}
           </section>
           {event.attendanceEnabled && registration?.status === "CONFIRMED" && (
             <section
@@ -1306,15 +1431,13 @@ export function EventDetailPage() {
               aria-labelledby="attendance-action-title"
             >
               <h2 id="attendance-action-title">Minha presença</h2>
-              {event.attendanceMode !== "PARTICIPANT_SCANS_EVENT" ? (
-                <p>Este evento utiliza validação de presença pela organização.</p>
-              ) : attendanceLoading ? (
+              {attendanceLoading ? (
                 <p role="status">Consultando sua elegibilidade…</p>
               ) : attendance?.status === "ATTENDED" ? (
                 <p className="registration-confirmed" role="status">
                   Presença confirmada{attendance.checkedAt ? ` em ${dateTime(attendance.checkedAt)}` : ""}.
                 </p>
-              ) : attendance?.status === "ELIGIBLE" ? (
+              ) : attendance?.action === "SCAN_EVENT_QR" ? (
                 <>
                   <p>
                     Leia o QR compartilhado ou informe o código do evento durante a atividade para registrar presença.
@@ -1327,13 +1450,21 @@ export function EventDetailPage() {
                     type="button"
                     disabled={attendanceBusy}
                     onClick={() => {
-                      setAttendanceError(null);
                       setAttendanceModalMode("participant");
                     }}
                   >
                     Confirmar Presença
                   </button>
                 </>
+              ) : attendance?.action === "GENERATE_PARTICIPANT_QR" ? (
+                <button
+                  className="button button-primary"
+                  type="button"
+                  disabled={attendanceBusy}
+                  onClick={() => void handleIssueParticipantQr()}
+                >
+                  Abrir meu QR de entrada
+                </button>
               ) : attendance?.status === "CANCELLED" ? (
                 <p role="status">Sua elegibilidade para presença foi cancelada.</p>
               ) : attendance?.status === "NO_SHOW" ? (
@@ -1341,7 +1472,7 @@ export function EventDetailPage() {
               ) : (
                 <p role="status">Sua elegibilidade está sendo sincronizada. Atualize em instantes.</p>
               )}
-              {event.attendanceMode === "PARTICIPANT_SCANS_EVENT" && attendance?.status !== "ATTENDED" && (
+              {attendance?.status !== "ATTENDED" && (
                 <button
                   className="button button-secondary"
                   type="button"
@@ -1351,70 +1482,29 @@ export function EventDetailPage() {
                   Atualizar presença
                 </button>
               )}
-              {attendanceError && (
-                <p className="notice notice-error" role="alert">
-                  {attendanceError}
-                </p>
-              )}
             </section>
           )}
-          {event.attendanceEnabled && event.createdByUserId && keycloak.subject === event.createdByUserId && (
+          {organizerAction && (
             <section
               className="registration-action-panel attendance-action-panel"
               aria-labelledby="organizer-attendance-title"
             >
               <h2 id="organizer-attendance-title">Organização do evento</h2>
-              {event.attendanceMode === "PARTICIPANT_SCANS_EVENT" ? (
-                <>
-                  <p>Gere o QR compartilhado para os participantes registrarem a presença.</p>
-                  <button
-                    className="button button-primary"
-                    type="button"
-                    disabled={organizerBusy}
-                    onClick={() => {
-                      setAttendanceModalMode("organizer");
-                      if (!organizerQr) {
-                        void handleIssueEventQr();
-                      }
-                    }}
-                  >
-                    {organizerBusy ? "Gerando QR…" : organizerQr ? "Ver / Gerar QR do Evento" : "Gerar QR do Evento"}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <p>Leia o QR do participante e confira o identificador antes de confirmar a presença.</p>
-                  <ParticipantQrScanner
-                    busy={organizerBusy}
-                    submitLabel="Verificar ticket"
-                    onToken={(token) => void handlePreviewOrganizerCheckIn(token)}
-                  />
-                  {scannedTicket && (
-                    <div className="organizer-ticket-preview" role="status">
-                      <strong>
-                        {scannedTicket.status === "ATTENDED" ? "Presença já registrada" : "Ticket válido"}
-                      </strong>
-                      <span>Evento: {scannedTicket.eventTitle}</span>
-                      <span>Identificador do participante: {scannedTicket.participantUserId}</span>
-                      {scannedTicket.status !== "ATTENDED" && (
-                        <button
-                          className="button button-primary"
-                          type="button"
-                          disabled={organizerBusy}
-                          onClick={() => void handleConfirmOrganizerCheckIn()}
-                        >
-                          Confirmar presença
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-              {organizerError && (
-                <p className="notice notice-error" role="alert">
-                  {organizerError}
-                </p>
-              )}
+              <p>
+                {organizerAction === "REVIEW_ATTENDANCE"
+                  ? "Consulte a lista de presentes e faça o fechamento definitivo da presença deste evento."
+                  : organizerAction === "GENERATE_EVENT_QR"
+                    ? "Gere o QR Code de presença e acompanhe em tempo real quem já realizou check-in."
+                    : "Valide os tickets QR dos participantes e acompanhe a lista de presença em tempo real."}
+              </p>
+              <button
+                className="button button-primary"
+                type="button"
+                disabled={organizerBusy}
+                onClick={handleOpenOrganizerAttendance}
+              >
+                Presença e QR Code
+              </button>
             </section>
           )}
           <span className="eyebrow">Evento</span>
@@ -1427,18 +1517,50 @@ export function EventDetailPage() {
       {attendanceModalMode && (
         <UniversalAttendanceModal
           mode={attendanceModalMode}
-          busy={attendanceModalMode === "participant" ? attendanceBusy : organizerBusy}
+          busy={attendanceModalMode === "organizer" ? organizerBusy : attendanceBusy}
           title={
-            attendanceModalMode === "participant" ? "Confirmar Presença no Evento" : "QR e Código de Presença do Evento"
+            attendanceModalMode === "participant"
+              ? "Confirmar Presença no Evento"
+              : attendanceModalMode === "participant-ticket"
+                ? "Meu QR de entrada"
+                : event.title
           }
           subtitle={`${event.title} · ${dateTime(event.startsAt)}`}
-          token={organizerQr?.token ?? null}
-          qrSvg={organizerQr?.qrSvg ?? null}
+          token={(attendanceModalMode === "participant-ticket" ? participantQr : organizerQr)?.token ?? null}
+          qrSvg={(attendanceModalMode === "participant-ticket" ? participantQr : organizerQr)?.qrSvg ?? null}
           checkedIn={attendance?.status === "ATTENDED"}
-          error={attendanceModalMode === "participant" ? attendanceError : organizerError}
+          organizerCanManageQr={organizerAction === "GENERATE_EVENT_QR"}
+          organizerScanMode={organizerAction === "SCAN_PARTICIPANT_QR"}
+          scannedTicket={scannedTicket}
+          onPreviewParticipantQr={(code) => void handlePreviewOrganizerCheckIn(code)}
+          onConfirmParticipantQr={() => void handleConfirmOrganizerCheckIn()}
+          attendanceReview={attendanceReview}
+          attendanceListLoading={attendanceReviewLoading}
+          canCloseAttendance={organizerAction === "REVIEW_ATTENDANCE"}
+          onRefreshAttendanceList={() => void handleAttendanceReview(false)}
+          onCloseAttendanceList={() => void handleAttendanceReview(true)}
           onSubmitToken={attendanceModalMode === "participant" ? (code) => void handleCheckIn(code) : undefined}
-          onGenerateToken={attendanceModalMode === "organizer" ? () => void handleIssueEventQr() : undefined}
+          onGenerateToken={
+            attendanceModalMode === "organizer"
+              ? () => void handleIssueEventQr()
+              : attendanceModalMode === "participant-ticket"
+                ? () => void handleIssueParticipantQr()
+                : undefined
+          }
           onClose={() => setAttendanceModalMode(null)}
+        />
+      )}
+
+      {paymentModalOpen && (
+        <PaymentCheckoutModal
+          keycloak={keycloak}
+          charge={paymentCharge}
+          loading={paymentChargeLoading}
+          fallbackTitle={event.title}
+          fallbackSubtitle="Inscrição em evento"
+          fallbackOrigin="eventos"
+          onConfirmed={refreshConfirmedRegistration}
+          onClose={() => setPaymentModalOpen(false)}
         />
       )}
     </div>

@@ -1,18 +1,12 @@
+import { AdminFeedback } from "./components/AdminFeedback";
+import { AdminModal } from "./components/AdminModal";
 import { useEffect, useState, type FormEvent } from "react";
 import Keycloak from "keycloak-js";
 import { env } from "./config/env";
+import { useToast } from "./contexts/ToastContext";
+import { extractErrorMessage } from "./utils/apiError";
+import { fetchAdminProfile, hasPlatformAdminRole, type AdminProfile, type TokenPayload } from "./services/adminSession";
 import {
-  extractRoles,
-  fetchAdminProfile,
-  hasPlatformAdminRole,
-  type AdminProfile,
-  type TokenPayload,
-} from "./services/adminSession";
-import {
-  createAcademicUnit,
-  createCourse,
-  createDepartment,
-  createSemester,
   deleteCampusStructure,
   getCampusOverview,
   reviewInstitutionalRequest,
@@ -24,6 +18,8 @@ import {
   type InstitutionalRequestSummary,
   type PermissionTargetKind,
 } from "./services/campusOverview";
+import { SportsManagementPanel } from "./components/SportsManagementPanel";
+import { CampusStructureManager } from "./components/CampusStructureManager";
 
 interface SessionState {
   status: "loading" | "unauthenticated" | "authenticated" | "error";
@@ -37,46 +33,32 @@ interface AppProps {
   keycloakReady: Promise<boolean>;
 }
 
-type CreateTab = "unit" | "department" | "course" | "semester";
+const NO_ADMIN_PERMISSION_MESSAGE = "Você não tem permissão para acessar este painel.";
 
 export function App({ keycloak, keycloakReady }: AppProps) {
+  const toast = useToast();
   const [session, setSession] = useState<SessionState>({
     status: "loading",
     profile: null,
   });
   const [overview, setOverview] = useState<CampusOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
-  const [overviewError, setOverviewError] = useState("");
   const [reviewingRequestId, setReviewingRequestId] = useState("");
-  const [reviewMessage, setReviewMessage] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
-  const [actionMessage, setActionMessage] = useState("");
-
-  // Creation forms state
-  const [createTab, setCreateTab] = useState<CreateTab>("unit");
-  const [unitCode, setUnitCode] = useState("");
-  const [unitName, setUnitName] = useState("");
-  const [unitDescription, setUnitDescription] = useState("");
-  const [deptAcronym, setDeptAcronym] = useState("");
-  const [deptName, setDeptName] = useState("");
-  const [deptDescription, setDeptDescription] = useState("");
-  const [courseDeptId, setCourseDeptId] = useState("");
-  const [courseName, setCourseName] = useState("");
-  const [semesterName, setSemesterName] = useState("");
-  const [semesterStart, setSemesterStart] = useState("2026-08-01");
-  const [semesterEnd, setSemesterEnd] = useState("2026-12-20");
 
   // Permissions management state
-  const [permTargetKey, setPermTargetKey] = useState("university:root");
+  const [permTargetKey, setPermTargetKey] = useState("");
   const [selectedUserId, setSelectedUserId] = useState("");
   const [manualUserId, setManualUserId] = useState("");
 
-  // University profile inline editing
+  // University profile dialog state
   const [editingUniversity, setEditingUniversity] = useState(false);
   const [uniName, setUniName] = useState("");
   const [uniAcronym, setUniAcronym] = useState("");
   const [uniDescription, setUniDescription] = useState("");
   const [uniTerm, setUniTerm] = useState("");
+  const [uniGeneralInfo, setUniGeneralInfo] = useState("");
+  const [uniLinks, setUniLinks] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -97,9 +79,7 @@ export function App({ keycloak, keycloakReady }: AppProps) {
             status: "authenticated",
             tokenParsed,
             profile,
-            ...(!profile || !hasPlatformAdminRole(tokenParsed)
-              ? { errorMessage: "O Gateway não confirmou uma autorização administrativa para esta conta." }
-              : {}),
+            ...(!profile || !hasPlatformAdminRole(tokenParsed) ? { errorMessage: NO_ADMIN_PERMISSION_MESSAGE } : {}),
           });
           if (!profile || !hasPlatformAdminRole(tokenParsed)) return;
 
@@ -108,36 +88,39 @@ export function App({ keycloak, keycloakReady }: AppProps) {
             const campusData = await getCampusOverview(env.gatewayUrl, token);
             if (active) setOverview(campusData);
           } catch (error) {
-            if (active) setOverviewError(error instanceof Error ? error.message : "Falha ao consultar o Campus.");
+            if (active) toast.error(extractErrorMessage(error, "Falha ao consultar o Campus."));
           } finally {
             if (active) setOverviewLoading(false);
           }
         } catch (error) {
           if (!active) return;
+          const message = extractErrorMessage(error, "Não foi possível verificar sua permissão.");
+          toast.error(message);
           setSession({
             status: "authenticated",
             tokenParsed,
             profile: null,
-            errorMessage: error instanceof Error ? error.message : "Indisponibilidade no Gateway",
+            errorMessage: message,
           });
         }
       })
       .catch((error: unknown) => {
         if (!active) return;
+        const message = extractErrorMessage(error, "Não foi possível conectar ao Keycloak.");
+        toast.error(message);
         setSession({
           status: "error",
           profile: null,
-          errorMessage: error instanceof Error ? error.message : "Não foi possível conectar ao Keycloak",
+          errorMessage: message,
         });
       });
 
     return () => {
       active = false;
     };
-  }, [keycloak, keycloakReady]);
+  }, [keycloak, keycloakReady, toast]);
 
   const redirectUri = window.location.origin + window.location.pathname + window.location.search;
-  const roles = extractRoles(session.tokenParsed);
   const isPlatformAdmin = hasPlatformAdminRole(session.tokenParsed);
   const isAuthorized = session.status === "authenticated" && Boolean(session.profile) && isPlatformAdmin;
 
@@ -149,80 +132,19 @@ export function App({ keycloak, keycloakReady }: AppProps) {
     const token = keycloak.token;
     if (!token) return;
     setReviewingRequestId(requestId);
-    setReviewMessage("");
-    setOverviewError("");
     try {
       await reviewInstitutionalRequest(env.gatewayUrl, token, requestId, decision);
       await reloadOverview(token);
-      setReviewMessage(decision === "approve" ? "Solicitação aprovada com sucesso." : "Solicitação recusada.");
+      toast.success(decision === "approve" ? "Solicitação aprovada com sucesso." : "Solicitação recusada.");
     } catch (error) {
-      setOverviewError(error instanceof Error ? error.message : "Não foi possível revisar a solicitação.");
+      toast.error(extractErrorMessage(error, "Não foi possível revisar a solicitação."));
     } finally {
       setReviewingRequestId("");
     }
   }
 
-  async function handleCreateStructure(event: FormEvent) {
-    event.preventDefault();
-    const token = keycloak.token;
-    if (!token) return;
-    setActionBusy(true);
-    setActionMessage("");
-    setOverviewError("");
-    try {
-      if (createTab === "unit") {
-        await createAcademicUnit(env.gatewayUrl, token, {
-          code: unitCode.trim().toUpperCase(),
-          name: unitName.trim(),
-          description: unitDescription.trim(),
-          generalInfoMarkdown: unitDescription.trim() || `Unidade acadêmica ${unitName.trim()}.`,
-        });
-        setUnitCode("");
-        setUnitName("");
-        setUnitDescription("");
-        setActionMessage("Unidade acadêmica criada com sucesso!");
-      } else if (createTab === "department") {
-        await createDepartment(env.gatewayUrl, token, {
-          acronym: deptAcronym.trim().toUpperCase(),
-          name: deptName.trim(),
-          description: deptDescription.trim(),
-          generalInfoMarkdown: deptDescription.trim() || `Departamento ${deptName.trim()}.`,
-        });
-        setDeptAcronym("");
-        setDeptName("");
-        setDeptDescription("");
-        setActionMessage("Departamento criado com sucesso!");
-      } else if (createTab === "course") {
-        const deptId = courseDeptId || overview?.departments.items[0]?.id || "";
-        await createCourse(env.gatewayUrl, token, { departmentId: deptId, name: courseName.trim() });
-        setCourseName("");
-        setActionMessage("Curso criado com sucesso!");
-      } else {
-        await createSemester(env.gatewayUrl, token, {
-          name: semesterName.trim(),
-          startOn: semesterStart,
-          endOn: semesterEnd,
-        });
-        setSemesterName("");
-        setActionMessage("Semestre letivo criado com sucesso!");
-      }
-      await reloadOverview(token);
-    } catch (error) {
-      setOverviewError(error instanceof Error ? error.message : "Não foi possível salvar o registro.");
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
   const permissionTargets = overview
     ? [
-        {
-          key: "university:root",
-          kind: "university" as PermissionTargetKind,
-          id: null as string | null,
-          label: `Universidade — ${overview.university.name}`,
-          adminIds: overview.university.administratorUserIds ?? [],
-        },
         ...overview.academicUnits.items.map((u) => ({
           key: `academic-units:${u.id}`,
           kind: "academic-units" as PermissionTargetKind,
@@ -256,10 +178,16 @@ export function App({ keycloak, keycloakReady }: AppProps) {
 
   const activeTarget = permissionTargets.find((t) => t.key === permTargetKey) ?? permissionTargets[0];
   const usersList: CampusUserSummary[] = overview?.users?.items ?? [];
+  const semesterOptions = overview?.semesters?.items ?? [];
+  const globalAdminUserId = overview?.university?.protectedAdministratorUserId ?? "";
 
   function resolveUserLabel(keycloakSub: string): string {
     const found = usersList.find((u) => u.keycloakUserId === keycloakSub);
     return found ? `${found.name} (${found.registrationCode ?? found.userType ?? "Campus"})` : keycloakSub;
+  }
+
+  function isProtectedGlobalAdmin(keycloakSub: string): boolean {
+    return Boolean(globalAdminUserId) && keycloakSub === globalAdminUserId;
   }
 
   async function handleAddAdmin() {
@@ -268,18 +196,14 @@ export function App({ keycloak, keycloakReady }: AppProps) {
     if (!token || !activeTarget || !candidate) return;
     const nextIds = Array.from(new Set([...activeTarget.adminIds, candidate]));
     setActionBusy(true);
-    setActionMessage("");
-    setOverviewError("");
     try {
       await updateProfileAdministrators(env.gatewayUrl, token, activeTarget.kind, activeTarget.id, nextIds);
       setSelectedUserId("");
       setManualUserId("");
-      setActionMessage(
-        `Permissão concedida em "${activeTarget.label}". Os botões de gestão já estão ativos para esse usuário no Web.`,
-      );
+      toast.success(`Permissão concedida em "${activeTarget.label}".`);
       await reloadOverview(token);
     } catch (error) {
-      setOverviewError(error instanceof Error ? error.message : "Não foi possível atualizar as permissões.");
+      toast.error(extractErrorMessage(error, "Não foi possível atualizar as permissões."));
     } finally {
       setActionBusy(false);
     }
@@ -288,16 +212,18 @@ export function App({ keycloak, keycloakReady }: AppProps) {
   async function handleRemoveAdmin(userIdToRemove: string) {
     const token = keycloak.token;
     if (!token || !activeTarget) return;
+    if (isProtectedGlobalAdmin(userIdToRemove)) {
+      toast.info("O administrador global não pode ser removido.");
+      return;
+    }
     const nextIds = activeTarget.adminIds.filter((id) => id !== userIdToRemove);
     setActionBusy(true);
-    setActionMessage("");
-    setOverviewError("");
     try {
       await updateProfileAdministrators(env.gatewayUrl, token, activeTarget.kind, activeTarget.id, nextIds);
-      setActionMessage(`Permissão removida de "${activeTarget.label}".`);
+      toast.success(`Permissão removida de "${activeTarget.label}".`);
       await reloadOverview(token);
     } catch (error) {
-      setOverviewError(error instanceof Error ? error.message : "Não foi possível remover a permissão.");
+      toast.error(extractErrorMessage(error, "Não foi possível remover a permissão."));
     } finally {
       setActionBusy(false);
     }
@@ -309,6 +235,20 @@ export function App({ keycloak, keycloakReady }: AppProps) {
     setUniAcronym(overview.university.acronym);
     setUniDescription(overview.university.description ?? "");
     setUniTerm(overview.university.currentTerm ?? "");
+    setUniGeneralInfo(overview.university.generalInfoMarkdown ?? "");
+    setUniLinks(
+      (overview.university.links ?? [])
+        .map((link) => {
+          if (typeof link === "string") return link;
+          if (link && typeof link === "object" && "url" in link) {
+            const item = link as { label?: unknown; url: string };
+            return `${typeof item.label === "string" && item.label.trim() ? item.label.trim() : item.url} | ${item.url}`;
+          }
+          return "";
+        })
+        .filter(Boolean)
+        .join("\n"),
+    );
     setEditingUniversity(true);
   }
 
@@ -317,20 +257,28 @@ export function App({ keycloak, keycloakReady }: AppProps) {
     const token = keycloak.token;
     if (!token) return;
     setActionBusy(true);
-    setActionMessage("");
-    setOverviewError("");
     try {
       await updateUniversityProfile(env.gatewayUrl, token, {
         name: uniName.trim(),
         acronym: uniAcronym.trim().toUpperCase(),
         description: uniDescription.trim(),
         currentTerm: uniTerm.trim(),
+        generalInfoMarkdown: uniGeneralInfo.trim(),
+        links: uniLinks
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => {
+            const separator = line.indexOf("|");
+            if (separator < 0) return line;
+            return { label: line.slice(0, separator).trim(), url: line.slice(separator + 1).trim() };
+          }),
       });
       setEditingUniversity(false);
-      setActionMessage("Perfil da universidade atualizado com sucesso!");
+      toast.success("Perfil da universidade atualizado com sucesso!");
       await reloadOverview(token);
     } catch (error) {
-      setOverviewError(error instanceof Error ? error.message : "Não foi possível atualizar o perfil da universidade.");
+      toast.error(extractErrorMessage(error, "Não foi possível atualizar o perfil da universidade."));
     } finally {
       setActionBusy(false);
     }
@@ -338,22 +286,16 @@ export function App({ keycloak, keycloakReady }: AppProps) {
 
   async function handleDeleteTarget() {
     const token = keycloak.token;
-    if (!token || !activeTarget || activeTarget.kind === "university" || !activeTarget.id) return;
+    if (!token || !activeTarget || !activeTarget.id) return;
     if (!window.confirm(`Tem certeza que deseja apagar "${activeTarget.label}"?`)) return;
     setActionBusy(true);
-    setActionMessage("");
-    setOverviewError("");
     try {
       await deleteCampusStructure(env.gatewayUrl, token, activeTarget.kind as DeletableStructureKind, activeTarget.id);
-      setPermTargetKey("university:root");
-      setActionMessage(`Estrutura "${activeTarget.label}" apagada com sucesso.`);
+      setPermTargetKey("");
+      toast.success(`Estrutura "${activeTarget.label}" apagada com sucesso.`);
       await reloadOverview(token);
     } catch (error) {
-      setOverviewError(
-        error instanceof Error
-          ? error.message
-          : "Não foi possível apagar a estrutura (verifique se há vínculos ativos).",
-      );
+      toast.error(extractErrorMessage(error, "Não foi possível apagar a estrutura (verifique se há vínculos ativos)."));
     } finally {
       setActionBusy(false);
     }
@@ -375,7 +317,7 @@ export function App({ keycloak, keycloakReady }: AppProps) {
           {session.status === "authenticated" && (
             <span className="admin-user-name">{session.tokenParsed?.name ?? session.tokenParsed?.email}</span>
           )}
-          <span className="admin-role-pill">{isPlatformAdmin ? "Acesso institucional" : "Acesso restrito"}</span>
+          <span className="admin-role-pill">{isPlatformAdmin ? "Acesso institucional" : "Sem permissão"}</span>
         </div>
         <div className="admin-actions">
           {session.status === "authenticated" ? (
@@ -402,47 +344,32 @@ export function App({ keycloak, keycloakReady }: AppProps) {
           </div>
           <div className={`admin-hero-status ${isAuthorized ? "is-authorized" : ""}`}>
             <span className="admin-status-dot" />
-            {isAuthorized ? "Acesso validado" : session.status === "loading" ? "Verificando acesso" : "Acesso restrito"}
+            {isAuthorized ? "Acesso validado" : session.status === "loading" ? "Verificando acesso" : "Sem permissão"}
           </div>
         </section>
 
         {session.status === "loading" && (
-          <p className="admin-notice" role="status">
-            Verificando sua sessão no Keycloak e no Gateway…
-          </p>
+          <AdminFeedback tone="info">Verificando sua sessão no Keycloak e no Gateway…</AdminFeedback>
         )}
         {session.status === "unauthenticated" && (
           <div className="admin-card admin-state-panel">
-            <strong>Entre com uma conta administrativa</strong>
-            <p>O acesso a este painel exige autenticação e o papel global PLATFORM_ADMIN.</p>
+            <strong>Você não tem permissão para acessar este painel</strong>
+            <p>Faça login com uma conta autorizada para continuar.</p>
           </div>
         )}
-        {session.status === "error" && (
-          <p className="admin-alert" role="alert">
-            {session.errorMessage}
-          </p>
-        )}
+        {session.status === "error" && <AdminFeedback>{session.errorMessage}</AdminFeedback>}
         {session.status === "authenticated" && session.errorMessage && (
-          <p className="admin-alert" role="alert">
-            {session.errorMessage}
-          </p>
+          <AdminFeedback>{session.errorMessage}</AdminFeedback>
         )}
 
         {isAuthorized && (
           <>
             {overviewLoading && (
-              <p className="admin-notice" role="status">
-                Carregando os dados institucionais do Campus…
-              </p>
+              <AdminFeedback tone="info">Carregando os dados institucionais do Campus…</AdminFeedback>
             )}
-            {overviewError && (
-              <p className="admin-alert" role="alert">
-                {overviewError}
-              </p>
-            )}
-            {actionMessage && (
-              <p className="admin-success-message" role="status">
-                {actionMessage}
+            {!!overview?.unavailableSections?.length && (
+              <p role="status">
+                Parte do catálogo está temporariamente indisponível. Atualize o painel para tentar novamente.
               </p>
             )}
             {overview && (
@@ -481,37 +408,83 @@ export function App({ keycloak, keycloakReady }: AppProps) {
                     </div>
                     <span className="admin-acronym">{overview.university.acronym}</span>
                   </div>
-                  {editingUniversity ? (
-                    <form className="admin-form" onSubmit={(e) => void handleSaveUniversity(e)}>
+                  <p>{overview.university.description || "Sem descrição institucional cadastrada."}</p>
+                  <div className="admin-university-meta">
+                    <span>
+                      <strong>Semestre atual</strong>
+                      {overview.university.currentTerm || "Não informado"}
+                    </span>
+                    <span>
+                      <strong>Cursos cadastrados</strong>
+                      {overview.courses?.totalElements ?? 0}
+                    </span>
+                  </div>
+                  <div className="admin-form-actions">
+                    <button type="button" className="btn-secondary" onClick={startEditUniversity}>
+                      Editar universidade
+                    </button>
+                  </div>
+                </section>
+
+                {editingUniversity && (
+                  <AdminModal
+                    eyebrow="Perfil institucional"
+                    title="Editar universidade"
+                    closeDisabled={actionBusy}
+                    onClose={() => setEditingUniversity(false)}
+                  >
+                    <form
+                      className="admin-form admin-dialog-form"
+                      onSubmit={(event) => void handleSaveUniversity(event)}
+                    >
                       <div className="admin-form-row">
                         <label>
-                          <span>Nome da universidade</span>
-                          <input type="text" required value={uniName} onChange={(e) => setUniName(e.target.value)} />
+                          <span>Nome</span>
+                          <input required value={uniName} onChange={(event) => setUniName(event.target.value)} />
                         </label>
                         <label>
                           <span>Sigla</span>
-                          <input
-                            type="text"
-                            required
-                            value={uniAcronym}
-                            onChange={(e) => setUniAcronym(e.target.value)}
-                          />
+                          <input required value={uniAcronym} onChange={(event) => setUniAcronym(event.target.value)} />
                         </label>
                         <label>
                           <span>Semestre atual</span>
-                          <input
-                            type="text"
-                            value={uniTerm}
-                            onChange={(e) => setUniTerm(e.target.value)}
-                            placeholder="2026/2"
-                          />
+                          <select required value={uniTerm} onChange={(event) => setUniTerm(event.target.value)}>
+                            <option value="" disabled>
+                              Selecione um semestre…
+                            </option>
+                            {uniTerm && !semesterOptions.some((semester) => semester.name === uniTerm) && (
+                              <option value={uniTerm}>{uniTerm}</option>
+                            )}
+                            {semesterOptions.map((semester) => (
+                              <option key={semester.id} value={semester.name}>
+                                {semester.name}
+                              </option>
+                            ))}
+                          </select>
                         </label>
                       </div>
                       <label>
-                        <span>Descrição institucional</span>
-                        <input type="text" value={uniDescription} onChange={(e) => setUniDescription(e.target.value)} />
+                        <span>Descrição</span>
+                        <textarea
+                          rows={2}
+                          value={uniDescription}
+                          onChange={(event) => setUniDescription(event.target.value)}
+                        />
                       </label>
-                      <div className="admin-form-actions">
+                      <label>
+                        <span>Informações em Markdown</span>
+                        <textarea
+                          rows={5}
+                          value={uniGeneralInfo}
+                          onChange={(event) => setUniGeneralInfo(event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        <span>Links e contatos</span>
+                        <textarea rows={3} value={uniLinks} onChange={(event) => setUniLinks(event.target.value)} />
+                        <small>Um por linha. Use a URL ou “Rótulo | URL”.</small>
+                      </label>
+                      <div className="admin-dialog-actions">
                         <button type="button" className="btn-secondary" onClick={() => setEditingUniversity(false)}>
                           Cancelar
                         </button>
@@ -520,216 +493,18 @@ export function App({ keycloak, keycloakReady }: AppProps) {
                         </button>
                       </div>
                     </form>
-                  ) : (
-                    <>
-                      <p>{overview.university.description || "Sem descrição institucional cadastrada."}</p>
-                      <div className="admin-university-meta">
-                        <span>
-                          <strong>Semestre atual</strong>
-                          {overview.university.currentTerm || "Não informado"}
-                        </span>
-                        <span>
-                          <strong>Cursos ativos</strong>
-                          {overview.courses?.totalElements ?? 0}
-                        </span>
-                        <span>
-                          <strong>Papel ativo</strong>
-                          {roles.includes("PLATFORM_ADMIN") ? "PLATFORM_ADMIN" : roles.join(", ")}
-                        </span>
-                      </div>
-                      <div className="admin-form-actions">
-                        <button type="button" className="btn-secondary" onClick={startEditUniversity}>
-                          Editar perfil da universidade
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </section>
+                  </AdminModal>
+                )}
 
-                <section className="admin-card admin-manage-card" aria-labelledby="create-structure-title">
-                  <div className="admin-directory-heading">
-                    <div>
-                      <span className="admin-eyebrow">Gestão da estrutura</span>
-                      <h2 id="create-structure-title">Criar estrutura acadêmica</h2>
-                    </div>
-                  </div>
-                  <div className="admin-tabs">
-                    <button
-                      type="button"
-                      className={createTab === "unit" ? "is-active" : ""}
-                      onClick={() => setCreateTab("unit")}
-                    >
-                      Unidade Acadêmica
-                    </button>
-                    <button
-                      type="button"
-                      className={createTab === "department" ? "is-active" : ""}
-                      onClick={() => setCreateTab("department")}
-                    >
-                      Departamento
-                    </button>
-                    <button
-                      type="button"
-                      className={createTab === "course" ? "is-active" : ""}
-                      onClick={() => setCreateTab("course")}
-                    >
-                      Curso
-                    </button>
-                    <button
-                      type="button"
-                      className={createTab === "semester" ? "is-active" : ""}
-                      onClick={() => setCreateTab("semester")}
-                    >
-                      Semestre
-                    </button>
-                  </div>
-
-                  <form className="admin-form" onSubmit={(e) => void handleCreateStructure(e)}>
-                    {createTab === "unit" && (
-                      <>
-                        <div className="admin-form-row">
-                          <label>
-                            <span>Sigla (ex: ICET)</span>
-                            <input
-                              type="text"
-                              required
-                              value={unitCode}
-                              onChange={(e) => setUnitCode(e.target.value)}
-                              placeholder="ICET"
-                            />
-                          </label>
-                          <label>
-                            <span>Nome da unidade</span>
-                            <input
-                              type="text"
-                              required
-                              value={unitName}
-                              onChange={(e) => setUnitName(e.target.value)}
-                              placeholder="Instituto de Ciências Exatas e Tecnológicas"
-                            />
-                          </label>
-                        </div>
-                        <label>
-                          <span>Descrição</span>
-                          <input
-                            type="text"
-                            value={unitDescription}
-                            onChange={(e) => setUnitDescription(e.target.value)}
-                            placeholder="Descrição institucional da unidade"
-                          />
-                        </label>
-                      </>
-                    )}
-
-                    {createTab === "department" && (
-                      <>
-                        <div className="admin-form-row">
-                          <label>
-                            <span>Sigla (ex: DCC)</span>
-                            <input
-                              type="text"
-                              required
-                              value={deptAcronym}
-                              onChange={(e) => setDeptAcronym(e.target.value)}
-                              placeholder="DCC"
-                            />
-                          </label>
-                          <label>
-                            <span>Nome do departamento</span>
-                            <input
-                              type="text"
-                              required
-                              value={deptName}
-                              onChange={(e) => setDeptName(e.target.value)}
-                              placeholder="Departamento de Ciência da Computação"
-                            />
-                          </label>
-                        </div>
-                        <label>
-                          <span>Descrição</span>
-                          <input
-                            type="text"
-                            value={deptDescription}
-                            onChange={(e) => setDeptDescription(e.target.value)}
-                            placeholder="Descrição do departamento"
-                          />
-                        </label>
-                      </>
-                    )}
-
-                    {createTab === "course" && (
-                      <div className="admin-form-row">
-                        <label>
-                          <span>Departamento</span>
-                          <select
-                            required
-                            value={courseDeptId || overview.departments.items[0]?.id || ""}
-                            onChange={(e) => setCourseDeptId(e.target.value)}
-                          >
-                            {overview.departments.items.map((dept) => (
-                              <option key={dept.id} value={dept.id}>
-                                {dept.acronym} — {dept.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          <span>Nome do curso</span>
-                          <input
-                            type="text"
-                            required
-                            value={courseName}
-                            onChange={(e) => setCourseName(e.target.value)}
-                            placeholder="Ciência da Computação"
-                          />
-                        </label>
-                      </div>
-                    )}
-
-                    {createTab === "semester" && (
-                      <div className="admin-form-row">
-                        <label>
-                          <span>Nome do semestre</span>
-                          <input
-                            type="text"
-                            required
-                            value={semesterName}
-                            onChange={(e) => setSemesterName(e.target.value)}
-                            placeholder="2026/2"
-                          />
-                        </label>
-                        <label>
-                          <span>Início</span>
-                          <input
-                            type="date"
-                            required
-                            value={semesterStart}
-                            onChange={(e) => setSemesterStart(e.target.value)}
-                          />
-                        </label>
-                        <label>
-                          <span>Fim</span>
-                          <input
-                            type="date"
-                            required
-                            value={semesterEnd}
-                            onChange={(e) => setSemesterEnd(e.target.value)}
-                          />
-                        </label>
-                      </div>
-                    )}
-
-                    <div className="admin-form-actions">
-                      <button
-                        type="submit"
-                        className="btn-primary"
-                        disabled={actionBusy || (createTab === "course" && overview.departments.items.length === 0)}
-                      >
-                        {actionBusy ? "Salvando…" : "Cadastrar"}
-                      </button>
-                    </div>
-                  </form>
-                </section>
+                <SportsManagementPanel gatewayUrl={env.gatewayUrl} keycloak={keycloak} />
+                {keycloak.token && (
+                  <CampusStructureManager
+                    gatewayUrl={env.gatewayUrl}
+                    token={keycloak.token}
+                    overview={overview}
+                    onSaved={() => reloadOverview(keycloak.token ?? "")}
+                  />
+                )}
 
                 <section className="admin-card admin-manage-card" aria-labelledby="permissions-title">
                   <div className="admin-directory-heading">
@@ -740,14 +515,18 @@ export function App({ keycloak, keycloakReady }: AppProps) {
                     <span className="admin-count-pill">{activeTarget?.adminIds.length ?? 0}</span>
                   </div>
                   <p className="admin-empty-note">
-                    Usuários listados aqui recebem automaticamente os botões de gestão no Web (+ Criar evento, + Criar
-                    oportunidade, + Criar esporte e edição do perfil institucional).
+                    Administradores podem editar o perfil e publicar comunicados, além de gerenciar eventos e
+                    oportunidades do órgão selecionado.
                   </p>
 
                   <div className="admin-form">
                     <label>
                       <span>Selecionar órgão / entidade / comunidade</span>
-                      <select value={permTargetKey} onChange={(e) => setPermTargetKey(e.target.value)}>
+                      <select
+                        value={activeTarget?.key ?? ""}
+                        disabled={!permissionTargets.length}
+                        onChange={(e) => setPermTargetKey(e.target.value)}
+                      >
                         {permissionTargets.map((target) => (
                           <option key={target.key} value={target.key}>
                             {target.label} ({target.adminIds.length} admin)
@@ -762,14 +541,18 @@ export function App({ keycloak, keycloakReady }: AppProps) {
                           activeTarget.adminIds.map((adminSub) => (
                             <li key={adminSub}>
                               <span>{resolveUserLabel(adminSub)}</span>
-                              <button
-                                type="button"
-                                className="btn-secondary"
-                                disabled={actionBusy}
-                                onClick={() => void handleRemoveAdmin(adminSub)}
-                              >
-                                Remover
-                              </button>
+                              {isProtectedGlobalAdmin(adminSub) ? (
+                                <span className="admin-protected-admin">Administrador global · acesso permanente</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn-secondary"
+                                  disabled={actionBusy}
+                                  onClick={() => void handleRemoveAdmin(adminSub)}
+                                >
+                                  Remover
+                                </button>
+                              )}
                             </li>
                           ))
                         ) : (
@@ -803,7 +586,7 @@ export function App({ keycloak, keycloakReady }: AppProps) {
                       </label>
                     </div>
                     <div className="admin-form-actions">
-                      {activeTarget && activeTarget.kind !== "university" && (
+                      {activeTarget && (
                         <button
                           type="button"
                           className="btn-secondary"
@@ -828,7 +611,6 @@ export function App({ keycloak, keycloakReady }: AppProps) {
                 <RequestsCard
                   requests={overview.pendingRequests.items}
                   reviewingRequestId={reviewingRequestId}
-                  message={reviewMessage}
                   onReview={reviewRequest}
                 />
               </>
@@ -843,12 +625,10 @@ export function App({ keycloak, keycloakReady }: AppProps) {
 function RequestsCard({
   requests,
   reviewingRequestId,
-  message,
   onReview,
 }: {
   requests: InstitutionalRequestSummary[];
   reviewingRequestId: string;
-  message: string;
   onReview: (requestId: string, decision: "approve" | "reject") => Promise<void>;
 }) {
   return (
@@ -860,7 +640,6 @@ function RequestsCard({
         </div>
         <span className="admin-count-pill">{requests.length}</span>
       </div>
-      {message && <p className="admin-success-message">{message}</p>}
       {requests.length ? (
         <ul>
           {requests.map((request) => {

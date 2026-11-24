@@ -17,6 +17,10 @@ export function campusProfilePath(type: CampusProfileType, id: string): string {
   return `/perfis/${profileTypeSlugs[type]}/${encodeURIComponent(id)}`;
 }
 
+export function communityCentralPath(id: string): string {
+  return `/comunidades/${encodeURIComponent(id)}/central`;
+}
+
 export function campusProfileTypeFromSlug(value: string | undefined): CampusProfileType | null {
   if (value === "universidade") return "UNIVERSITY";
   if (value === "unidade") return "ACADEMIC_UNIT";

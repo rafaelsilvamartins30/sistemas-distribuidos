@@ -55,9 +55,16 @@ public class OpportunityService {
         return OpportunityListResponse.from(result);
     }
 
-    public OpportunityResponse getOpportunity(UUID id) {
-        return this.opportunityRepository.findById(id).map(OpportunityResponse::from)
+    public OpportunityResponse getOpportunity(UUID id, String bearerToken) {
+        Opportunity opportunity = this.opportunityRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Opportunity not found"));
+        boolean authorized;
+        try {
+            authorized = this.isAuthorizedPublisher(opportunity, bearerToken);
+        } catch (ResponseStatusException exception) {
+            authorized = false;
+        }
+        return OpportunityResponse.from(opportunity, authorized);
     }
 
     public OpportunityPublisherContextsResponse getPublisherContexts(String bearerToken) {
@@ -69,16 +76,22 @@ public class OpportunityService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "page must be non-negative and size must be between 1 and 100");
         }
-        List<OpportunityPublisherContext> contexts = this.campusPublisherClient.getContexts(bearerToken).items();
-        Set<UUID> publisherIds = contexts.stream().map(OpportunityPublisherContext::publisherId)
-                .collect(Collectors.toSet());
-        if (publisherIds.isEmpty()) {
+        var publishers = this.campusPublisherClient.getContexts(bearerToken).items().stream()
+                .collect(Collectors.groupingBy(OpportunityPublisherContext::publisherType,
+                        Collectors.mapping(OpportunityPublisherContext::publisherId, Collectors.toSet())));
+        if (publishers.isEmpty()) {
             return new OpportunityListResponse(List.of(), page, size, 0, 0);
         }
         var pageable = PageRequest.of(page, size,
                 Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.ASC, "id")));
-        var result = this.opportunityRepository.findByPublisherIdIn(publisherIds, pageable)
-                .map(OpportunityResponse::from);
+        var result = this.opportunityRepository
+                .findAll((row, query,
+                        builder) -> builder.or(publishers.entrySet().stream()
+                                .map(entry -> builder.and(builder.equal(row.get("publisherType"), entry.getKey()),
+                                        row.get("publisherId").in(entry.getValue())))
+                                .toArray(jakarta.persistence.criteria.Predicate[]::new)),
+                        pageable)
+                .map(opportunity -> OpportunityResponse.from(opportunity, true));
         return OpportunityListResponse.from(result);
     }
 
@@ -115,7 +128,7 @@ public class OpportunityService {
 
     @Transactional
     public OpportunityResponse updateOpportunity(UUID id, UpdateOpportunityRequest request, String bearerToken) {
-        Opportunity opportunity = this.opportunityRepository.findById(id)
+        Opportunity opportunity = this.opportunityRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Opportunity not found"));
         this.verifyPublisherAuthorization(opportunity, bearerToken);
 
@@ -164,33 +177,41 @@ public class OpportunityService {
             }
             status = normalizedStatus;
         }
+        if (Boolean.TRUE.equals(request.reactivate())) {
+            status = Opportunity.activeStatus();
+            if (deadline != null && !deadline.isAfter(now)) {
+                deadline = null;
+            }
+        }
         if (Opportunity.activeStatus().equals(status) && deadline != null && !deadline.isAfter(now)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Active opportunity deadline must be in the future");
         }
 
         opportunity.updateDetails(title, description, category, deadline, externalUrl, imageUrl, status);
-        return OpportunityResponse.from(this.opportunityRepository.saveAndFlush(opportunity));
+        return OpportunityResponse.from(this.opportunityRepository.saveAndFlush(opportunity), true);
     }
 
     @Transactional
     public OpportunityResponse closeOpportunity(UUID id, String bearerToken) {
-        Opportunity opportunity = this.opportunityRepository.findById(id)
+        Opportunity opportunity = this.opportunityRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Opportunity not found"));
         this.verifyPublisherAuthorization(opportunity, bearerToken);
         opportunity.close();
-        return OpportunityResponse.from(this.opportunityRepository.saveAndFlush(opportunity));
+        return OpportunityResponse.from(this.opportunityRepository.saveAndFlush(opportunity), true);
     }
 
     private void verifyPublisherAuthorization(Opportunity opportunity, String bearerToken) {
-        List<OpportunityPublisherContext> contexts = this.campusPublisherClient.getContexts(bearerToken).items();
-        boolean authorized = contexts.stream()
-                .anyMatch(context -> opportunity.getPublisherType().equals(context.publisherType())
-                        && opportunity.getPublisherId().equals(context.publisherId()));
-        if (!authorized) {
+        if (!this.isAuthorizedPublisher(opportunity, bearerToken)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "The authenticated user is not authorized for this publisher");
         }
+    }
+
+    private boolean isAuthorizedPublisher(Opportunity opportunity, String bearerToken) {
+        return this.campusPublisherClient.getContexts(bearerToken).items().stream()
+                .anyMatch(context -> opportunity.getPublisherType().equals(context.publisherType())
+                        && opportunity.getPublisherId().equals(context.publisherId()));
     }
 
     private static String requireNonBlank(String value, String message) {

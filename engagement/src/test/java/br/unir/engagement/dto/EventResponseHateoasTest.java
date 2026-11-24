@@ -21,9 +21,10 @@ class EventResponseHateoasTest {
                 RegistrationMode.INTERNAL_PAID, 2500L, null, true, AttendanceMode.ORGANIZER_SCANS_PARTICIPANT,
                 EventStatus.ACTIVE, Instant.now());
 
-        EventResponse response = EventResponse.from(view);
+        EventResponse response = EventResponse.from(view, true);
 
-        assertThat(response.links()).containsKeys("self", "collection", "update", "cancel", "register", "attendanceQr");
+        assertThat(response.links()).containsOnlyKeys("self", "collection", "update", "cancel", "register");
+        assertThat(EventResponse.from(view).links()).containsOnlyKeys("self", "collection", "register");
         assertThat(response.links().get("self")).isEqualTo(new HateoasLink("/api/v1/events/" + eventId, "GET"));
         assertThat(response.links().get("register"))
                 .isEqualTo(new HateoasLink("/api/v1/events/" + eventId + "/registrations", "POST"));

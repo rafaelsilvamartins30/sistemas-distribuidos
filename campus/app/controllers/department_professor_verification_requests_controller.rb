@@ -10,7 +10,7 @@ class DepartmentProfessorVerificationRequestsController < ApplicationController
     department = Department.find_by(id: params[:department_id])
     return render_problem(:not_found, 'Department not found') unless department
 
-    unless department.administered_by?(current_subject)
+    unless global_platform_admin? || department.administered_by?(current_subject)
       return render_problem(:forbidden, 'Department administrator access is required')
     end
 
@@ -79,7 +79,7 @@ class DepartmentProfessorVerificationRequestsController < ApplicationController
   end
 
   def department_admin_for_request?(verification)
-    return true if verification.target_department.administered_by?(current_subject)
+    return true if global_platform_admin? || verification.target_department.administered_by?(current_subject)
 
     render_problem(:forbidden, 'Department administrator access is required')
     false

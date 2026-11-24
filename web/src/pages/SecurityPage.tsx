@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { Icon } from "../components/Icon";
+import { useToast } from "../contexts/ToastContext";
 import {
   endMySession,
   formatSessionDate,
@@ -28,18 +29,17 @@ function accountError(error: unknown): string {
 
 export function SecurityPage() {
   const { keycloak } = useOutletContext<AccountContext>();
+  const toast = useToast();
   const [totpStatus, setTotpStatus] = useState<TotpStatus>("loading");
-  const [totpError, setTotpError] = useState("");
   const [sessions, setSessions] = useState<KeycloakSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
-  const [sessionsError, setSessionsError] = useState("");
+  const [sessionsFailed, setSessionsFailed] = useState(false);
   const [revoking, setRevoking] = useState("");
 
   const loadSecurityData = useCallback(async () => {
     setTotpStatus("loading");
-    setTotpError("");
     setSessionsLoading(true);
-    setSessionsError("");
+    setSessionsFailed(false);
     const [totpResult, sessionsResult] = await Promise.allSettled([
       hasTotpCredential(keycloak),
       getMySessions(keycloak),
@@ -48,13 +48,16 @@ export function SecurityPage() {
     if (totpResult.status === "fulfilled") setTotpStatus(totpResult.value ? "configured" : "missing");
     else {
       setTotpStatus("error");
-      setTotpError(accountError(totpResult.reason));
+      toast.error(accountError(totpResult.reason));
     }
 
     if (sessionsResult.status === "fulfilled") setSessions(sessionsResult.value);
-    else setSessionsError(accountError(sessionsResult.reason));
+    else {
+      setSessionsFailed(true);
+      toast.error(accountError(sessionsResult.reason));
+    }
     setSessionsLoading(false);
-  }, [keycloak]);
+  }, [keycloak, toast]);
 
   useEffect(() => {
     void loadSecurityData();
@@ -73,12 +76,12 @@ export function SecurityPage() {
   async function revokeSession(session: KeycloakSession) {
     if (!window.confirm("Encerrar esta sessão? O dispositivo precisará entrar novamente.")) return;
     setRevoking(session.id);
-    setSessionsError("");
     try {
       await endMySession(keycloak, session.id);
       setSessions((current) => current.filter((item) => item.id !== session.id));
+      toast.success("Sessão encerrada com sucesso.");
     } catch (error) {
-      setSessionsError(accountError(error));
+      toast.error(accountError(error));
     } finally {
       setRevoking("");
     }
@@ -140,11 +143,6 @@ export function SecurityPage() {
                       ? "Ainda não configurada"
                       : "Não foi possível verificar"}
               </span>
-              {totpError && (
-                <p className="notice notice-error" role="alert">
-                  {totpError}
-                </p>
-              )}
             </div>
           </div>
           <div className="setting-card-action">
@@ -191,18 +189,13 @@ export function SecurityPage() {
           Sem 2FA, a troca pede apenas sua senha. Configure o autenticador para exigir também o código.
         </p>
       )}
-      {sessionsError && (
-        <p className="notice notice-error" role="alert">
-          {sessionsError}
-        </p>
-      )}
 
       <section className="appearance-section" aria-labelledby="sessions-title">
         <h3 id="sessions-title">Sessões ativas</h3>
         <p>Confira onde sua conta está conectada e encerre sessões que não reconhece.</p>
         {sessionsLoading ? (
           <p className="notice">Carregando sessões…</p>
-        ) : sessionsError ? (
+        ) : sessionsFailed ? (
           <button className="button button-secondary button-small retry-button" onClick={() => void loadSecurityData()}>
             Tentar novamente
           </button>

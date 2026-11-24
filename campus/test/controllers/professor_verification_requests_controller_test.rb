@@ -55,15 +55,32 @@ class ProfessorVerificationRequestsControllerTest < ActionDispatch::IntegrationT
     assert_empty ProfessorAffiliation.all
   end
 
+  test 'global administrator can review professor verification requests for any department' do
+    department = create_department(administrators: ['department-admin'])
+    create_profile(subject: 'faculty-subject')
+    submit_request(subject: 'faculty-subject')
+    verification = InstitutionalRequest.sole
+    create_profile(subject: 'global-admin-sub', institutional_id: 'ADMIN-0001')
+
+    list_requests(subject: 'global-admin-sub', department_id: department.id, roles: ['PLATFORM_ADMIN'])
+    assert_response :success
+    assert_equal [verification.id], response.parsed_body.fetch('items').pluck('id')
+
+    review_request(subject: 'global-admin-sub', request_id: verification.id, decision: 'approve',
+                   roles: ['PLATFORM_ADMIN'])
+    assert_response :success
+    assert_equal 'APPROVED', verification.reload.status
+    assert_equal 'global-admin-sub', verification.reviewed_by_user_id
+    assert_equal 'ACTIVE', ProfessorAffiliation.sole.status
+  end
+
   test 'request requires an existing profile and rejects spoofed fields and duplicates' do
     create_department(administrators: [])
     submit_request(subject: 'no-profile')
     assert_response :not_found
 
     create_profile(subject: 'faculty-subject')
-    submit_request(
-      subject: 'faculty-subject', extra: { requestedByUserId: 'department-admin' }
-    )
+    submit_request(subject: 'faculty-subject', extra: { requestedByUserId: 'department-admin' })
     assert_response :bad_request
 
     submit_request(subject: 'faculty-subject')
@@ -74,40 +91,29 @@ class ProfessorVerificationRequestsControllerTest < ActionDispatch::IntegrationT
 
   test 'context lookup rejects an invalid bearer token' do
     get '/internal/v1/opportunity-publishers', headers: { 'Authorization' => 'Bearer invalid-token' }
-
     assert_response :unauthorized
   end
 
   private
 
   def submit_request(subject:, department_id: nil, extra: {})
-    with_jwks do
-      post '/professor-verification-requests',
-           params: (department_id ? { departmentId: department_id } : {}).merge(extra),
-           headers: bearer_headers(subject: subject),
-           as: :json
-    end
+    params = (department_id ? { departmentId: department_id } : {}).merge(extra)
+    headers = bearer_headers(subject: subject)
+    with_jwks { post '/professor-verification-requests', params: params, headers: headers, as: :json }
   end
 
-  def list_requests(subject:, department_id:)
-    with_jwks do
-      get "/departments/#{department_id}/professor-verification-requests",
-          headers: bearer_headers(subject: subject)
-    end
+  def list_requests(subject:, department_id:, roles: [])
+    headers = bearer_headers(subject: subject, roles: roles)
+    with_jwks { get "/departments/#{department_id}/professor-verification-requests", headers: headers }
   end
 
-  def review_request(subject:, request_id:, decision:)
-    with_jwks do
-      post "/professor-verification-requests/#{request_id}/#{decision}",
-           headers: bearer_headers(subject: subject),
-           as: :json
-    end
+  def review_request(subject:, request_id:, decision:, roles: [])
+    headers = bearer_headers(subject: subject, roles: roles)
+    with_jwks { post "/professor-verification-requests/#{request_id}/#{decision}", headers: headers, as: :json }
   end
 
   def request_contexts(subject:)
-    with_jwks do
-      get '/internal/v1/opportunity-publishers', headers: bearer_headers(subject: subject)
-    end
+    with_jwks { get '/internal/v1/opportunity-publishers', headers: bearer_headers(subject: subject) }
   end
 
   def professor_affiliation(subject)
@@ -115,8 +121,6 @@ class ProfessorVerificationRequestsControllerTest < ActionDispatch::IntegrationT
   end
 
   def create_department(administrators: [])
-    department = ensure_profile_department!
-    department.update!(administrator_user_ids: administrators)
-    department
+    ensure_profile_department!.tap { |department| department.update!(administrator_user_ids: administrators) }
   end
 end

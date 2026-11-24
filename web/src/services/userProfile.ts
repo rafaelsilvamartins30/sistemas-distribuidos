@@ -1,3 +1,5 @@
+import { parseApiError } from "../utils/apiError.js";
+
 export type AffiliationStatus = "STUDENT" | "PROFESSOR" | "ALUMNI";
 export type AcademicLevel = "UNDERGRADUATE" | "MASTERS" | "DOCTORATE";
 
@@ -39,8 +41,11 @@ export interface UpdateProfileInput {
 }
 
 export class UserProfileApiError extends Error {
-  constructor(public readonly status: number) {
-    super(`Gateway respondeu com status ${status}.`);
+  constructor(
+    public readonly status: number,
+    message?: string,
+  ) {
+    super(message ?? `Gateway respondeu com status ${status}.`);
     this.name = "UserProfileApiError";
   }
 }
@@ -58,7 +63,8 @@ async function requestProfile(token: string, path: string, method = "GET", body?
   });
 
   if (!response.ok) {
-    throw new UserProfileApiError(response.status);
+    const parsed = await parseApiError(response);
+    throw new UserProfileApiError(response.status, parsed.message);
   }
 
   return response.json() as Promise<UserProfile>;

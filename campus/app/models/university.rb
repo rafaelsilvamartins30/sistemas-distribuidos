@@ -2,6 +2,8 @@
 
 # UNIR has one university record. Departments belong to this singleton implicitly.
 class University < ApplicationRecord
+  include ProtectGlobalAdministrator
+
   SINGLETON_ID = '00000000-0000-4000-8000-000000000001'
 
   has_many :semesters, dependent: :restrict_with_error

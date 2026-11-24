@@ -32,4 +32,22 @@ module KeycloakAuthenticated
   def current_display_name
     @token_claims['name'].presence || @token_claims['preferred_username'].presence || @token_claims['email'].presence
   end
+
+  def platform_admin_role?
+    roles = @token_claims.dig('realm_access', 'roles')
+    roles.is_a?(Array) && roles.include?('PLATFORM_ADMIN')
+  end
+
+  def global_platform_admin?
+    return false unless platform_admin_role?
+
+    global_id = global_administrator_subject
+    return global_id == current_subject if global_id.present?
+
+    University.current&.administrator_user_ids&.include?(current_subject) == true
+  end
+
+  def global_administrator_subject
+    UserProfile.find_by(registration_code: ProtectGlobalAdministrator::GLOBAL_ADMIN_REGISTRATION_CODE)&.keycloak_user_id
+  end
 end

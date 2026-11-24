@@ -405,6 +405,14 @@ seed_databases() {
     < "$ROOT/config/local-demo-accounts.json"
 }
 
+populate_demo_data() {
+  if [[ "$SEED_MODE" != "demo" ]]; then
+    return 0
+  fi
+  echo "Populating local demo data (posts, events, opportunities, and sports)..."
+  UNIR_DEMO_BASE_URL="http://localhost:${INGRESS_PORT}" python3 "$ROOT/scripts/populate-local-demo.py"
+}
+
 rebuild_event_projection() {
   echo "Rebuilding the MongoDB event projection from PostgreSQL after seeds..."
   kubectl -n "$NAMESPACE" exec deploy/engagement -- env \
@@ -469,6 +477,7 @@ main() {
   done
 
   seed_databases
+  populate_demo_data
   rebuild_event_projection
   sync_rag_index
 

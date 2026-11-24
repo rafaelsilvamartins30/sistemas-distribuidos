@@ -14,7 +14,6 @@
     "noEmitOnError": true
   },
   "include": [
-    "src/components/DepartmentCard.tsx",
     "src/components/EventCard.tsx",
     "src/components/InstitutionalProfileContent.tsx",
     "src/components/OpportunityCard.tsx",
@@ -24,6 +23,7 @@
     "src/services/opportunities.ts",
     "src/services/registrations.ts",
     "src/services/attendance.ts",
+    "src/utils/apiError.ts",
     "test/**/*.ts",
     "test/**/*.tsx"
   ]

@@ -1,3 +1,4 @@
+import { formatBrl } from "../utils/currency.js";
 import type { Event } from "../services/events.js";
 import { eventCategoryLabel, eventStatusLabel, organizerTypeLabel } from "../utils/eventPresentation.js";
 
@@ -12,7 +13,7 @@ function eventTime(value: string): string {
 function priceLabel(event: Event): string {
   if (event.registrationMode === "INTERNAL_FREE") return "Gratuito";
   if (event.price == null) return "Valor a consultar";
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(event.price / 100);
+  return formatBrl(event.price);
 }
 
 export function EventCard({ event }: { event: Event }) {

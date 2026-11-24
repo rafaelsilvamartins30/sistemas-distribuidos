@@ -97,6 +97,14 @@ func NewHandlerWithStoreAndVerifier(db DatabasePinger, reader ChargeReader, conf
 	if confirmer != nil {
 		mux.HandleFunc("POST /local/simulated-payments/{registrationId}/confirm", func(w http.ResponseWriter,
 			r *http.Request) {
+			_, roles, ok := authenticatedPrincipal(w, r, verifier)
+			if !ok {
+				return
+			}
+			if !hasRole(roles, "PLATFORM_ADMIN") {
+				writeError(w, http.StatusForbidden, "PLATFORM_ADMIN role is required")
+				return
+			}
 			handleConfirm(w, r, func(ctx context.Context, regID string, paidAt time.Time) (payment.PaymentConfirmedEvent, error) {
 				return confirmer.ConfirmSimulatedPayment(ctx, regID, paidAt)
 			})
@@ -104,7 +112,7 @@ func NewHandlerWithStoreAndVerifier(db DatabasePinger, reader ChargeReader, conf
 
 		if userConfirmer, ok := confirmer.(UserSimulatedPaymentConfirmer); ok {
 			mux.HandleFunc("POST /api/v1/payments/{registrationId}/confirm", func(w http.ResponseWriter, r *http.Request) {
-				userID, ok := authenticatedSubject(w, r, verifier)
+				userID, _, ok := authenticatedPrincipal(w, r, verifier)
 				if !ok {
 					return
 				}
@@ -187,23 +195,41 @@ func hasBearerToken(authorization string) bool {
 }
 
 func authenticatedSubject(w http.ResponseWriter, r *http.Request, verifier SubjectVerifier) (string, bool) {
+	subject, _, ok := authenticatedPrincipal(w, r, verifier)
+	return subject, ok
+}
+
+func authenticatedPrincipal(w http.ResponseWriter, r *http.Request, verifier SubjectVerifier) (string, []string, bool) {
 	if verifier == nil {
 		writeError(w, http.StatusServiceUnavailable, "Token verification is not configured")
-		return "", false
+		return "", nil, false
 	}
 	parts := strings.Fields(r.Header.Get("Authorization"))
 	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 		writeError(w, http.StatusUnauthorized, "Invalid bearer token")
-		return "", false
+		return "", nil, false
 	}
-	userID, err := verifier.VerifySubject(r.Context(), parts[1])
+	var (
+		userID string
+		roles  []string
+		err    error
+	)
+	if roleVerifier, ok := verifier.(RoleVerifier); ok {
+		userID, roles, err = roleVerifier.VerifyToken(r.Context(), parts[1])
+	} else {
+		userID, err = verifier.VerifySubject(r.Context(), parts[1])
+	}
 	if err == nil {
-		return userID, true
+		return userID, roles, true
 	}
 	if errors.Is(err, ErrIdentityProviderUnavailable) {
 		writeError(w, http.StatusServiceUnavailable, "Token verification is unavailable")
-		return "", false
+		return "", nil, false
+	}
+	if errors.Is(err, ErrForbiddenAccessToken) {
+		writeError(w, http.StatusForbidden, "Missing required UNIR role")
+		return "", nil, false
 	}
 	writeError(w, http.StatusUnauthorized, "Invalid bearer token")
-	return "", false
+	return "", nil, false
 }

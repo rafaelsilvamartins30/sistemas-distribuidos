@@ -2,6 +2,8 @@
 
 # An institution-level profile managed independently from departments.
 class AcademicUnit < ApplicationRecord
+  include ProtectGlobalAdministrator
+
   before_validation :assign_id, on: :create
 
   validates :code, :name, :description, :general_info_markdown, presence: true

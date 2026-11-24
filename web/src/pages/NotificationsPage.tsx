@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
+import { useToast } from "../contexts/ToastContext.js";
 import {
   getNotifications,
   markAllNotificationsRead,
   markNotificationRead,
   type CampusNotification,
 } from "../services/campusSocial.js";
+import { extractErrorMessage } from "../utils/apiError.js";
 import { campusProfilePath } from "../utils/profileRoutes.js";
 
 interface WebContext {
@@ -33,25 +35,24 @@ export function notificationPath(notification: CampusNotification): string {
 
 export function NotificationsPage() {
   const { keycloak } = useOutletContext<WebContext>();
+  const toast = useToast();
   const [items, setItems] = useState<CampusNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const token = keycloak.token ?? "";
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError("");
     try {
       const page = await getNotifications(token);
       setItems(page.items);
       setUnreadCount(page.unreadCount ?? 0);
-    } catch {
-      setError("Não foi possível carregar sua central de notificações.");
+    } catch (err) {
+      toast.error(extractErrorMessage(err, "Não foi possível carregar sua central de notificações."));
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, toast]);
 
   useEffect(() => {
     document.title = "UNIR — Notificações";
@@ -64,8 +65,8 @@ export function NotificationsPage() {
       const updated = await markNotificationRead(token, item.id);
       setItems((current) => current.map((candidate) => (candidate.id === updated.id ? updated : candidate)));
       setUnreadCount((count) => Math.max(0, count - 1));
-    } catch {
-      setError("Não foi possível atualizar o estado da notificação.");
+    } catch (err) {
+      toast.error(extractErrorMessage(err, "Não foi possível atualizar o estado da notificação."));
     }
   }
 
@@ -74,8 +75,9 @@ export function NotificationsPage() {
       await markAllNotificationsRead(token);
       setItems((current) => current.map((item) => ({ ...item, readAt: item.readAt ?? new Date().toISOString() })));
       setUnreadCount(0);
-    } catch {
-      setError("Não foi possível marcar as notificações como lidas.");
+      toast.success("Todas as notificações foram marcadas como lidas.");
+    } catch (err) {
+      toast.error(extractErrorMessage(err, "Não foi possível marcar as notificações como lidas."));
     }
   }
 
@@ -95,11 +97,6 @@ export function NotificationsPage() {
           Marcar todas como lidas
         </button>
       </div>
-      {error && (
-        <p className="notice notice-error" role="alert">
-          {error}
-        </p>
-      )}
       {loading ? (
         <p className="notice" role="status">
           Carregando notificações…

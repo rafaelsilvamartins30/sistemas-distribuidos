@@ -9,8 +9,8 @@ Backend for Frontend dedicado exclusivamente ao painel **UNIR Administration (`a
 
 ## Como funciona e singularidades
 
-1. **Isolamento de superfície administrativa:** separa completamente as operações de governança global da universidade do tráfego do `web-bff`, mantendo o mesmo princípio de não possuir banco de dados próprio e sempre repassar o JWT do administrador ao `Campus`.
-2. **Agregação dedicada (`GET /api/v1/admin/overview`):** reduz múltiplas chamadas paralelas do painel em um único payload consolidado contendo universidade, unidades acadêmicas, departamentos, cursos, semestres, entidades, comunidades, usuários cadastrados e solicitações pendentes.
+1. **Isolamento de superfície administrativa:** mantém edição da universidade, catálogo de semestres e gestão esportiva fora do `web-bff`. O Admin BFF não tem banco próprio e repassa o JWT ao serviço responsável (`Campus` ou `Engagement`).
+2. **Agregações dedicadas:** `/api/v1/admin/overview` reúne dados acadêmicos e solicitações; `/api/v1/admin/sports/catalog` reúne modalidades, contextos, campeonatos e temporadas.
 
 ---
 
@@ -19,9 +19,11 @@ Backend for Frontend dedicado exclusivamente ao painel **UNIR Administration (`a
 - `GET /health`
 - `GET /api/v1/admin/me` — perfil do administrador autenticado
 - `GET /api/v1/admin/overview` — agregação completa de governança institucional
+- `GET /api/v1/admin/sports/catalog` — catálogo e contextos esportivos
 - `POST /api/v1/admin/academic-units|departments|courses|semesters` — criação de estruturas acadêmicas
-- `PATCH /api/v1/admin/university|academic-units/:id|departments/:id|entities/:id|communities/:id` — edição de perfis institucionais e `administratorUserIds`
-- `DELETE /api/v1/admin/academic-units/:id|departments/:id|courses/:id|semesters/:id|entities/:id|communities/:id` — remoção de estruturas
+- `PATCH /api/v1/admin/university|semesters/:id|academic-units/:id|departments/:id|entities/:id|communities/:id` — edição institucional; a universidade não aceita administradores contextuais
+- `POST /api/v1/admin/sports|competitions|seasons` and `/api/v1/admin/sports-events/**`, `/api/v1/admin/sports-matches/**` — gestão de modalidades, campeonatos e partidas
+- `DELETE /api/v1/admin/academic-units/:id|departments/:id|courses/:id|entities/:id|communities/:id` — remoção de estruturas
 - `POST /api/v1/admin/requests/:requestId/approve|reject` — decisão sobre solicitações pendentes
 - **Contratos:** [Catálogo Acadêmico](../docs/contracts/campus-academic-catalog.md) · [Semestres](../docs/contracts/campus-semesters.md)
 

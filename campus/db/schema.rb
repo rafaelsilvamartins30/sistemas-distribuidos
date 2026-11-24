@@ -13,19 +13,19 @@
 ActiveRecord::Schema[8.1].define(version: 2026_11_21_000000) do
   create_table "academic_entities", id: :string, force: :cascade do |t|
     t.string "name", limit: 255, null: false
+    t.string "entity_type", limit: 255, null: false
     t.text "description", null: false
     t.text "general_info_markdown", null: false
-    t.string "entity_type", limit: 255, null: false
     t.string "department_id"
     t.string "logo_url"
     t.string "banner_url"
-    t.json "links", default: [], null: false
-    t.json "administrator_user_ids", default: [], null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
     t.string "source_url"
     t.string "source_affiliation_text"
+    t.json "links", default: [], null: false
+    t.json "administrator_user_ids", default: [], null: false
     t.boolean "reference_only", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
     t.index ["department_id"], name: "index_academic_entities_on_department_id"
     t.index ["entity_type"], name: "index_academic_entities_on_entity_type"
     t.index ["name"], name: "index_academic_entities_on_name"
@@ -35,15 +35,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_000000) do
     t.string "code", limit: 80, null: false
     t.string "name", limit: 255, null: false
     t.string "source_url"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.text "description", default: "", null: false
-    t.text "general_info_markdown", default: "", null: false
     t.string "logo_url"
     t.string "banner_url"
+    t.text "description", default: "", null: false
+    t.text "general_info_markdown", default: "", null: false
     t.json "links", default: [], null: false
     t.json "administrator_user_ids", default: [], null: false
     t.boolean "reference_only", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
     t.index ["code"], name: "index_academic_units_on_code", unique: true
     t.index ["name"], name: "index_academic_units_on_name"
   end
@@ -66,13 +66,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_000000) do
     t.text "description", null: false
     t.text "general_info_markdown", null: false
     t.string "category", limit: 255
+    t.string "department_id"
     t.string "logo_url"
     t.string "banner_url"
     t.json "links", default: [], null: false
     t.json "administrator_user_ids", default: [], null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.string "department_id"
     t.index ["category"], name: "index_communities_on_category"
     t.index ["department_id"], name: "index_communities_on_department_id"
     t.index ["name"], name: "index_communities_on_name"
@@ -97,12 +97,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_000000) do
     t.string "source_url"
     t.text "source_note"
     t.boolean "reference_only", default: true, null: false
+    t.string "department_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.string "department_id"
     t.index ["department_id", "name"], name: "index_courses_on_department_id_and_name", unique: true, where: "department_id IS NOT NULL"
     t.index ["department_id"], name: "index_courses_on_department_id"
-    t.index ["name"], name: "index_courses_on_academic_unit_id_and_name", unique: true
     t.index ["name"], name: "index_courses_on_name"
   end
 
@@ -113,19 +112,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_000000) do
     t.text "general_info_markdown", null: false
     t.string "logo_url"
     t.string "banner_url"
+    t.string "source_url"
     t.json "links", default: [], null: false
     t.json "administrator_user_ids", default: [], null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.string "source_url"
     t.index ["name"], name: "index_departments_on_name"
   end
 
   create_table "feed_posts", id: :string, force: :cascade do |t|
     t.string "owner_type", limit: 32, null: false
+    t.string "term", limit: 32, null: false
     t.string "owner_id", null: false
     t.string "author_user_id", null: false
-    t.string "term", limit: 32, null: false
     t.text "body", default: "", null: false
     t.json "image_urls", default: [], null: false
     t.string "external_url"
@@ -140,8 +139,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_000000) do
 
   create_table "follows", id: :string, force: :cascade do |t|
     t.string "user_id", null: false
-    t.string "target_type", limit: 32, null: false
     t.string "target_id", null: false
+    t.string "target_type", limit: 32, null: false
     t.datetime "unfollowed_at"
     t.datetime "created_at", null: false
     t.index ["target_type", "target_id", "unfollowed_at"], name: "index_follows_on_target_type_and_target_id_and_unfollowed_at"
@@ -151,12 +150,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_000000) do
 
   create_table "notifications", id: :string, force: :cascade do |t|
     t.string "recipient_user_id", null: false
+    t.string "title", null: false
+    t.string "resource_id", null: false
     t.string "actor_user_id"
     t.string "event_type", limit: 64, null: false
-    t.string "title", null: false
-    t.text "message", null: false
     t.string "resource_type", limit: 64, null: false
-    t.string "resource_id", null: false
+    t.text "message", null: false
     t.datetime "read_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
@@ -212,11 +211,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_000000) do
     t.string "requested_by_user_id", limit: 255, null: false
     t.string "target_department_id"
     t.json "payload_json", default: {}, null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
     t.string "status", limit: 32, null: false
     t.datetime "reviewed_at"
     t.string "reviewed_by_user_id", limit: 255
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
     t.index ["requested_by_user_id", "target_department_id", "type"], name: "index_requests_unique_pending_professor_verification", unique: true, where: "type = 'PROFESSOR_VERIFICATION' AND status = 'PENDING'"
     t.index ["requested_by_user_id", "type", "status"], name: "index_requests_on_requested_by_user_id_and_type_and_status"
     t.index ["target_department_id"], name: "index_requests_on_target_department_id"
@@ -245,9 +244,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_000000) do
     t.string "logo_url"
     t.string "banner_url"
     t.json "links", default: [], null: false
+    t.json "administrator_user_ids", default: [], null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.json "administrator_user_ids", default: [], null: false
   end
 
   create_table "user_profiles", id: :string, force: :cascade do |t|
@@ -256,14 +255,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_21_000000) do
     t.string "registration_code", limit: 255, null: false
     t.string "legacy_affiliation_status", limit: 20, null: false
     t.string "academic_level", limit: 20, null: false
+    t.string "user_type"
     t.string "legacy_course_name"
     t.string "legacy_department_name"
     t.json "interests", default: [], null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.string "user_type"
     t.string "course_id"
     t.string "department_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
     t.index ["course_id"], name: "index_user_profiles_on_course_id"
     t.index ["department_id"], name: "index_user_profiles_on_department_id"
     t.index ["keycloak_user_id"], name: "index_user_profiles_on_keycloak_user_id", unique: true

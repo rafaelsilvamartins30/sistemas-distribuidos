@@ -2,23 +2,23 @@
 
 # Profile endpoints implementing the existing public HTTP contract.
 class UsersController < ApplicationController
+  include KeycloakAuthenticated
   include UserProfiles::ApiContract
 
   wrap_parameters false
 
-  before_action :authenticate_keycloak!
-
   def index
-    items = directory_scope.limit(200).map { |profile| directory_item(profile) }
-    render json: { items: items }
+    return index_by_subjects if params.key?(:subjects)
+    unless global_platform_admin?
+      return render_problem(:forbidden, 'Only the platform administrator can list the user directory')
+    end
+
+    render json: { items: directory_scope.limit(200).map { |profile| directory_item(profile) } }
   end
 
   def create
-    payload = load_payload(CREATE_FIELDS)
+    payload = validated_profile_payload(CREATE_FIELDS, required: true)
     return unless payload
-    unless valid_catalog_relations?(payload, required: true)
-      return render_problem(:bad_request, 'Course must belong to the selected department')
-    end
 
     profile = UserProfile.new(create_attributes(payload, current_subject))
     return render(json: profile_response(profile), status: :created) if profile.save
@@ -36,14 +36,11 @@ class UsersController < ApplicationController
   end
 
   def update_me
-    payload = load_payload(UPDATE_FIELDS)
-    return unless payload
-
     profile = find_my_profile
     return unless profile
-    unless valid_catalog_relations?(payload, profile: profile, required: false)
-      return render_problem(:bad_request, 'Course must belong to the selected department')
-    end
+
+    payload = validated_profile_payload(UPDATE_FIELDS, required: false, profile: profile)
+    return unless payload
 
     profile.assign_attributes(profile_update_attributes(payload))
     return render(json: profile_response(profile, include_token_claims: true)) if profile.save
@@ -53,15 +50,42 @@ class UsersController < ApplicationController
 
   private
 
-  def authenticate_keycloak!
-    match = request.authorization.to_s.match(/\ABearer\s+(\S+)\z/i)
-    return render_problem(:unauthorized, 'Bearer token is required') unless match
+  def validated_profile_payload(fields, required:, profile: nil)
+    payload = load_payload(fields)
+    return nil unless payload
 
-    @token_claims = KeycloakJwt.decode(match[1])
-  rescue JWT::DecodeError, JWT::JWKError
-    render_problem(:unauthorized, 'Invalid bearer token')
-  rescue KeycloakJwt::Unavailable
-    render_problem(:service_unavailable, 'Keycloak is unavailable')
+    if reserved_institutional_id?(payload)
+      render_problem(:forbidden, 'Institutional ID is reserved')
+      return nil
+    end
+    return payload if valid_catalog_relations?(payload, profile: profile, required: required)
+
+    render_problem(:bad_request, 'Course must belong to the selected department')
+    nil
+  end
+
+  def index_by_subjects
+    subjects = params[:subjects]
+    unless subjects.is_a?(Array) && subjects.length.between?(1, 100) && subjects.all?(String)
+      return render_problem(:bad_request, 'Invalid subjects')
+    end
+
+    profiles = UserProfile.where(keycloak_user_id: subjects).order(:name).limit(200)
+    render json: { items: profiles.map { |profile| subject_lookup_item(profile) } }
+  end
+
+  def subject_lookup_item(profile)
+    return directory_item(profile) if global_platform_admin?
+
+    { keycloakUserId: profile.keycloak_user_id, name: profile.name }
+  end
+
+  def reserved_institutional_id?(payload)
+    raw = payload['institutionalId']
+    code = ProtectGlobalAdministrator::GLOBAL_ADMIN_REGISTRATION_CODE
+    return false unless raw.is_a?(String) && raw.strip.casecmp?(code)
+
+    !platform_admin_role?
   end
 
   def find_my_profile
@@ -73,26 +97,10 @@ class UsersController < ApplicationController
   def valid_catalog_relations?(payload, required:, profile: nil)
     course_id = payload.fetch('courseId', profile&.course_id)
     department_id = payload.fetch('departmentId', profile&.department_id)
-    return true if catalog_relations_absent?(course_id, department_id, required)
-    return false unless catalog_relation_pair?(course_id, department_id)
+    return true if course_id.blank? && department_id.blank? && !required
+    return false unless course_id.present? && department_id.present?
 
-    course_belongs_to_department?(course_id, department_id)
-  end
-
-  def catalog_relations_absent?(course_id, department_id, required)
-    course_id.blank? && department_id.blank? && !required
-  end
-
-  def catalog_relation_pair?(course_id, department_id)
-    course_id.present? && department_id.present?
-  end
-
-  def course_belongs_to_department?(course_id, department_id)
     Course.exists?(id: course_id, department_id: department_id, reference_only: false)
-  end
-
-  def current_subject
-    @token_claims.fetch('sub')
   end
 
   def render_save_error(profile)
@@ -109,8 +117,7 @@ class UsersController < ApplicationController
     query = params[:q].to_s.strip
     return scope if query.blank?
 
-    pattern = "%#{ActiveRecord::Base.sanitize_sql_like(query)}%"
-    scope.where('name ILIKE :q OR registration_code ILIKE :q', q: pattern)
+    scope.where('name ILIKE :q OR registration_code ILIKE :q', q: "%#{ActiveRecord::Base.sanitize_sql_like(query)}%")
   end
 
   def directory_item(profile)
@@ -119,11 +126,7 @@ class UsersController < ApplicationController
   end
 
   def render_create_conflict
-    detail = if UserProfile.exists?(keycloak_user_id: current_subject)
-               'User already exists'
-             else
-               'Institutional ID already exists'
-             end
-    render_problem(:conflict, detail)
+    taken = UserProfile.exists?(keycloak_user_id: current_subject)
+    render_problem(:conflict, taken ? 'User already exists' : 'Institutional ID already exists')
   end
 end

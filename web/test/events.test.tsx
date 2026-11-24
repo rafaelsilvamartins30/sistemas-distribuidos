@@ -17,7 +17,6 @@ import {
   getEventOrganizerContexts,
   getEvents,
   getManagedEvents,
-  isExternalPaidOrganizer,
   updateEvent,
   type Event,
 } from "../src/services/events.js";
@@ -132,17 +131,20 @@ test("attendance instructions explain each QR flow without exposing internal mod
 });
 
 test("organizer contexts, create, update, and cancel event routes use the authenticated Gateway contract", async () => {
-  assert.equal(isExternalPaidOrganizer("COMMUNITY"), true);
-  assert.equal(isExternalPaidOrganizer("ACADEMIC_ENTITY"), true);
-  assert.equal(isExternalPaidOrganizer("DEPARTMENT"), false);
-  assert.equal(isExternalPaidOrganizer("PROFESSOR"), false);
-  assert.equal(isExternalPaidOrganizer("ACADEMIC_UNIT"), false);
-
   const calls: { url: string; method: string }[] = [];
   const fetchImpl: typeof globalThis.fetch = async (url, init) => {
     calls.push({ url: String(url), method: init?.method ?? "GET" });
     const payload = String(url).endsWith("/organizer-contexts")
-      ? { items: [{ organizerType: "DEPARTMENT", organizerId: event.organizerId, name: "DCC" }] }
+      ? {
+          items: [
+            {
+              organizerType: "DEPARTMENT",
+              organizerId: event.organizerId,
+              name: "DCC",
+              paidRegistrationMode: "INTERNAL_PAID",
+            },
+          ],
+        }
       : String(url).includes("/managed")
         ? { items: [event], page: 0, size: 20, totalElements: 1, totalPages: 1 }
         : init?.method === "DELETE"
@@ -151,7 +153,8 @@ test("organizer contexts, create, update, and cancel event routes use the authen
     return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
   };
 
-  await getEventOrganizerContexts("token", "http://localhost:18084", fetchImpl);
+  const contexts = await getEventOrganizerContexts("token", "http://localhost:18084", fetchImpl);
+  assert.equal(contexts.items[0]?.paidRegistrationMode, "INTERNAL_PAID");
   await getManagedEvents("token", 0, 20, "http://localhost:18084", fetchImpl);
   await createEvent(
     "token",
@@ -182,4 +185,13 @@ test("organizer contexts, create, update, and cancel event routes use the authen
     { url: `http://localhost:18084/api/v1/web/events/${event.id}`, method: "PATCH" },
     { url: `http://localhost:18084/api/v1/web/events/${event.id}`, method: "DELETE" },
   ]);
+});
+
+test("event edits surface the Engagement validation code for the form", async () => {
+  await assert.rejects(
+    updateEvent("token", event.id, { endsAt: event.startsAt }, "http://localhost:18084", async () =>
+      Response.json({ code: "EVENT_END_NOT_AFTER_START" }, { status: 400 }),
+    ),
+    (error) => error instanceof EventApiError && error.status === 400 && error.code === "EVENT_END_NOT_AFTER_START",
+  );
 });

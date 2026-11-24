@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Reads and edits the single university institutional profile.
+# Reads and edits the single university institutional profile. Changes are centralized in Admin.
 class UniversitiesController < ApplicationController
   include KeycloakAuthenticated
   include InstitutionalProfileAuthorization
@@ -25,8 +25,7 @@ class UniversitiesController < ApplicationController
   private
 
   def update_university(university)
-    payload = profile_payload(%w[name acronym description generalInfoMarkdown logoUrl bannerUrl links
-                                 administratorUserIds currentTerm])
+    payload = profile_payload(%w[name acronym description generalInfoMarkdown logoUrl bannerUrl links currentTerm])
     return unless payload
     return unless authorize_profile_update?(university, payload)
 

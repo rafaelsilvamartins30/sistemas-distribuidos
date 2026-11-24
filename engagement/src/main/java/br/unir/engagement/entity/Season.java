@@ -8,10 +8,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.UUID;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "seasons")
@@ -36,10 +33,6 @@ public class Season {
     @Column(name = "organizer_id", nullable = false)
     private UUID organizerId;
 
-    @JdbcTypeCode(SqlTypes.ARRAY)
-    @Column(name = "manager_user_ids", nullable = false, columnDefinition = "uuid[]")
-    private UUID[] managerUserIds;
-
     @Column(name = "target_team_count", nullable = false)
     private int targetTeamCount;
 
@@ -49,10 +42,6 @@ public class Season {
     @Column(name = "roster_max", nullable = false)
     private int rosterMax;
 
-    @JdbcTypeCode(SqlTypes.ARRAY)
-    @Column(name = "tie_breakers", nullable = false, columnDefinition = "varchar[]")
-    private String[] tieBreakers;
-
     @Column(name = "team_entry_price", nullable = false)
     private long teamEntryPrice;
 
@@ -61,6 +50,9 @@ public class Season {
 
     @Column(name = "registration_deadline", nullable = false)
     private Instant registrationDeadline;
+
+    @Column(name = "manual_champion_team_id")
+    private UUID manualChampionTeamId;
 
     // The source defines this field but does not yet define its vocabulary.
     @Column(length = 80)
@@ -73,22 +65,17 @@ public class Season {
     }
 
     public Season(UUID id, String title, Sport sport, String skillLevel, String organizerType, UUID organizerId,
-            UUID[] managerUserIds, int targetTeamCount, int rosterMin, int rosterMax, String[] tieBreakers,
-            long teamEntryPrice, long freeAgentPrice, Instant registrationDeadline, String status,
-            String roundRobinMode) {
+            int targetTeamCount, int rosterMin, int rosterMax, long teamEntryPrice, long freeAgentPrice,
+            Instant registrationDeadline, String status, String roundRobinMode) {
         this.id = id;
         this.title = title;
         this.sport = sport;
         this.skillLevel = skillLevel;
         this.organizerType = organizerType;
         this.organizerId = organizerId;
-        this.managerUserIds = managerUserIds == null
-                ? new UUID[0]
-                : Arrays.copyOf(managerUserIds, managerUserIds.length);
         this.targetTeamCount = targetTeamCount;
         this.rosterMin = rosterMin;
         this.rosterMax = rosterMax;
-        this.tieBreakers = tieBreakers == null ? new String[0] : Arrays.copyOf(tieBreakers, tieBreakers.length);
         this.teamEntryPrice = teamEntryPrice;
         this.freeAgentPrice = freeAgentPrice;
         this.registrationDeadline = registrationDeadline;
@@ -114,9 +101,6 @@ public class Season {
     public UUID getOrganizerId() {
         return this.organizerId;
     }
-    public UUID[] getManagerUserIds() {
-        return Arrays.copyOf(this.managerUserIds, this.managerUserIds.length);
-    }
     public int getTargetTeamCount() {
         return this.targetTeamCount;
     }
@@ -125,9 +109,6 @@ public class Season {
     }
     public int getRosterMax() {
         return this.rosterMax;
-    }
-    public String[] getTieBreakers() {
-        return Arrays.copyOf(this.tieBreakers, this.tieBreakers.length);
     }
     public long getTeamEntryPrice() {
         return this.teamEntryPrice;
@@ -138,6 +119,12 @@ public class Season {
     public Instant getRegistrationDeadline() {
         return this.registrationDeadline;
     }
+    public void openSchedule() {
+        if ("OPEN".equals(this.status)) {
+            this.status = "ACTIVE";
+        }
+    }
+
     public String getStatus() {
         return this.status;
     }
@@ -147,6 +134,15 @@ public class Season {
 
     public void updateRegistrationDeadline(Instant registrationDeadline) {
         this.registrationDeadline = registrationDeadline;
+    }
+
+    public UUID getManualChampionTeamId() {
+        return this.manualChampionTeamId;
+    }
+
+    public void selectChampion(UUID teamId) {
+        this.manualChampionTeamId = teamId;
+        this.status = "COMPLETED";
     }
 
     public void cancel() {

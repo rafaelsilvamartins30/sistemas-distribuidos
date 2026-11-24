@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
 import { Icon } from "../components/Icon";
+import { useToast } from "../contexts/ToastContext";
+import { extractErrorMessage } from "../utils/apiError.js";
 import {
   getCourses,
   getDepartments,
@@ -74,11 +76,15 @@ function errorMessage(error: unknown): string {
   if (error instanceof UserProfileApiError && error.status === 401) {
     return "Sua sessão expirou. Entre novamente para continuar.";
   }
-  return "Não foi possível carregar ou salvar seu perfil. Verifique o serviço Campus e tente novamente.";
+  return extractErrorMessage(
+    error,
+    "Não foi possível carregar ou salvar seu perfil. Verifique o serviço Campus e tente novamente.",
+  );
 }
 
 export function ProfilePage() {
   const { keycloak } = useOutletContext<AccountContext>();
+  const toast = useToast();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [form, setForm] = useState<ProfileForm>(emptyForm);
   const [savedForm, setSavedForm] = useState<ProfileForm>(emptyForm);
@@ -86,8 +92,6 @@ export function ProfilePage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [preparingProfessorRequest, setPreparingProfessorRequest] = useState(false);
-  const [error, setError] = useState("");
-  const [savedMessage, setSavedMessage] = useState("");
   const [professorConfirmationOpen, setProfessorConfirmationOpen] = useState(false);
   const [university, setUniversity] = useState<University | null>(null);
   const [courses, setCourses] = useState<CatalogCourse[]>([]);
@@ -142,7 +146,7 @@ export function ProfilePage() {
         }
       } catch (loadError) {
         if (active) {
-          setError(errorMessage(loadError));
+          toast.error(errorMessage(loadError));
           setLoadFailed(true);
         }
       } finally {
@@ -154,7 +158,7 @@ export function ProfilePage() {
     return () => {
       active = false;
     };
-  }, [keycloak]);
+  }, [keycloak, toast]);
 
   useEffect(() => {
     let active = true;
@@ -221,22 +225,21 @@ export function ProfilePage() {
     setProfile(updatedProfile);
     setForm(nextForm);
     setSavedForm(nextForm);
-    setSavedMessage(message);
+    toast.success(message);
   }
 
   async function openProfessorRequestConfirmation(savedProfile: UserProfile) {
     setPreparingProfessorRequest(true);
-    setError("");
     try {
       if (catalogLoadFailed || departmentsLoadFailed || departments.length === 0) {
-        setError("Perfil salvo, mas não foi possível validar o departamento cadastrado no Campus.");
+        toast.error("Perfil salvo, mas não foi possível validar o departamento cadastrado no Campus.");
         return;
       }
       if (
         !savedProfile.departmentId ||
         !departments.some((department) => department.id === savedProfile.departmentId)
       ) {
-        setError(
+        toast.error(
           "Selecione um departamento existente nos dados acadêmicos do perfil antes de solicitar a verificação.",
         );
         return;
@@ -256,14 +259,13 @@ export function ProfilePage() {
     )
       return;
     setPreparingProfessorRequest(true);
-    setError("");
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
       await openProfessorRequestConfirmation(profile);
     } catch {
       setPreparingProfessorRequest(false);
-      setError("Não foi possível preparar a solicitação. Atualize a página e tente novamente.");
+      toast.error("Não foi possível preparar a solicitação. Atualize a página e tente novamente.");
     }
   }
 
@@ -276,25 +278,25 @@ export function ProfilePage() {
     );
 
     setSaving(true);
-    setError("");
-    setSavedMessage("");
 
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
       const token = keycloak.token;
       const savedProfile = await saveProfileRecord(token);
-      applySavedProfile(savedProfile);
       if (shouldPromptForRequest) {
         if (professorRequestLoadFailed) {
-          setError("Perfil salvo, mas não foi possível confirmar se já existe uma solicitação docente em aberto.");
+          applySavedProfile(savedProfile);
+          toast.error("Perfil salvo, mas não foi possível confirmar se já existe uma solicitação docente em aberto.");
         } else {
-          setSavedMessage("Perfil salvo. Confira seus dados antes de confirmar a solicitação docente.");
+          applySavedProfile(savedProfile, "Perfil salvo. Confira seus dados antes de confirmar a solicitação docente.");
           await openProfessorRequestConfirmation(savedProfile);
         }
+      } else {
+        applySavedProfile(savedProfile);
       }
     } catch (saveError) {
-      setError(errorMessage(saveError));
+      toast.error(errorMessage(saveError));
     } finally {
       setSaving(false);
     }
@@ -303,8 +305,6 @@ export function ProfilePage() {
   async function confirmProfessorRequest() {
     if (!profile?.departmentId || !departments.some((department) => department.id === profile.departmentId)) return;
     setSaving(true);
-    setError("");
-    setSavedMessage("");
 
     try {
       await keycloak.updateToken(30);
@@ -321,7 +321,7 @@ export function ProfilePage() {
         });
         setProfessorRequestLoadFailed(false);
         setProfessorConfirmationOpen(false);
-        setSavedMessage(`Solicitação enviada. Protocolo ${createdRequest.id}.`);
+        toast.success(`Solicitação enviada. Protocolo ${createdRequest.id}.`);
       } catch (requestError) {
         if (requestError instanceof OpportunityApiError && requestError.status === 409) {
           try {
@@ -331,21 +331,24 @@ export function ProfilePage() {
             setProfessorRequestLoadFailed(false);
             setProfessorConfirmationOpen(false);
             if (latestRequest) {
-              setSavedMessage(`Já existe uma solicitação. Protocolo ${latestRequest.id}.`);
+              toast.info(`Já existe uma solicitação. Protocolo ${latestRequest.id}.`);
               return;
             }
           } catch {
             setProfessorRequestLoadFailed(true);
           }
         }
-        setError(
+        toast.error(
           requestError instanceof OpportunityApiError && requestError.status === 409
             ? "Perfil salvo, mas já existe uma solicitação pendente ou um vínculo docente ativo para esse departamento."
-            : "Perfil salvo, mas não foi possível enviar a solicitação docente. Revise os dados e tente novamente.",
+            : extractErrorMessage(
+                requestError,
+                "Perfil salvo, mas não foi possível enviar a solicitação docente. Revise os dados e tente novamente.",
+              ),
         );
       }
     } catch (saveError) {
-      setError(errorMessage(saveError));
+      toast.error(errorMessage(saveError));
     } finally {
       setSaving(false);
     }
@@ -358,14 +361,9 @@ export function ProfilePage() {
           Carregando seu perfil…
         </p>
       ) : loadFailed ? (
-        <>
-          <p className="notice notice-error" role="alert">
-            {error}
-          </p>
-          <button className="button button-secondary retry-button" onClick={() => window.location.reload()}>
-            Tentar novamente
-          </button>
-        </>
+        <button className="button button-secondary retry-button" onClick={() => window.location.reload()}>
+          Tentar novamente
+        </button>
       ) : (
         <>
           <section className="profile-hero-card" aria-label="Resumo do perfil">
@@ -431,7 +429,6 @@ export function ProfilePage() {
                   value={form.name}
                   onChange={(event) => {
                     setForm({ ...form, name: event.target.value });
-                    setSavedMessage("");
                   }}
                 />
               </label>
@@ -453,7 +450,6 @@ export function ProfilePage() {
                   value={form.affiliationStatus}
                   onChange={(event) => {
                     setForm({ ...form, affiliationStatus: event.target.value as AffiliationStatus | "" });
-                    setSavedMessage("");
                   }}
                 >
                   <option value="">Selecione sua situação</option>
@@ -471,7 +467,6 @@ export function ProfilePage() {
                   value={form.academicLevel}
                   onChange={(event) => {
                     setForm({ ...form, academicLevel: event.target.value as AcademicLevel | "" });
-                    setSavedMessage("");
                   }}
                 >
                   <option value="">Selecione seu nível</option>
@@ -506,7 +501,6 @@ export function ProfilePage() {
                   value={form.institutionalId}
                   onChange={(event) => {
                     setForm({ ...form, institutionalId: event.target.value });
-                    setSavedMessage("");
                   }}
                 />
                 <small>Informe sua matrícula ou seu SIAPE, conforme seu vínculo institucional.</small>
@@ -520,7 +514,6 @@ export function ProfilePage() {
                   disabled={catalogLoadFailed || departmentsLoadFailed}
                   onChange={(event) => {
                     setForm({ ...form, departmentId: event.target.value, courseId: "" });
-                    setSavedMessage("");
                   }}
                 >
                   <option value="">
@@ -543,7 +536,6 @@ export function ProfilePage() {
                   disabled={!selectedDepartment || coursesLoadFailed}
                   onChange={(event) => {
                     setForm({ ...form, courseId: event.target.value });
-                    setSavedMessage("");
                   }}
                 >
                   <option value="">
@@ -574,22 +566,10 @@ export function ProfilePage() {
                   value={form.interests}
                   onChange={(event) => {
                     setForm({ ...form, interests: event.target.value });
-                    setSavedMessage("");
                   }}
                 />
                 <small>Adicione um interesse em cada linha.</small>
               </label>
-
-              {error && (
-                <p className="notice notice-error" role="alert">
-                  {error}
-                </p>
-              )}
-              {savedMessage && (
-                <p className="notice notice-success" role="status">
-                  {savedMessage}
-                </p>
-              )}
 
               <div className="form-actions">
                 <button
@@ -611,8 +591,6 @@ export function ProfilePage() {
                     type="button"
                     onClick={() => {
                       setForm(savedForm);
-                      setError("");
-                      setSavedMessage("");
                     }}
                   >
                     Descartar
@@ -754,12 +732,6 @@ export function ProfilePage() {
                 do departamento. Se um pedido for recusado e a universidade considerar que houve má-fé, o acesso à
                 plataforma poderá ser revogado. Depois do envio, o protocolo ficará visível ao lado do perfil.
               </p>
-
-              {error && (
-                <p className="notice notice-error" role="alert">
-                  {error}
-                </p>
-              )}
 
               <div className="profile-professor-confirmation-actions">
                 <button

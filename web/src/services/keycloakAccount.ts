@@ -1,4 +1,5 @@
 import type Keycloak from "keycloak-js";
+import { parseApiError } from "../utils/apiError.js";
 
 export interface KeycloakSession {
   id: string;
@@ -24,8 +25,11 @@ interface KeycloakCredential {
 }
 
 export class KeycloakAccountError extends Error {
-  constructor(public readonly status: number) {
-    super(`Keycloak respondeu com status ${status}.`);
+  constructor(
+    public readonly status: number,
+    message?: string,
+  ) {
+    super(message ?? `Keycloak respondeu com status ${status}.`);
     this.name = "KeycloakAccountError";
   }
 }
@@ -42,7 +46,10 @@ async function accountRequest<T>(keycloak: Keycloak, path: string, method = "GET
       Authorization: `Bearer ${keycloak.token}`,
     },
   });
-  if (!response.ok) throw new KeycloakAccountError(response.status);
+  if (!response.ok) {
+    const parsed = await parseApiError(response, `Keycloak respondeu com status ${response.status}.`);
+    throw new KeycloakAccountError(response.status, parsed.message);
+  }
   if (response.status === 204) return undefined as T;
   if (!response.headers.get("content-type")?.includes("application/json")) {
     throw new Error(`Resposta não JSON de ${path}.`);

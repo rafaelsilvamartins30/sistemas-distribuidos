@@ -1,3 +1,4 @@
+import { parseApiError } from "../utils/apiError.js";
 import type { Event } from "./events.js";
 
 export type RegistrationStatus =
@@ -11,6 +12,8 @@ export interface Registration {
   registeredAt: string;
   confirmedAt: string | null;
   cancelledAt: string | null;
+  canCancel: boolean;
+  cancellationBlockedReason: string | null;
   paymentDeadlineAt: string | null;
   reservationExpiresAt: string | null;
   event: Event;
@@ -46,15 +49,8 @@ async function request<T>(
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
-    let detail = `Gateway respondeu com status ${response.status}.`;
-    try {
-      const problem = (await response.json()) as { detail?: unknown; error?: unknown };
-      if (typeof problem.detail === "string") detail = problem.detail;
-      else if (typeof problem.error === "string") detail = problem.error;
-    } catch {
-      // Use the HTTP status when an upstream error has no JSON body.
-    }
-    throw new RegistrationApiError(response.status, detail);
+    const parsed = await parseApiError(response);
+    throw new RegistrationApiError(response.status, parsed.message);
   }
   return (await response.json()) as T;
 }
@@ -65,6 +61,23 @@ export function getMyRegistrations(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<RegistrationPage> {
   return request("GET", "/api/v1/web/me/activities?page=0&size=100", token, gatewayUrl, fetchImpl);
+}
+
+export async function getMyEventRegistration(
+  token: string,
+  eventId: string,
+  gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<Registration | null> {
+  const query = new URLSearchParams({ page: "0", size: "1", eventId });
+  const page = await request<RegistrationPage>(
+    "GET",
+    `/api/v1/web/me/activities?${query}`,
+    token,
+    gatewayUrl,
+    fetchImpl,
+  );
+  return page.items[0] ?? null;
 }
 
 export function registerForEvent(

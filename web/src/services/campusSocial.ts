@@ -1,9 +1,11 @@
+import { parseApiError } from "../utils/apiError.js";
+
 export type InstitutionalProfileType = "UNIVERSITY" | "ACADEMIC_UNIT" | "DEPARTMENT" | "ACADEMIC_ENTITY" | "COMMUNITY";
 
 export interface CampusPollOption {
   id: string;
   text: string;
-  votes: number;
+  votes: number | null;
 }
 
 export interface CampusPoll {
@@ -12,6 +14,7 @@ export interface CampusPoll {
   closesAt: string | null;
   closed: boolean;
   myVoteOptionId: string | null;
+  totalVotes?: number | null;
   options: CampusPollOption[];
 }
 
@@ -92,8 +95,11 @@ export interface CampusPage<T> {
 }
 
 export class CampusSocialApiError extends Error {
-  constructor(public readonly status: number) {
-    super(`Campus respondeu com status ${status}.`);
+  constructor(
+    public readonly status: number,
+    message?: string,
+  ) {
+    super(message ?? `Campus respondeu com status ${status}.`);
     this.name = "CampusSocialApiError";
   }
 }
@@ -110,7 +116,10 @@ async function request<T>(token: string, path: string, method = "GET", body?: un
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  if (!response.ok) throw new CampusSocialApiError(response.status);
+  if (!response.ok) {
+    const parsed = await parseApiError(response);
+    throw new CampusSocialApiError(response.status, parsed.message);
+  }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
@@ -119,8 +128,12 @@ function paginatedPath(path: string, page: number, size: number): string {
   return `${path}${path.includes("?") ? "&" : "?"}page=${page}&size=${size}`;
 }
 
-export function getFollowedProfiles(token: string): Promise<{ items: CampusFollow[] }> {
-  return request(token, "/api/v1/web/follows");
+export function getFollowedProfiles(
+  token: string,
+  target?: { targetType: InstitutionalProfileType; targetId: string },
+): Promise<{ items: CampusFollow[] }> {
+  const query = target ? `?${new URLSearchParams(target)}` : "";
+  return request(token, `/api/v1/web/follows${query}`);
 }
 
 export function followProfile(
@@ -152,10 +165,8 @@ export function getInstitutionalPosts(
   term: string,
   page = 0,
   size = 20,
-  includeExpired = false,
 ): Promise<CampusPage<FeedPost>> {
-  const history = includeExpired ? "&includeExpired=true" : "";
-  const path = `/api/v1/web/profiles/${encodeURIComponent(type)}/${encodeURIComponent(profileId)}/posts?term=${encodeURIComponent(term)}${history}`;
+  const path = `/api/v1/web/profiles/${encodeURIComponent(type)}/${encodeURIComponent(profileId)}/posts?term=${encodeURIComponent(term)}`;
   return request(token, paginatedPath(path, page, size));
 }
 

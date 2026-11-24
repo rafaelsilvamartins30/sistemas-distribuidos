@@ -14,3 +14,17 @@ The envelope follows the shared integration event format. `aggregateType` is `Re
 ```
 
 Access uses the registration, event, and participant identities together. A matching eligible ticket becomes `CANCELLED` and its personal QR token is revoked. Repeated deliveries are idempotent. A check-in already recorded remains in the attendance history.
+
+## Availability in the registration API
+
+Registration responses expose `canCancel` and `cancellationBlockedReason`. Engagement uses the
+same policy for those fields and for the cancellation command. Confirmed free registrations can
+be cancelled up to 24 hours before the event. The response gives an applicable reason when the
+button should be unavailable. The Web BFF forwards these fields in the personal tickets response.
+
+The personal registration endpoint also accepts `eventId` for a specific event, or
+`startOn`, `endOn` (inclusive UTC calendar dates) and `agenda=upcoming|past`.
+Engagement applies these before sorting and pagination. The Web BFF forwards the
+same filters for its ticket list and attaches Access attendance by registration ID.
+Event details return the personalized `registrationBlockedReason`, or null if
+registration is open for the caller at the time of the read.

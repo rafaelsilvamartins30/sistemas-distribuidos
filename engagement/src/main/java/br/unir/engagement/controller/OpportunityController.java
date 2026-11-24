@@ -40,8 +40,8 @@ public class OpportunityController {
     }
 
     @GetMapping("/{opportunityId}")
-    public OpportunityResponse getOpportunity(@PathVariable UUID opportunityId) {
-        return this.opportunityService.getOpportunity(opportunityId);
+    public OpportunityResponse getOpportunity(@PathVariable UUID opportunityId, @AuthenticationPrincipal Jwt jwt) {
+        return this.opportunityService.getOpportunity(opportunityId, jwt.getTokenValue());
     }
 
     @GetMapping("/publisher-contexts")

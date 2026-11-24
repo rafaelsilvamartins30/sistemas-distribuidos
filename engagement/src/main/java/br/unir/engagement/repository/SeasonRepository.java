@@ -33,6 +33,10 @@ public interface SeasonRepository extends JpaRepository<Season, UUID> {
             @Param("organizerId") UUID organizerId, @Param("targetTeamCount") Integer targetTeamCount,
             Pageable pageable);
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select event from Season event where event.id = :id")
+    Optional<Season> lockById(@Param("id") UUID id);
+
     @EntityGraph(attributePaths = "sport")
     Optional<Season> findById(UUID id);
 }

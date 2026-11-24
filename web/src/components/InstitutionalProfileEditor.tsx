@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useToast } from "../contexts/ToastContext";
 import {
   CampusApiError,
   updateInstitutionalProfile,
@@ -6,23 +7,22 @@ import {
   type AcademicUnit,
   type Community,
   type Department,
-  type University,
 } from "../services/campus";
 import type { InstitutionalProfileType } from "../services/campusSocial";
-import { UserPicker } from "./UserPicker";
+import { extractErrorMessage } from "../utils/apiError.js";
 
-type EditableProfile = Pick<
-  University,
-  "name" | "description" | "generalInfoMarkdown" | "logoUrl" | "bannerUrl" | "links"
-> & {
+type EditableProfile = {
+  name: string;
+  description: string;
+  generalInfoMarkdown: string;
+  links: unknown[];
   id: string;
   viewerCanManage?: boolean;
-  administratorUserIds?: string[] | null;
 };
 
 interface InstitutionalProfileEditorProps {
   token: string;
-  type: InstitutionalProfileType;
+  type: Exclude<InstitutionalProfileType, "UNIVERSITY">;
   profileId: string;
   profile: EditableProfile | Department | AcademicUnit | AcademicEntity | Community;
   onSaved: (profile: Record<string, unknown>) => void;
@@ -31,9 +31,7 @@ interface InstitutionalProfileEditorProps {
 function errorMessage(error: unknown): string {
   if (error instanceof CampusApiError && error.status === 403)
     return "Somente administradores deste perfil podem editá-lo.";
-  if (error instanceof CampusApiError && error.status === 422)
-    return "Revise os campos. O Campus recusou os dados informados.";
-  return "Não foi possível salvar as informações do perfil.";
+  return extractErrorMessage(error, "Não foi possível salvar as informações do perfil.");
 }
 
 function formatLinks(links: unknown[]): string {
@@ -77,26 +75,19 @@ export function InstitutionalProfileEditor({
   profile,
   onSaved,
 }: InstitutionalProfileEditorProps) {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(profile.name);
   const [description, setDescription] = useState(profile.description);
   const [generalInfoMarkdown, setGeneralInfoMarkdown] = useState(profile.generalInfoMarkdown);
-  const [logoUrl, setLogoUrl] = useState(profile.logoUrl ?? "");
-  const [bannerUrl, setBannerUrl] = useState(profile.bannerUrl ?? "");
   const [links, setLinks] = useState(formatLinks(profile.links ?? []));
-  const [administratorUserIds, setAdministratorUserIds] = useState<string[]>(profile.administratorUserIds ?? []);
-  const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
   function openModal() {
     setName(profile.name);
     setDescription(profile.description);
     setGeneralInfoMarkdown(profile.generalInfoMarkdown);
-    setLogoUrl(profile.logoUrl ?? "");
-    setBannerUrl(profile.bannerUrl ?? "");
     setLinks(formatLinks(profile.links ?? []));
-    setAdministratorUserIds(profile.administratorUserIds ?? []);
-    setError("");
     setOpen(true);
   }
 
@@ -104,31 +95,22 @@ export function InstitutionalProfileEditor({
     event.preventDefault();
     const parsedLinks = parseLinks(links);
     if (!parsedLinks) {
-      setError("Informe uma URL válida por linha. Para adicionar um nome, use: Nome do link | https://exemplo.br");
+      toast.error("Informe uma URL válida por linha. Para adicionar um nome, use: Nome do link | https://exemplo.br");
       return;
     }
-    const parsedAdmins = [...new Set(administratorUserIds.map((subject) => subject.trim()).filter(Boolean))];
-    if (parsedAdmins.length === 0) {
-      setError("Selecione pelo menos um administrador para este perfil.");
-      return;
-    }
-
     setSaving(true);
-    setError("");
     try {
       const updated = await updateInstitutionalProfile(token, type, profileId, {
         name,
         description,
         generalInfoMarkdown,
-        logoUrl: logoUrl || null,
-        bannerUrl: bannerUrl || null,
         links: parsedLinks,
-        administratorUserIds: parsedAdmins,
       });
       onSaved(updated as Record<string, unknown>);
+      toast.success("Informações do perfil atualizadas.");
       setOpen(false);
     } catch (requestError) {
-      setError(errorMessage(requestError));
+      toast.error(errorMessage(requestError));
     } finally {
       setSaving(false);
     }
@@ -138,8 +120,8 @@ export function InstitutionalProfileEditor({
 
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.75rem" }}>
-        <button type="button" className="button button-primary" onClick={openModal}>
+      <div className="institutional-profile-editor-trigger">
+        <button type="button" className="button button-secondary" onClick={openModal}>
           Editar informações do perfil
         </button>
       </div>
@@ -190,17 +172,6 @@ export function InstitutionalProfileEditor({
                   />
                 </label>
 
-                <div className="sports-form-row">
-                  <label className="sports-field">
-                    <span>Logo (URL opcional)</span>
-                    <input type="url" value={logoUrl} onChange={(event) => setLogoUrl(event.target.value)} />
-                  </label>
-                  <label className="sports-field">
-                    <span>Banner (URL opcional)</span>
-                    <input type="url" value={bannerUrl} onChange={(event) => setBannerUrl(event.target.value)} />
-                  </label>
-                </div>
-
                 <label className="sports-field">
                   <span>Links e contatos</span>
                   <textarea rows={3} value={links} onChange={(event) => setLinks(event.target.value)} />
@@ -208,20 +179,6 @@ export function InstitutionalProfileEditor({
                     Um por linha. Use a URL ou escreva um rótulo seguido de “|” e a URL.
                   </small>
                 </label>
-
-                <UserPicker
-                  token={token}
-                  selectedUserIds={administratorUserIds}
-                  onChange={setAdministratorUserIds}
-                  label="Administradores do perfil"
-                  helperText="Busque pessoas cadastradas na UNIR pelo nome ou matrícula. Mantenha-se na lista para continuar administrando."
-                />
-
-                {error && (
-                  <p className="notice notice-error" role="alert">
-                    {error}
-                  </p>
-                )}
 
                 <div className="sports-form-actions">
                   <button type="button" className="button button-secondary" onClick={() => setOpen(false)}>

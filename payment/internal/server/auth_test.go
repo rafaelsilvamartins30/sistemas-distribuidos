@@ -80,9 +80,19 @@ func (f *jwtFixture) token(t *testing.T, claims map[string]any) string {
 
 func validClaims(sub string) map[string]any {
 	return map[string]any{
-		"iss": testIssuer,
-		"sub": sub,
-		"exp": time.Now().Add(time.Hour).Unix(),
+		"iss":          testIssuer,
+		"sub":          sub,
+		"exp":          time.Now().Add(time.Hour).Unix(),
+		"realm_access": map[string]any{"roles": []string{"USER"}},
+	}
+}
+
+func adminClaims(sub string) map[string]any {
+	return map[string]any{
+		"iss":          testIssuer,
+		"sub":          sub,
+		"exp":          time.Now().Add(time.Hour).Unix(),
+		"realm_access": map[string]any{"roles": []string{"USER", "PLATFORM_ADMIN"}},
 	}
 }
 
