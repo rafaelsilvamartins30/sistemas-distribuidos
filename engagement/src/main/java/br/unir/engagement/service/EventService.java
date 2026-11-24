@@ -19,6 +19,7 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -142,22 +143,24 @@ public class EventService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN,
                         "The authenticated user is not authorized for this organizer"));
 
-        Instant now = Instant.now();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         String title = requireNonBlank(request.title(), "title must not be blank");
         String description = requireNonBlank(request.description(), "description must not be blank");
         String location = requireNonBlank(request.location(), "location must not be blank");
         String category = requireNonBlank(request.category(), "category must not be blank");
         String imageUrl = validateOptionalUrl(request.imageUrl());
-        validateScheduleAndCapacity(request.startsAt(), request.endsAt(), request.registrationDeadline(),
-                request.capacity(), now, true);
+        Instant startsAt = truncateMicros(request.startsAt());
+        Instant endsAt = truncateMicros(request.endsAt());
+        Instant registrationDeadline = truncateMicros(request.registrationDeadline());
+        validateScheduleAndCapacity(startsAt, endsAt, registrationDeadline, request.capacity(), now, true);
 
         RegistrationConfig registrationConfig = validateRegistrationMode(organizerType, request.registrationMode(),
                 request.price(), request.externalUrl(), request.attendanceEnabled(), request.attendanceMode());
 
         Event event = new Event(UUID.randomUUID(), title, description, verifiedOrganizer.organizerType(),
-                verifiedOrganizer.organizerId(), imageUrl, location, request.startsAt(), request.endsAt(), category,
-                request.capacity(), request.registrationDeadline(), registrationConfig.mode(),
-                registrationConfig.price(), registrationConfig.externalUrl(), registrationConfig.attendanceEnabled(),
+                verifiedOrganizer.organizerId(), imageUrl, location, startsAt, endsAt, category, request.capacity(),
+                registrationDeadline, registrationConfig.mode(), registrationConfig.price(),
+                registrationConfig.externalUrl(), registrationConfig.attendanceEnabled(),
                 registrationConfig.attendanceMode(), EventStatus.ACTIVE, now, createdByUserId);
         Event savedEvent = this.eventRepository.saveAndFlush(event);
         this.projectionOutboxWriter.append(savedEvent, EventProjectionEvents.CREATED, savedEvent.getCreatedAt());
@@ -193,11 +196,11 @@ public class EventService {
             imageUrl = validateOptionalUrl(request.imageUrl());
         }
 
-        Instant startsAt = request.startsAt() == null ? event.getStartsAt() : request.startsAt();
-        Instant endsAt = request.endsAt() == null ? event.getEndsAt() : request.endsAt();
-        Instant registrationDeadline = request.registrationDeadline() == null
+        Instant startsAt = truncateMicros(request.startsAt() == null ? event.getStartsAt() : request.startsAt());
+        Instant endsAt = truncateMicros(request.endsAt() == null ? event.getEndsAt() : request.endsAt());
+        Instant registrationDeadline = truncateMicros(request.registrationDeadline() == null
                 ? event.getRegistrationDeadline()
-                : request.registrationDeadline();
+                : request.registrationDeadline());
         Integer capacity = Boolean.TRUE.equals(request.clearCapacity())
                 ? null
                 : request.capacity() == null ? event.getCapacity() : request.capacity();
@@ -276,6 +279,10 @@ public class EventService {
         if (capacity != null && capacity <= 0) {
             throw invalidEvent("EVENT_INVALID_CAPACITY", "capacity must be greater than zero");
         }
+    }
+
+    private static Instant truncateMicros(Instant value) {
+        return value == null ? null : value.truncatedTo(ChronoUnit.MICROS);
     }
 
     private static ResponseStatusException invalidEvent(String code, String detail) {
