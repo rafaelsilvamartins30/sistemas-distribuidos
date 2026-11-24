@@ -384,13 +384,21 @@ pub async fn event_attendance_review(
     let id: Uuid = session.try_get("id")?;
     let mut closed_at: Option<OffsetDateTime> = session.try_get("attendance_reviewed_at")?;
     if close && closed_at.is_none() {
-        sqlx::query(
-            "UPDATE attendance_sessions SET status = 'CLOSED', shared_token_hash = NULL, attendance_reviewed_at = $2 WHERE id = $1",
-        ).bind(id).bind(now).execute(&mut *tx).await?;
+        let recorded_at: OffsetDateTime = sqlx::query_scalar(
+            "UPDATE attendance_sessions SET status = 'CLOSED', shared_token_hash = NULL, attendance_reviewed_at = $2 WHERE id = $1 RETURNING attendance_reviewed_at",
+        )
+        .bind(id)
+        .bind(now)
+        .fetch_one(&mut *tx)
+        .await?;
         sqlx::query(
             "UPDATE attendance_entries SET status = 'NO_SHOW', finalized_at = $2 WHERE session_id = $1 AND status = 'ELIGIBLE'",
-        ).bind(id).bind(now).execute(&mut *tx).await?;
-        closed_at = Some(now);
+        )
+        .bind(id)
+        .bind(recorded_at)
+        .execute(&mut *tx)
+        .await?;
+        closed_at = Some(recorded_at);
     }
     let rows: Vec<(String, OffsetDateTime)> = sqlx::query_as(
         "SELECT e.user_id, c.checked_at FROM check_ins c JOIN attendance_entries e ON e.id = c.attendance_entry_id \
