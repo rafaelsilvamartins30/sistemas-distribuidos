@@ -66,6 +66,7 @@ test("checkInWithEventQr sends only the QR token and surfaces domain errors", as
             headers: { "content-type": "application/problem+json" },
           }),
       ),
-    (error: unknown) => error instanceof Error && error.message === "QR token is invalid",
+    (error: unknown) =>
+      error instanceof Error && error.message === "Código QR inválido ou expirado. Peça ou gere um novo código.",
   );
 });

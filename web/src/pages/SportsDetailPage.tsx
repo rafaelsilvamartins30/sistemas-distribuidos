@@ -400,11 +400,9 @@ export function SportsDetailPage({ kind }: SportsDetailPageProps) {
           >
             {match.viewerCheckedIn ? (
               <span className="sports-checked-badge">✓ Presença registrada</span>
-            ) : match.status === "COMPLETED" ? (
-              <span className="sports-match-meta">Partida encerrada · Presença não registrada</span>
             ) : canConfirmAttendance ? (
               <>
-                <span className="sports-match-meta">Código liberado na quadra</span>
+                <span className="sports-match-meta">Check-in aberto · confirme sua presença com o QR</span>
                 <button
                   type="button"
                   className="button button-primary"
@@ -413,8 +411,10 @@ export function SportsDetailPage({ kind }: SportsDetailPageProps) {
                   Confirmar Presença
                 </button>
               </>
+            ) : !match.hasCheckinToken && match.status === "SCHEDULED" ? (
+              <span className="sports-match-meta">Aguardando organizador liberar o QR Code da partida</span>
             ) : (
-              <span className="sports-match-meta">Presença será liberada no dia do jogo</span>
+              <span className="sports-match-meta">Lista de presença encerrada</span>
             )}
           </div>
         )}

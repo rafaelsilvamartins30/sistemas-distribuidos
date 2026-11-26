@@ -126,7 +126,7 @@ public class RegistrationService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "page must be non-negative and size must be between 1 and 100");
         }
-        if (agenda != null && !agenda.equals("upcoming") && !agenda.equals("past")) {
+        if (agenda != null && !agenda.equals("upcoming") && !agenda.equals("past") && !agenda.equals("cancelled")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid agenda");
         }
         if (startOn != null && endOn != null && endOn.isBefore(startOn)) {

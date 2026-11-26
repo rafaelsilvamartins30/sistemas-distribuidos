@@ -109,6 +109,8 @@ export interface SportsMatch {
   awayTeamId: string;
   awayTeamName: string;
   scheduledAt: string;
+  checkInOpensAt?: string | null;
+  checkInClosesAt?: string | null;
   location: string;
   homeScore: number | null;
   awayScore: number | null;
@@ -200,6 +202,8 @@ export interface MySportsMatch {
   teamName: string;
   opponentName: string;
   scheduledAt: string;
+  checkInOpensAt?: string | null;
+  checkInClosesAt?: string | null;
   location: string;
   homeScore: number | null;
   awayScore: number | null;

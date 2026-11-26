@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import type Keycloak from "keycloak-js";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { Icon } from "../components/Icon";
 import { OpportunityCard } from "../components/OpportunityCard";
 import { PaginationControls } from "../components/PaginationControls";
@@ -94,6 +95,8 @@ export function OpportunitiesPage() {
   const [editDeadline, setEditDeadline] = useState("");
   const [editExternalUrl, setEditExternalUrl] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [removingOpportunity, setRemovingOpportunity] = useState<Opportunity | null>(null);
+  const [removingBusy, setRemovingBusy] = useState(false);
   const publishDialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -277,6 +280,7 @@ export function OpportunitiesPage() {
   }
 
   async function handleRemoveOpportunity(opportunityId: string) {
+    setRemovingBusy(true);
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
@@ -284,10 +288,13 @@ export function OpportunitiesPage() {
       if (editingOpportunity?.id === opportunityId) {
         setEditingOpportunity(null);
       }
+      setRemovingOpportunity(null);
       toast.success("Oportunidade removida do mural ativo.");
       setOpportunityReload((value) => value + 1);
     } catch (requestError) {
       toast.error(extractErrorMessage(requestError, "Não foi possível remover a oportunidade."));
+    } finally {
+      setRemovingBusy(false);
     }
   }
 
@@ -590,7 +597,7 @@ export function OpportunitiesPage() {
                           <button
                             className="button button-secondary"
                             type="button"
-                            onClick={() => void handleRemoveOpportunity(item.id)}
+                            onClick={() => setRemovingOpportunity(item)}
                           >
                             Apagar do mural
                           </button>
@@ -696,6 +703,17 @@ export function OpportunitiesPage() {
           <PaginationControls page={results.page} totalPages={results.totalPages} onPageChange={setPage} />
         )}
       </section>
+
+      {removingOpportunity && (
+        <ConfirmModal
+          title="Deseja mesmo apagar esta oportunidade do mural?"
+          description={`“${removingOpportunity.title}” deixará de aparecer no mural ativo. Você poderá reativá-la depois, se necessário.`}
+          confirmLabel="Sim, apagar do mural"
+          busy={removingBusy}
+          onConfirm={() => void handleRemoveOpportunity(removingOpportunity.id)}
+          onClose={() => setRemovingOpportunity(null)}
+        />
+      )}
     </div>
   );
 }
@@ -714,6 +732,7 @@ export function OpportunityDetailPage() {
   const [editDeadline, setEditDeadline] = useState("");
   const [editExternalUrl, setEditExternalUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
 
   useEffect(() => {
     document.title = "UNIR — Detalhes da oportunidade";
@@ -786,6 +805,7 @@ export function OpportunityDetailPage() {
       if (!keycloak.token) throw new Error("Token indisponível.");
       const updated = await closeOpportunity(keycloak.token, opportunity.id);
       setOpportunity(updated);
+      setConfirmClose(false);
       toast.success("Oportunidade removida do mural ativo.");
     } catch (requestError) {
       toast.error(extractErrorMessage(requestError, "Não foi possível remover a oportunidade."));
@@ -915,7 +935,7 @@ export function OpportunityDetailPage() {
                     className="button button-secondary"
                     type="button"
                     disabled={busy}
-                    onClick={() => void handleClose()}
+                    onClick={() => setConfirmClose(true)}
                   >
                     Apagar do mural
                   </button>
@@ -1003,6 +1023,16 @@ export function OpportunityDetailPage() {
           </section>
         )}
       </article>
+      {confirmClose && (
+        <ConfirmModal
+          title="Deseja mesmo apagar esta oportunidade do mural?"
+          description={`“${opportunity.title}” deixará de aparecer no mural ativo. Você poderá reativá-la depois, se necessário.`}
+          confirmLabel="Sim, apagar do mural"
+          busy={busy}
+          onConfirm={() => void handleClose()}
+          onClose={() => setConfirmClose(false)}
+        />
+      )}
     </div>
   );
 }

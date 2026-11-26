@@ -6,6 +6,7 @@ import { Icon, type IconName } from "../components/Icon";
 import { RagAssistantWidget } from "../components/RagAssistantWidget";
 import { getUniversity } from "../services/campus";
 import { getNotifications } from "../services/campusSocial";
+import { getEventOrganizerContexts } from "../services/events";
 
 interface MainLayoutProps {
   keycloak: Keycloak;
@@ -28,6 +29,7 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
   const navigationRef = useRef<HTMLElement>(null);
   const [universityAcronym, setUniversityAcronym] = useState("UNIR");
   const [unreadCount, setUnreadCount] = useState(0);
+  const [canManageEvents, setCanManageEvents] = useState(false);
   const email = String(keycloak.tokenParsed?.email ?? "");
   const name = String(keycloak.tokenParsed?.name ?? (email || "Minha conta"));
   const initial = (name.trim()[0] || "U").toLocaleUpperCase("pt-BR");
@@ -38,11 +40,13 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
       ? "Minha conta"
       : location.pathname.startsWith("/tickets")
         ? "Meus tickets"
-        : location.pathname.startsWith("/meus-esportes")
-          ? "Meus esportes"
-          : location.pathname.startsWith("/pagamentos")
-            ? "Meus pagamentos"
-            : (section?.label ?? "Campus");
+        : location.pathname.startsWith("/meus-eventos")
+          ? "Meus eventos"
+          : location.pathname.startsWith("/meus-esportes")
+            ? "Meus esportes"
+            : location.pathname.startsWith("/pagamentos")
+              ? "Meus pagamentos"
+              : (section?.label ?? "Campus");
     document.title = `UNIR — ${label}`;
   }, [location.pathname]);
 
@@ -52,6 +56,11 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
       void getUniversity(keycloak.token)
         .then((university) => {
           if (active) setUniversityAcronym(university.acronym);
+        })
+        .catch(() => undefined);
+      void getEventOrganizerContexts(keycloak.token)
+        .then((contexts) => {
+          if (active) setCanManageEvents(contexts.items.length > 0);
         })
         .catch(() => undefined);
     }
@@ -137,6 +146,11 @@ export function MainLayout({ keycloak }: MainLayoutProps) {
                 <Link to="/tickets">
                   <Icon name="calendar" width="17" height="17" /> Meus tickets
                 </Link>
+                {canManageEvents && (
+                  <Link to="/meus-eventos">
+                    <Icon name="calendar" width="17" height="17" /> Meus eventos
+                  </Link>
+                )}
                 <Link to="/meus-esportes">
                   <Icon name="calendar" width="17" height="17" /> Meus esportes
                 </Link>

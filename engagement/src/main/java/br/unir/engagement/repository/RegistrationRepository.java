@@ -61,10 +61,23 @@ public interface RegistrationRepository extends JpaRepository<Registration, UUID
               and (cast(:eventId as uuid) is null or r.eventId = :eventId)
               and (cast(:startsFrom as timestamp) is null or e.startsAt >= :startsFrom)
               and (cast(:startsBefore as timestamp) is null or e.startsAt < :startsBefore)
-              and (cast(:agenda as string) is null or (:agenda = 'upcoming' and e.endsAt >= :now)
-                   or (:agenda = 'past' and e.endsAt < :now))
+              and (cast(:agenda as string) is null
+                   or (:agenda = 'upcoming' and e.endsAt >= :now
+                       and e.status <> br.unir.engagement.entity.EventStatus.CANCELLED
+                       and r.status <> br.unir.engagement.entity.RegistrationStatus.CANCELLED_BY_USER
+                       and r.status <> br.unir.engagement.entity.RegistrationStatus.CANCELLED_BY_EVENT)
+                   or (:agenda = 'past' and e.endsAt < :now
+                       and e.status <> br.unir.engagement.entity.EventStatus.CANCELLED
+                       and r.status <> br.unir.engagement.entity.RegistrationStatus.CANCELLED_BY_USER
+                       and r.status <> br.unir.engagement.entity.RegistrationStatus.CANCELLED_BY_EVENT)
+                   or (:agenda = 'cancelled'
+                       and (e.status = br.unir.engagement.entity.EventStatus.CANCELLED
+                            or r.status = br.unir.engagement.entity.RegistrationStatus.CANCELLED_BY_USER
+                            or r.status = br.unir.engagement.entity.RegistrationStatus.CANCELLED_BY_EVENT)))
             order by case when :agenda = 'upcoming' then e.startsAt end asc,
-                     case when :agenda = 'past' then e.startsAt end desc, r.registeredAt desc, r.id asc
+                     case when :agenda = 'past' then e.startsAt end desc,
+                     case when :agenda = 'cancelled' then e.startsAt end desc,
+                     r.registeredAt desc, r.id asc
             """)
     Page<Registration> findAgenda(@Param("userId") String userId, @Param("eventId") UUID eventId,
             @Param("startsFrom") Instant startsFrom, @Param("startsBefore") Instant startsBefore,

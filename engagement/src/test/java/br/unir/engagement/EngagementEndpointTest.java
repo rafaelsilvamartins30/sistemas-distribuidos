@@ -860,6 +860,44 @@ class EngagementEndpointTest {
         this.assertProjectionSnapshot(departmentEventId, EventProjectionEvents.CANCELLED, 2, "CANCELLED");
     }
 
+    @Test
+    void registrationAgendaSeparatesUpcomingPastAndCancelledTickets() throws Exception {
+        Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        Event upcomingEvent = event(UUID.randomUUID(), "Evento futuro ativo", EventStatus.ACTIVE,
+                RegistrationMode.INTERNAL_FREE, now.plus(Duration.ofDays(2)),
+                now.plus(Duration.ofDays(2)).plusSeconds(3600), now.plus(Duration.ofDays(1)), null, null);
+        Event pastEvent = event(UUID.randomUUID(), "Evento anterior ativo", EventStatus.ACTIVE,
+                RegistrationMode.INTERNAL_FREE, now.minus(Duration.ofDays(3)),
+                now.minus(Duration.ofDays(3)).plusSeconds(3600), now.minus(Duration.ofDays(4)), null, null);
+        Event cancelledEvent = event(UUID.randomUUID(), "Evento cancelado", EventStatus.CANCELLED,
+                RegistrationMode.INTERNAL_FREE, now.plus(Duration.ofDays(4)),
+                now.plus(Duration.ofDays(4)).plusSeconds(3600), now.plus(Duration.ofDays(3)), null, null);
+        Event userCancelledEvent = event(UUID.randomUUID(), "Inscrição cancelada pelo aluno", EventStatus.ACTIVE,
+                RegistrationMode.INTERNAL_FREE, now.plus(Duration.ofDays(5)),
+                now.plus(Duration.ofDays(5)).plusSeconds(3600), now.plus(Duration.ofDays(4)), null, null);
+        this.eventRepository.saveAllAndFlush(List.of(upcomingEvent, pastEvent, cancelledEvent, userCancelledEvent));
+
+        String subject = "kc-agenda-user";
+        this.registrationRepository.saveAllAndFlush(List.of(
+                new Registration(UUID.randomUUID(), upcomingEvent.getId(), subject, RegistrationStatus.CONFIRMED, now,
+                        now, null, null, null),
+                new Registration(UUID.randomUUID(), pastEvent.getId(), subject, RegistrationStatus.CONFIRMED, now, now,
+                        null, null, null),
+                new Registration(UUID.randomUUID(), cancelledEvent.getId(), subject,
+                        RegistrationStatus.CANCELLED_BY_EVENT, now, now, now, null, null),
+                new Registration(UUID.randomUUID(), userCancelledEvent.getId(), subject,
+                        RegistrationStatus.CANCELLED_BY_USER, now, now, now, null, null)));
+
+        this.mockMvc.perform(get("/api/v1/registrations/me?agenda=upcoming").with(userJwt(subject)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items[0].event.id").value(upcomingEvent.getId().toString()));
+        this.mockMvc.perform(get("/api/v1/registrations/me?agenda=past").with(userJwt(subject)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items[0].event.id").value(pastEvent.getId().toString()));
+        this.mockMvc.perform(get("/api/v1/registrations/me?agenda=cancelled").with(userJwt(subject)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2));
+    }
+
     private static Event event(UUID id, String title, EventStatus status, RegistrationMode registrationMode,
             Instant startsAt, Instant endsAt, Instant registrationDeadline, Long price, String externalUrl) {
         return new Event(id, title, "Descrição do evento persistido.", "UNIVERSITY", UUID.randomUUID(), null,

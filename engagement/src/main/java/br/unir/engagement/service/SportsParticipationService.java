@@ -91,6 +91,8 @@ public class SportsParticipationService {
     private static final Duration SPORTS_PAYMENT_WINDOW = Duration.ofMinutes(15);
     private static final Duration SPORTS_RESERVATION_WINDOW = Duration.ofMinutes(20);
     private static final Duration TEAM_INVITE_WINDOW = Duration.ofHours(24);
+    private static final Duration MATCH_CHECK_IN_OPEN_LEAD = Duration.ofHours(2);
+    private static final Duration MATCH_CHECK_IN_CLOSE_GRACE = Duration.ofHours(2);
 
     private final SportRepository sportRepository;
     private final CompetitionRepository competitionRepository;
@@ -1277,8 +1279,9 @@ public class SportsParticipationService {
         SportsMatch match = lockMatch(matchId);
         EventMeta meta = resolveEventMeta(match.getContextType(), match.getContextId());
         requireAuthorizedOrganizer(meta.organizerType(), meta.organizerId(), bearerToken);
-        if (close && !attendanceReviewAvailable(match)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "A lista só pode ser fechada após a partida.");
+        if (close && "CANCELLED".equals(meta.status())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Não é possível fechar a lista de presença de um campeonato cancelado.");
         }
         if (close) {
             match.closeAttendance(Instant.now(this.clock));
@@ -1299,10 +1302,16 @@ public class SportsParticipationService {
         return new MatchAttendance(entries, match.getAttendanceClosedAt());
     }
 
-    private boolean attendanceReviewAvailable(SportsMatch match) {
-        return match.getAttendanceClosedAt() != null || !STATUS_SCHEDULED.equals(match.getStatus())
-                || match.getScheduledAt().atZone(CAMPUS_ZONE).toLocalDate()
-                        .isBefore(Instant.now(this.clock).atZone(CAMPUS_ZONE).toLocalDate());
+    private static Instant matchCheckInOpensAt(SportsMatch match) {
+        return match.getScheduledAt().minus(MATCH_CHECK_IN_OPEN_LEAD);
+    }
+
+    private static Instant matchCheckInClosesAt(SportsMatch match) {
+        return match.getScheduledAt().plus(MATCH_CHECK_IN_CLOSE_GRACE);
+    }
+
+    private static boolean isAttendanceClosed(SportsMatch match) {
+        return match.getAttendanceClosedAt() != null;
     }
 
     private SportsMatch lockMatch(UUID matchId) {
@@ -1316,8 +1325,9 @@ public class SportsParticipationService {
         EventMeta meta = resolveEventMeta(match.getContextType(), match.getContextId());
         requireAuthorizedOrganizer(meta.organizerType(), meta.organizerId(), bearerToken);
 
-        if ("CANCELLED".equals(meta.status()) || attendanceReviewAvailable(match)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "O QR de presença desta partida está encerrado.");
+        if ("CANCELLED".equals(meta.status()) || isAttendanceClosed(match)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "A lista de presença desta partida já foi fechada pelo organizador.");
         }
         String token = "UNIR-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
         match.updateCheckinToken(token);
@@ -1328,18 +1338,21 @@ public class SportsParticipationService {
     @Transactional
     public SportsMatchCheckInResponse checkIn(UUID matchId, SportsMatchCheckInRequest request, String userId) {
         if (request == null || request.token() == null || request.token().isBlank()) {
-            throw badRequest("Check-in token is required");
+            throw badRequest("O código de presença é obrigatório.");
         }
         SportsMatch match = lockMatch(matchId);
         EventMeta meta = resolveEventMeta(match.getContextType(), match.getContextId());
-        if ("CANCELLED".equals(meta.status()) || attendanceReviewAvailable(match)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Check-in is not open for this match");
+        Instant now = Instant.now(this.clock);
+        if ("CANCELLED".equals(meta.status()) || isAttendanceClosed(match)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "A lista de presença desta partida já foi fechada pelo organizador.");
         }
         if (match.getCheckinToken() == null || match.getCheckinToken().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Check-in is not open for this match");
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "O organizador ainda não liberou o QR Code de presença desta partida.");
         }
         if (!match.getCheckinToken().equalsIgnoreCase(request.token().trim())) {
-            throw badRequest("Invalid check-in token");
+            throw badRequest("Código de presença inválido.");
         }
         UUID playerTeamId = null;
         if (this.teamMemberRepository.existsByTeamIdAndUserId(match.getHomeTeamId(), userId)) {
@@ -1349,13 +1362,13 @@ public class SportsParticipationService {
         }
         if (playerTeamId == null) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Only players enrolled in one of the match teams can check in");
+                    "Apenas atletas inscritos em uma das equipes da partida podem registrar presença.");
         }
         if (this.checkInRepository.existsByMatchIdAndUserId(matchId, userId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Check-in already recorded for this match");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Sua presença já foi registrada nesta partida.");
         }
         SportsMatchCheckIn saved = this.checkInRepository
-                .save(new SportsMatchCheckIn(UUID.randomUUID(), matchId, userId, playerTeamId, Instant.now()));
+                .save(new SportsMatchCheckIn(UUID.randomUUID(), matchId, userId, playerTeamId, now));
         return new SportsMatchCheckInResponse(saved.getId(), saved.getMatchId(), saved.getTeamId(), saved.getUserId(),
                 saved.getCheckedInAt());
     }
@@ -1393,8 +1406,9 @@ public class SportsParticipationService {
             items.add(new MySportsMatchResponse(match.getId(), match.getContextType(), match.getContextId(),
                     meta.title(), meta.sport().getName(), match.getRoundNumber(), teamId,
                     teamNames.getOrDefault(teamId, "Minha equipe"), teamNames.getOrDefault(opponentId, "Adversário"),
-                    match.getScheduledAt(), match.getLocation(), match.getHomeScore(), match.getAwayScore(),
-                    match.getStatus(), match.getCheckinToken() != null && !match.getCheckinToken().isBlank(),
+                    match.getScheduledAt(), matchCheckInOpensAt(match), matchCheckInClosesAt(match),
+                    match.getLocation(), match.getHomeScore(), match.getAwayScore(), match.getStatus(),
+                    match.getCheckinToken() != null && !match.getCheckinToken().isBlank(),
                     checkedInMatchIds.contains(match.getId())));
         }
         return new MySportsMatchesResponse(items);
@@ -1475,22 +1489,24 @@ public class SportsParticipationService {
                 && matches.stream().filter(game -> game.getRoundNumber() <= 3).count() == 48;
         return matches.stream().map(match -> {
             boolean hasToken = match.getCheckinToken() != null && !match.getCheckinToken().isBlank();
+            Instant opensAt = matchCheckInOpensAt(match);
+            Instant closesAt = matchCheckInClosesAt(match);
+            boolean attendanceOpen = active && !isAttendanceClosed(match);
             return new SportsMatchResponse(match.getId(), match.getRoundNumber(),
                     roundLabel(meta, match.getRoundNumber()), match.getHomeTeamId(),
                     teamNames.getOrDefault(match.getHomeTeamId(), "Mandante"), match.getAwayTeamId(),
-                    teamNames.getOrDefault(match.getAwayTeamId(), "Visitante"), match.getScheduledAt(),
-                    match.getLocation(), match.getHomeScore(), match.getAwayScore(), match.getHomePenaltyScore(),
-                    match.getAwayPenaltyScore(), match.getStatus(), counts.getOrDefault(match.getId(), 0),
-                    viewerChecked.getOrDefault(match.getId(), false), hasToken,
-                    includeToken && active && !attendanceReviewAvailable(match) ? match.getCheckinToken() : null,
-                    active && hasToken && !attendanceReviewAvailable(match)
+                    teamNames.getOrDefault(match.getAwayTeamId(), "Visitante"), match.getScheduledAt(), opensAt,
+                    closesAt, match.getLocation(), match.getHomeScore(), match.getAwayScore(),
+                    match.getHomePenaltyScore(), match.getAwayPenaltyScore(), match.getStatus(),
+                    counts.getOrDefault(match.getId(), 0), viewerChecked.getOrDefault(match.getId(), false), hasToken,
+                    includeToken && attendanceOpen ? match.getCheckinToken() : null,
+                    attendanceOpen && hasToken
                             && (match.getHomeTeamId().equals(viewerTeamId)
                                     || match.getAwayTeamId().equals(viewerTeamId))
                             && !viewerChecked.getOrDefault(match.getId(), false),
                     includeToken && active && meta.manualChampionTeamId() == null
                             && scoreLockReason(meta, match, matches, standardBracket) == null,
-                    includeToken && active && !attendanceReviewAvailable(match),
-                    includeToken && attendanceReviewAvailable(match));
+                    includeToken && attendanceOpen, includeToken && active);
         }).toList();
     }
 

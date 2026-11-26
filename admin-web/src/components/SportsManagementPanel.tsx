@@ -85,6 +85,7 @@ export function SportsManagementPanel({ gatewayUrl, keycloak }: SportsManagement
   const [catalogSection, setCatalogSection] = useState<"sports" | "competitions" | "seasons">("competitions");
   const [catalogPage, setCatalogPage] = useState(0);
   const [attendanceMatchId, setAttendanceMatchId] = useState<string | null>(null);
+  const [confirmCancelEvent, setConfirmCancelEvent] = useState(false);
   const organizerContexts = catalog.organizerContexts.items;
   const confirmedTeams = overview?.teams.filter((team) => !team.placeholder) ?? [];
   const queuedFreeAgents = overview?.freeAgents.filter((agent) => agent.status === "QUEUED") ?? [];
@@ -261,7 +262,8 @@ export function SportsManagementPanel({ gatewayUrl, keycloak }: SportsManagement
   }
 
   async function handleCancelEvent() {
-    if (!selectedEvent || !keycloak.token || !window.confirm(`Cancelar “${selectedEvent.item.title}”?`)) return;
+    if (!selectedEvent || !keycloak.token) return;
+    setConfirmCancelEvent(false);
     await runEventAction(
       () => cancelAdminSportsEvent(gatewayUrl, keycloak.token!, selectedEvent.kind, selectedEvent.item.id),
       "Campeonato cancelado.",
@@ -675,7 +677,7 @@ export function SportsManagementPanel({ gatewayUrl, keycloak }: SportsManagement
                     <button
                       className="btn-secondary"
                       disabled={busy || overview.status === "CANCELLED"}
-                      onClick={() => void handleCancelEvent()}
+                      onClick={() => setConfirmCancelEvent(true)}
                       type="button"
                     >
                       Cancelar campeonato
@@ -944,6 +946,36 @@ export function SportsManagementPanel({ gatewayUrl, keycloak }: SportsManagement
                 </section>
               </>
             )}
+          </div>
+        </AdminModal>
+      )}
+      {confirmCancelEvent && selectedEvent && (
+        <AdminModal
+          elevated
+          eyebrow="Confirmação"
+          title="Deseja mesmo cancelar este campeonato?"
+          subtitle={selectedEvent.item.title}
+          closeDisabled={busy}
+          onClose={() => setConfirmCancelEvent(false)}
+        >
+          <div className="admin-dialog-content">
+            <p style={{ margin: "0 0 1.25rem", lineHeight: 1.55 }}>
+              Esta ação não poderá ser desfeita. Todas as inscrições de equipes e free agents serão canceladas e
+              eventuais pagamentos serão estornados automaticamente.
+            </p>
+            <div className="admin-dialog-actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={busy}
+                onClick={() => setConfirmCancelEvent(false)}
+              >
+                Voltar
+              </button>
+              <button type="button" className="btn-primary" disabled={busy} onClick={() => void handleCancelEvent()}>
+                {busy ? "Cancelando…" : "Sim, cancelar campeonato"}
+              </button>
+            </div>
           </div>
         </AdminModal>
       )}

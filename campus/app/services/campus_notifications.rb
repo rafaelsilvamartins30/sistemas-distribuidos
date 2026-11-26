@@ -54,6 +54,30 @@ class CampusNotifications
     )
   end
 
+  def self.payment_refunded!(recipient:, charge_id:, amount_minor:, label: nil)
+    return if refund_already_notified?(recipient, charge_id) || amount_minor.to_i <= 0
+
+    create_notification(
+      recipient: recipient, actor: nil, event: 'PAYMENT_REFUNDED',
+      title: 'Estorno concluído', message: refund_message(amount_minor.to_i, label),
+      resource_type: 'PAYMENT', resource_id: charge_id
+    )
+  end
+
+  def self.refund_already_notified?(recipient, charge_id)
+    charge_id.blank? || Notification.exists?(
+      recipient_user_id: recipient, event_type: 'PAYMENT_REFUNDED',
+      resource_type: 'PAYMENT', resource_id: charge_id
+    )
+  end
+  private_class_method :refund_already_notified?
+
+  def self.refund_message(amount_minor, label)
+    formatted = format('R$ %.2f', amount_minor / 100.0).tr('.', ',')
+    label.present? ? "#{formatted} estornados · #{label}" : "#{formatted} estornados para sua conta."
+  end
+  private_class_method :refund_message
+
   def self.recipients_for_request(request_record)
     return Array(request_record.target_department&.administrator_user_ids).uniq if request_record.target_department_id
 

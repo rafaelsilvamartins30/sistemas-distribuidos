@@ -1,7 +1,7 @@
 use crate::{
     attendance::{
         confirm_organizer_check_in, event_attendance_review, get_my_attendance, get_my_tickets,
-        get_organizer_action, issue_event_qr_for_creator, issue_participant_qr,
+        get_organizer_action_info, issue_event_qr_for_creator, issue_participant_qr,
         preview_organizer_check_in, record_participant_check_in, CheckInError,
     },
     auth::{JwtError, JwtVerifier},
@@ -371,8 +371,8 @@ async fn route_request(pool: &PgPool, verifier: &JwtVerifier, request: &HttpRequ
                     "eventId must be a UUID",
                 );
             };
-            match get_organizer_action(pool, event_id, &authenticated_subject).await {
-                Ok(action) => Response::json(200, "OK", &serde_json::json!({ "action": action })),
+            match get_organizer_action_info(pool, event_id, &authenticated_subject).await {
+                Ok(info) => Response::json(200, "OK", &info),
                 Err(_) => Response::problem(
                     503,
                     "Service Unavailable",

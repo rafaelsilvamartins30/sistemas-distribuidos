@@ -356,7 +356,55 @@ export function createServer(options: ServerOptions = {}) {
     ),
   );
 
+  async function syncRefundNotifications(authorization: string): Promise<void> {
+    try {
+      const paymentsResponse = await fetchPaymentService(`${paymentServiceUrl}/api/v1/payments/me`, {
+        headers: { authorization },
+        signal: AbortSignal.timeout(2500),
+      });
+      if (!paymentsResponse.ok) return;
+      const payload = (await paymentsResponse.json()) as {
+        items?: Array<{ id?: string; referenceId?: string; amountMinor?: number; status?: string }>;
+      };
+      const refunded = (payload.items ?? []).filter(
+        (charge) =>
+          charge.status === "REFUNDED" &&
+          typeof charge.id === "string" &&
+          typeof charge.amountMinor === "number" &&
+          charge.amountMinor > 0,
+      );
+      if (refunded.length === 0) return;
+
+      type ReferenceMeta = string | { title?: string };
+      const references = await fetchEngagementService(`${engagementServiceUrl}/api/v1/payment-references/me`, {
+        headers: { authorization },
+        signal: AbortSignal.timeout(2500),
+      })
+        .then(async (res) => (res.ok ? ((await res.json()) as Record<string, ReferenceMeta>) : null))
+        .catch(() => null);
+
+      const items = refunded.map((charge) => {
+        const meta = typeof charge.referenceId === "string" ? references?.[charge.referenceId] : undefined;
+        const label = typeof meta === "object" && meta?.title ? meta.title : undefined;
+        return { chargeId: charge.id, amountMinor: charge.amountMinor, ...(label ? { label } : {}) };
+      });
+
+      await fetchCampus(`${campusUrl}/internal/v1/refund-notifications`, {
+        method: "POST",
+        headers: { authorization, "content-type": "application/json" },
+        body: JSON.stringify({ items }),
+        signal: AbortSignal.timeout(2500),
+      });
+    } catch {
+      // Best-effort sync; Campus notifications remain available even if Payment is temporarily unreachable.
+    }
+  }
+
   server.get("/api/v1/web/notifications", async (request, reply) => {
+    const authorization = request.headers.authorization;
+    if (typeof authorization === "string" && /^Bearer\s+\S+$/i.test(authorization)) {
+      await syncRefundNotifications(authorization);
+    }
     const query = new URL(request.url, "http://localhost").search;
     return forwardToCampus(request, reply, "GET", `/notifications${query}`, "Campus unavailable");
   });
@@ -879,15 +927,11 @@ export function createServer(options: ServerOptions = {}) {
         ...(requestBody !== undefined ? { body: requestBody } : {}),
         signal: AbortSignal.timeout(5000),
       });
-      if (response.ok && path.endsWith("/attendance-review")) {
-        const review = (await response.json()) as {
-          entries: { userId: string; checkedInAt: string }[];
-          closedAt: string | null;
-        };
-        const ids = [...new Set(review.entries.map((entry) => entry.userId))];
+      const resolveUserNames = async (ids: string[]) => {
+        const uniqueIds = [...new Set(ids.filter(Boolean))];
         const names = new Map<string, string>();
-        const pages = Array.from({ length: Math.ceil(ids.length / 100) }, (_, page) =>
-          ids.slice(page * 100, (page + 1) * 100),
+        const pages = Array.from({ length: Math.ceil(uniqueIds.length / 100) }, (_, page) =>
+          uniqueIds.slice(page * 100, (page + 1) * 100),
         );
         await Promise.allSettled(
           pages.map(async (page) => {
@@ -902,12 +946,36 @@ export function createServer(options: ServerOptions = {}) {
             items.forEach((item) => names.set(item.keycloakUserId, item.name));
           }),
         );
+        return names;
+      };
+
+      if (response.ok && path.endsWith("/attendance-review")) {
+        const review = (await response.json()) as {
+          entries: { userId: string; checkedInAt: string }[];
+          closedAt: string | null;
+        };
+        const names = await resolveUserNames(review.entries.map((entry) => entry.userId));
         return reply.send({
           ...review,
           entries: review.entries.map((entry) => ({
             ...entry,
             name: names.get(entry.userId) ?? null,
           })),
+        });
+      }
+      if (response.ok && path === "/api/v1/attendance/organizer-check-ins/preview") {
+        const preview = (await response.json()) as {
+          eventId: string;
+          eventTitle: string;
+          attendanceEntryId: string;
+          registrationId: string | null;
+          participantUserId: string;
+          status: string;
+        };
+        const names = await resolveUserNames([preview.participantUserId]);
+        return reply.send({
+          ...preview,
+          participantName: names.get(preview.participantUserId) ?? null,
         });
       }
       const body = Buffer.from(await response.arrayBuffer());
