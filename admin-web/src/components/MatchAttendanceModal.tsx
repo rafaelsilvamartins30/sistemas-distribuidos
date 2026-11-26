@@ -33,6 +33,7 @@ export function MatchAttendanceModal({ gatewayUrl, keycloak, match, onChanged, o
   const [attendance, setAttendance] = useState<MatchAttendance | null>(null);
   const [loadingList, setLoadingList] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [confirmingClose, setConfirmingClose] = useState(false);
 
   useEffect(() => {
     setToken(match.checkinToken ?? null);
@@ -123,8 +124,6 @@ export function MatchAttendanceModal({ gatewayUrl, keycloak, match, onChanged, o
   const entries = attendance?.entries ?? [];
   const statusPill = isClosed ? (
     <span className="admin-status-pill is-ready">Lista fechada</span>
-  ) : match.viewerCanReviewAttendance ? (
-    <span className="admin-status-pill">Aguardando fechamento</span>
   ) : (
     <span className="admin-status-pill is-open">Check-in aberto</span>
   );
@@ -263,18 +262,46 @@ export function MatchAttendanceModal({ gatewayUrl, keycloak, match, onChanged, o
                   Lista fechada em {formatDateTime(attendance.closedAt)}.
                 </p>
               ) : match.viewerCanReviewAttendance ? (
-                <button
-                  type="button"
-                  className="btn-primary"
-                  disabled={busy || loadingList}
-                  onClick={() => void handleCloseList()}
-                >
-                  {busy ? "Fechando…" : "Fechar lista de presença"}
-                </button>
+                confirmingClose ? (
+                  <div>
+                    <p className="admin-attendance-hint" role="status" style={{ marginBottom: "0.65rem" }}>
+                      Deseja mesmo fechar a lista de presença desta partida? Novos check-ins serão bloqueados.
+                    </p>
+                    <div className="admin-dialog-actions">
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={busy}
+                        onClick={() => setConfirmingClose(false)}
+                      >
+                        Voltar
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        disabled={busy || loadingList}
+                        onClick={() => {
+                          setConfirmingClose(false);
+                          void handleCloseList();
+                        }}
+                      >
+                        {busy ? "Fechando…" : "Sim, fechar lista"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={busy || loadingList}
+                    onClick={() => setConfirmingClose(true)}
+                  >
+                    {busy ? "Fechando…" : "Fechar lista de presença"}
+                  </button>
+                )
               ) : (
                 <p className="admin-attendance-hint">
-                  As presenças aparecem aqui em tempo real. O fechamento definitivo fica disponível após o término da
-                  partida.
+                  As presenças aparecem aqui em tempo real até que a lista seja fechada.
                 </p>
               )}
             </div>

@@ -27,7 +27,21 @@ class NotificationsController < ApplicationController
     head :no_content
   end
 
+  def sync_refunds
+    Array(params[:items]).first(100).each { |item| sync_single_refund(item) }
+    head :no_content
+  end
+
   private
+
+  def sync_single_refund(item)
+    return unless item.respond_to?(:[])
+
+    CampusNotifications.payment_refunded!(
+      recipient: current_subject, charge_id: item[:chargeId].to_s.strip,
+      amount_minor: item[:amountMinor], label: item[:label].to_s.strip.presence
+    )
+  end
 
   def notification_scope
     notifications = Notification.where(recipient_user_id: current_subject)

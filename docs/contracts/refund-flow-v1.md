@@ -72,3 +72,14 @@ Payment records refund intent, provider result, projection changes, and its
 result Outbox transactionally. Engagement records the compensation case and its
 request Outbox atomically, then updates the case from result events. Registrations
 remain in their terminal state throughout compensation.
+
+## Notificação de estorno na central (`PAYMENT_REFUNDED`)
+
+Ao consultar `GET /api/v1/web/notifications`, o Web BFF verifica de forma *best-effort*
+as cobranças com status `REFUNDED` no Payment (`GET /api/v1/payments/me`), enriquece o
+título da atividade no Engagement (`GET /api/v1/payment-references/me`) e sincroniza de
+forma idempotente por `chargeId` no endpoint interno do Campus
+`POST /internal/v1/refund-notifications` (não exposto no Gateway e autenticado pelo JWT
+do próprio usuário). A notificação gerada (`eventType = PAYMENT_REFUNDED`,
+`resourceType = PAYMENT`, `resourceId = chargeId`) soma no contador de não lidas e abre
+diretamente `/pagamentos`.

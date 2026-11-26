@@ -20,17 +20,21 @@ pub const EXCHANGE: &str = "unir.events";
 pub const QUEUE: &str = "access.registration-confirmed";
 pub const ROUTING_KEY: &str = "engagement.registration.confirmed.v1";
 pub const EVENT_CANCELLED_ROUTING_KEY: &str = "engagement.event.cancelled.v1";
+pub const EVENT_UPDATED_ROUTING_KEY: &str = "engagement.event.projection.updated.v1";
 pub const REGISTRATION_CANCELLED_ROUTING_KEY: &str = "engagement.registration.cancelled.v1";
 
 const EVENT_TYPE: &str = "RegistrationConfirmed";
 const AGGREGATE_TYPE: &str = "Registration";
 const EVENT_CANCELLED_TYPE: &str = "EventCancelled";
+const EVENT_UPDATED_TYPE: &str = "EventProjectionUpdated";
 const EVENT_AGGREGATE_TYPE: &str = "Event";
 const REGISTRATION_CANCELLED_TYPE: &str = "RegistrationCancelled";
 const REGISTRATION_AGGREGATE_TYPE: &str = "Registration";
 const SESSION_SOURCE_TYPE: &str = "EVENT";
 const PARTICIPANT_SCANS_EVENT: &str = "PARTICIPANT_SCANS_EVENT";
 const ORGANIZER_SCANS_PARTICIPANT: &str = "ORGANIZER_SCANS_PARTICIPANT";
+const CHECK_IN_OPEN_LEAD: time::Duration = time::Duration::hours(2);
+const CHECK_IN_CLOSE_GRACE: time::Duration = time::Duration::hours(1);
 
 #[derive(Debug)]
 pub enum ProcessError {
@@ -127,6 +131,10 @@ pub struct MyAttendance {
     pub status: String,
     pub action: Option<ParticipantAction>,
     #[serde(with = "time::serde::rfc3339")]
+    pub check_in_opens_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub check_in_closes_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
     pub registered_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339::option")]
     pub checked_at: Option<OffsetDateTime>,
@@ -144,6 +152,10 @@ pub struct MyTicket {
     pub starts_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
     pub ends_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub check_in_opens_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub check_in_closes_at: OffsetDateTime,
     pub mode: String,
     pub status: String,
     pub action: Option<ParticipantAction>,
@@ -201,35 +213,13 @@ fn new_qr_token() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 
-async fn finalize_expired_tickets(pool: &PgPool) -> Result<(), sqlx::Error> {
-    let mut transaction = pool.begin().await?;
-    let now = OffsetDateTime::now_utc();
-    sqlx::query(
-        "UPDATE attendance_sessions SET status = 'CLOSED' \
-         WHERE status = 'OPEN' AND ends_at < $1",
-    )
-    .bind(now)
-    .execute(&mut *transaction)
-    .await?;
-    sqlx::query(
-        "UPDATE attendance_entries entries SET status = 'NO_SHOW', finalized_at = $1 \
-         FROM attendance_sessions sessions \
-         WHERE entries.session_id = sessions.id AND entries.status = 'ELIGIBLE' \
-           AND sessions.status = 'CLOSED' AND sessions.ends_at < $1",
-    )
-    .bind(now)
-    .execute(&mut *transaction)
-    .await?;
-    transaction.commit().await
-}
-
-/// Lists this user's attendance tickets, finalizing expired eligible entries as no-shows.
+/// Lists this user's attendance tickets.
 pub async fn get_my_tickets(pool: &PgPool, user_id: &str) -> Result<Vec<MyTicket>, sqlx::Error> {
-    finalize_expired_tickets(pool).await?;
     let rows = sqlx::query(
         "SELECT sessions.source_id AS event_id, entries.registration_id, sessions.id AS session_id, \
          entries.id AS attendance_entry_id, sessions.source_title AS event_title, sessions.starts_at, \
-         sessions.ends_at, sessions.mode, sessions.status AS session_status, entries.status, entries.registered_at, check_ins.checked_at \
+         sessions.ends_at, sessions.check_in_opens_at, sessions.check_in_closes_at, \
+         sessions.mode, sessions.status AS session_status, entries.status, entries.registered_at, check_ins.checked_at \
          FROM attendance_sessions sessions \
          JOIN attendance_entries entries ON entries.session_id = sessions.id \
          LEFT JOIN check_ins ON check_ins.attendance_entry_id = entries.id \
@@ -250,6 +240,8 @@ pub async fn get_my_tickets(pool: &PgPool, user_id: &str) -> Result<Vec<MyTicket
                 event_title: row.try_get("event_title")?,
                 starts_at: row.try_get("starts_at")?,
                 ends_at: row.try_get("ends_at")?,
+                check_in_opens_at: row.try_get("check_in_opens_at")?,
+                check_in_closes_at: row.try_get("check_in_closes_at")?,
                 mode: row.try_get("mode")?,
                 status: row.try_get("status")?,
                 action: participant_action(
@@ -309,14 +301,24 @@ fn organizer_action(
     }
 }
 
-pub async fn get_organizer_action(
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizerActionInfo {
+    pub action: Option<OrganizerAction>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub check_in_opens_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub check_in_closes_at: Option<OffsetDateTime>,
+}
+
+pub async fn get_organizer_action_info(
     pool: &PgPool,
     event_id: Uuid,
     user_id: &str,
-) -> Result<Option<OrganizerAction>, sqlx::Error> {
+) -> Result<OrganizerActionInfo, sqlx::Error> {
     let session = sqlx::query(
-        "SELECT event_creator_user_id, mode, status, check_in_closes_at FROM attendance_sessions \
-         WHERE source_type = $1 AND source_id = $2",
+        "SELECT event_creator_user_id, mode, status, check_in_opens_at, check_in_closes_at \
+         FROM attendance_sessions WHERE source_type = $1 AND source_id = $2",
     )
     .bind(SESSION_SOURCE_TYPE)
     .bind(event_id)
@@ -324,18 +326,43 @@ pub async fn get_organizer_action(
     .await?;
 
     let Some(row) = session else {
-        return Ok(None);
+        return Ok(OrganizerActionInfo {
+            action: None,
+            check_in_opens_at: None,
+            check_in_closes_at: None,
+        });
     };
     let owner: Option<String> = row.try_get("event_creator_user_id")?;
     let status: &str = row.try_get("status")?;
-    let ends: OffsetDateTime = row.try_get("check_in_closes_at")?;
-    if owner.as_deref() == Some(user_id)
-        && status != "CANCELLED"
-        && OffsetDateTime::now_utc() > ends
-    {
-        return Ok(Some(OrganizerAction::ReviewAttendance));
+    let opens: OffsetDateTime = row.try_get("check_in_opens_at")?;
+    let closes: OffsetDateTime = row.try_get("check_in_closes_at")?;
+    if owner.as_deref() != Some(user_id) {
+        return Ok(OrganizerActionInfo {
+            action: None,
+            check_in_opens_at: None,
+            check_in_closes_at: None,
+        });
     }
-    Ok(organizer_action(owner.as_deref(), user_id, row.try_get("mode")?, status).ok())
+    let action = if status == "CLOSED" {
+        Some(OrganizerAction::ReviewAttendance)
+    } else {
+        organizer_action(owner.as_deref(), user_id, row.try_get("mode")?, status).ok()
+    };
+    Ok(OrganizerActionInfo {
+        action,
+        check_in_opens_at: Some(opens),
+        check_in_closes_at: Some(closes),
+    })
+}
+
+pub async fn get_organizer_action(
+    pool: &PgPool,
+    event_id: Uuid,
+    user_id: &str,
+) -> Result<Option<OrganizerAction>, sqlx::Error> {
+    Ok(get_organizer_action_info(pool, event_id, user_id)
+        .await?
+        .action)
 }
 
 #[derive(Serialize)]
@@ -362,7 +389,7 @@ pub async fn event_attendance_review(
 ) -> Result<AttendanceReview, CheckInError> {
     let mut tx = pool.begin().await?;
     let session = sqlx::query(
-        "SELECT id, event_creator_user_id, status, check_in_closes_at, attendance_reviewed_at \
+        "SELECT id, event_creator_user_id, status, attendance_reviewed_at \
          FROM attendance_sessions WHERE source_type = $1 AND source_id = $2 FOR UPDATE",
     )
     .bind(SESSION_SOURCE_TYPE)
@@ -375,9 +402,8 @@ pub async fn event_attendance_review(
         return Err(CheckInError::NotEventCreator);
     }
     let status: &str = session.try_get("status")?;
-    let ends: OffsetDateTime = session.try_get("check_in_closes_at")?;
     let now = OffsetDateTime::now_utc();
-    if status == "CANCELLED" || (close && now <= ends) {
+    if status == "CANCELLED" {
         return Err(CheckInError::SessionUnavailable);
     }
 
@@ -392,7 +418,7 @@ pub async fn event_attendance_review(
         .fetch_one(&mut *tx)
         .await?;
         sqlx::query(
-            "UPDATE attendance_entries SET status = 'NO_SHOW', finalized_at = $2 WHERE session_id = $1 AND status = 'ELIGIBLE'",
+            "UPDATE attendance_entries SET status = 'NO_SHOW', finalized_at = $2, participant_token_hash = NULL WHERE session_id = $1 AND status = 'ELIGIBLE'",
         )
         .bind(id)
         .bind(recorded_at)
@@ -423,7 +449,7 @@ pub async fn issue_event_qr_for_creator(
 ) -> Result<QrArtifact, CheckInError> {
     let mut transaction = pool.begin().await?;
     let row = sqlx::query(
-        "SELECT id, mode, status, event_creator_user_id, check_in_closes_at FROM attendance_sessions \
+        "SELECT id, mode, status, event_creator_user_id FROM attendance_sessions \
          WHERE source_type = $1 AND source_id = $2 FOR UPDATE",
     )
     .bind(SESSION_SOURCE_TYPE)
@@ -439,10 +465,6 @@ pub async fn issue_event_qr_for_creator(
         != OrganizerAction::GenerateEventQr
     {
         return Err(CheckInError::SessionUnavailable);
-    }
-    let ends: OffsetDateTime = row.try_get("check_in_closes_at")?;
-    if OffsetDateTime::now_utc() > ends {
-        return Err(CheckInError::OutsideWindow);
     }
     let token = new_qr_token();
     sqlx::query("UPDATE attendance_sessions SET shared_token_hash = $2 WHERE id = $1")
@@ -462,7 +484,7 @@ pub async fn issue_participant_qr(
 ) -> Result<QrArtifact, CheckInError> {
     let mut transaction = pool.begin().await?;
     let row = sqlx::query(
-        "SELECT sessions.id AS session_id, sessions.mode, sessions.status, sessions.check_in_closes_at, entries.id AS entry_id, \
+        "SELECT sessions.id AS session_id, sessions.mode, sessions.status, entries.id AS entry_id, \
          entries.status AS entry_status \
          FROM attendance_sessions sessions JOIN attendance_entries entries ON entries.session_id = sessions.id \
          WHERE sessions.source_type = $1 AND sessions.source_id = $2 AND entries.user_id = $3 \
@@ -474,10 +496,6 @@ pub async fn issue_participant_qr(
     .fetch_optional(&mut *transaction)
     .await?
     .ok_or(CheckInError::NotEligible)?;
-    let ends: OffsetDateTime = row.try_get("check_in_closes_at")?;
-    if OffsetDateTime::now_utc() > ends {
-        return Err(CheckInError::OutsideWindow);
-    }
     let mode: String = row.try_get("mode")?;
     let session_status: String = row.try_get("status")?;
     let entry_status: String = row.try_get("entry_status")?;
@@ -534,8 +552,6 @@ fn validate_organizer_scan(
     let owner_id: Option<String> = row.try_get("event_creator_user_id")?;
     let mode: String = row.try_get("mode")?;
     let session_status: String = row.try_get("session_status")?;
-    let opens_at: OffsetDateTime = row.try_get("check_in_opens_at")?;
-    let closes_at: OffsetDateTime = row.try_get("check_in_closes_at")?;
     let entry_status: String = row.try_get("entry_status")?;
     if organizer_action(
         owner_id.as_deref(),
@@ -545,10 +561,6 @@ fn validate_organizer_scan(
     )? != OrganizerAction::ScanParticipantQr
     {
         return Err(CheckInError::SessionUnavailable);
-    }
-    let now = OffsetDateTime::now_utc();
-    if now < opens_at || now > closes_at {
-        return Err(CheckInError::OutsideWindow);
     }
     if entry_status != "ELIGIBLE" && entry_status != "ATTENDED" {
         return Err(CheckInError::EntryUnavailable);
@@ -637,7 +649,7 @@ pub async fn record_participant_check_in(
 
     let mut transaction = pool.begin().await?;
     let row = sqlx::query(
-        "SELECT id, mode, status, check_in_opens_at, check_in_closes_at \
+        "SELECT id, mode, status \
          FROM attendance_sessions WHERE shared_token_hash = $1 FOR UPDATE",
     )
     .bind(shared_token_hash(token))
@@ -648,16 +660,11 @@ pub async fn record_participant_check_in(
     let session_id: Uuid = row.try_get("id")?;
     let mode: String = row.try_get("mode")?;
     let status: String = row.try_get("status")?;
-    let opens_at: OffsetDateTime = row.try_get("check_in_opens_at")?;
-    let closes_at: OffsetDateTime = row.try_get("check_in_closes_at")?;
     if mode != PARTICIPANT_SCANS_EVENT || status != "OPEN" {
         return Err(CheckInError::SessionUnavailable);
     }
 
     let checked_at = OffsetDateTime::now_utc();
-    if checked_at < opens_at || checked_at > closes_at {
-        return Err(CheckInError::OutsideWindow);
-    }
 
     if let Some(existing) = sqlx::query(
         "SELECT c.id, c.session_id, c.attendance_entry_id, c.checked_at \
@@ -737,10 +744,10 @@ pub async fn get_my_attendance(
     event_id: Uuid,
     user_id: &str,
 ) -> Result<Option<MyAttendance>, sqlx::Error> {
-    finalize_expired_tickets(pool).await?;
     let row = sqlx::query(
         "SELECT s.source_id AS event_id, s.id AS session_id, e.id AS attendance_entry_id, \
-         s.mode, s.status AS session_status, e.status, e.registered_at, c.checked_at \
+         s.mode, s.status AS session_status, s.check_in_opens_at, s.check_in_closes_at, \
+         e.status, e.registered_at, c.checked_at \
          FROM attendance_sessions s JOIN attendance_entries e ON e.session_id = s.id \
          LEFT JOIN check_ins c ON c.attendance_entry_id = e.id \
          WHERE s.source_type = $1 AND s.source_id = $2 AND e.user_id = $3 \
@@ -763,6 +770,8 @@ pub async fn get_my_attendance(
                 row.try_get("session_status")?,
                 row.try_get("status")?,
             ),
+            check_in_opens_at: row.try_get("check_in_opens_at")?,
+            check_in_closes_at: row.try_get("check_in_closes_at")?,
             registered_at: row.try_get("registered_at")?,
             checked_at: row.try_get("checked_at")?,
         })
@@ -873,6 +882,17 @@ struct EventCancelled {
     cancelled_at: OffsetDateTime,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EventUpdatedPayload {
+    event_id: Uuid,
+    title: String,
+    #[serde(with = "time::serde::rfc3339")]
+    starts_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    ends_at: OffsetDateTime,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RegistrationCancelledEnvelope {
@@ -953,11 +973,64 @@ pub async fn process_message(pool: &PgPool, body: &[u8]) -> Result<(), ProcessEr
     match header.get("eventType").and_then(Value::as_str) {
         Some(EVENT_TYPE) => process_registration_confirmed(pool, body).await,
         Some(EVENT_CANCELLED_TYPE) => process_event_cancelled(pool, body).await,
+        Some(EVENT_UPDATED_TYPE) => process_event_updated(pool, body).await,
         Some(REGISTRATION_CANCELLED_TYPE) => process_registration_cancelled(pool, body).await,
         _ => Err(ProcessError::Invalid(
             "unsupported Access event type".into(),
         )),
     }
+}
+
+async fn process_event_updated(pool: &PgPool, body: &[u8]) -> Result<(), ProcessError> {
+    let envelope: EventCancelledEnvelope = serde_json::from_slice(body).map_err(|error| {
+        ProcessError::Invalid(format!(
+            "invalid EventProjectionUpdated envelope JSON: {error}"
+        ))
+    })?;
+    if envelope.message_id.is_nil()
+        || envelope.event_type != EVENT_UPDATED_TYPE
+        || envelope.aggregate_type != EVENT_AGGREGATE_TYPE
+        || envelope.aggregate_id.is_nil()
+        || envelope.schema_version != 1
+    {
+        return Err(ProcessError::Invalid(
+            "unsupported EventProjectionUpdated envelope identity or version".into(),
+        ));
+    }
+    let payload: EventUpdatedPayload = serde_json::from_value(envelope.payload_json.clone())
+        .map_err(|error| {
+            ProcessError::Invalid(format!(
+                "invalid EventProjectionUpdated payload JSON: {error}"
+            ))
+        })?;
+    if payload.event_id.is_nil()
+        || payload.event_id != envelope.aggregate_id
+        || payload.title.trim().is_empty()
+        || payload.title.chars().count() > 200
+        || payload.ends_at <= payload.starts_at
+    {
+        return Err(ProcessError::Invalid(
+            "inconsistent EventProjectionUpdated payload".into(),
+        ));
+    }
+    let check_in_opens_at = payload.starts_at - CHECK_IN_OPEN_LEAD;
+    let check_in_closes_at = payload.ends_at + CHECK_IN_CLOSE_GRACE;
+    sqlx::query(
+        "UPDATE attendance_sessions \
+         SET source_title = $3, starts_at = $4, ends_at = $5, \
+             check_in_opens_at = $6, check_in_closes_at = $7 \
+         WHERE source_type = $1 AND source_id = $2 AND status <> 'CANCELLED'",
+    )
+    .bind(SESSION_SOURCE_TYPE)
+    .bind(payload.event_id)
+    .bind(&payload.title)
+    .bind(payload.starts_at)
+    .bind(payload.ends_at)
+    .bind(check_in_opens_at)
+    .bind(check_in_closes_at)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 async fn process_registration_cancelled(pool: &PgPool, body: &[u8]) -> Result<(), ProcessError> {
@@ -1264,11 +1337,13 @@ async fn ensure_session(
         ProcessError::Invalid("attendanceMode is required when attendance is enabled".into())
     })?;
     let candidate_id = Uuid::new_v4();
+    let check_in_opens_at = message.payload.starts_at - CHECK_IN_OPEN_LEAD;
+    let check_in_closes_at = message.payload.ends_at + CHECK_IN_CLOSE_GRACE;
     sqlx::query(
         "INSERT INTO attendance_sessions \
          (id, source_type, source_id, source_title, starts_at, ends_at, mode, status, event_creator_user_id, \
           check_in_opens_at, check_in_closes_at, shared_token_hash, created_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'OPEN', $8, $5, $6, NULL, $9) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'OPEN', $8, $9, $10, NULL, $11) \
          ON CONFLICT (source_type, source_id) DO NOTHING",
     )
     .bind(candidate_id)
@@ -1279,6 +1354,8 @@ async fn ensure_session(
     .bind(message.payload.ends_at)
     .bind(mode.as_str())
     .bind(&message.payload.event_creator_user_id)
+    .bind(check_in_opens_at)
+    .bind(check_in_closes_at)
     .bind(message.envelope.occurred_at)
     .execute(&mut **transaction)
     .await?;
@@ -1410,6 +1487,15 @@ async fn consume_once(
             QUEUE.into(),
             EXCHANGE.into(),
             EVENT_CANCELLED_ROUTING_KEY.into(),
+            QueueBindOptions::default(),
+            FieldTable::default(),
+        )
+        .await?;
+    channel
+        .queue_bind(
+            QUEUE.into(),
+            EXCHANGE.into(),
+            EVENT_UPDATED_ROUTING_KEY.into(),
             QueueBindOptions::default(),
             FieldTable::default(),
         )

@@ -80,4 +80,8 @@ test("notifications open the right institutional profile tab", () => {
     "/comunidades/community-1/central",
   );
   assert.equal(notificationPath({ ...base, resourceType: "REQUEST", resourceId: "request-1" }), "/solicitacoes");
+  assert.equal(
+    notificationPath({ ...base, eventType: "PAYMENT_REFUNDED", resourceType: "PAYMENT", resourceId: "charge-1" }),
+    "/pagamentos",
+  );
 });

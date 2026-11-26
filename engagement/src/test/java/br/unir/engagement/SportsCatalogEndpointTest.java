@@ -304,7 +304,8 @@ class SportsCatalogEndpointTest {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"token\":\"" + checkinToken + "\"}"))
                 .andExpect(status().isForbidden());
 
-        // Free agent allocated to Team Beta checks in successfully
+        // Free agent allocated to Team Beta checks in successfully regardless of match
+        // clock
         this.mockMvc
                 .perform(post("/api/v1/sports-matches/{id}/checkins", matchId).with(userJwt("free-1", "Lucas"))
                         .contentType(MediaType.APPLICATION_JSON).content("{\"token\":\"" + checkinToken + "\"}"))
@@ -316,13 +317,10 @@ class SportsCatalogEndpointTest {
                 .andExpect(jsonPath("$.items[?(@.matchId == '" + matchId + "')].viewerCheckedIn")
                         .value(org.hamcrest.Matchers.contains(true)));
 
-        // Organizer can view live check-ins before match finishes, but cannot close
-        // early
+        // Organizer can view live check-ins before closing the list
         this.mockMvc.perform(get("/api/v1/sports-matches/{id}/attendance", matchId).with(organizerJwt()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.entries[0].name").value("Lucas"))
                 .andExpect(jsonPath("$.closedAt").doesNotExist());
-        this.mockMvc.perform(post("/api/v1/sports-matches/{id}/attendance", matchId).with(organizerJwt()))
-                .andExpect(status().isConflict());
 
         // Organizer records score
         this.mockMvc
@@ -347,7 +345,12 @@ class SportsCatalogEndpointTest {
                 .andExpect(jsonPath("$.closedAt").doesNotExist());
         this.mockMvc.perform(post("/api/v1/sports-matches/{id}/attendance", matchId).with(organizerJwt()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.closedAt").isNotEmpty());
+        // After closing the list, neither new QR tokens nor check-ins are accepted
         this.mockMvc.perform(post("/api/v1/sports-matches/{id}/checkin-token", matchId).with(organizerJwt()))
+                .andExpect(status().isConflict());
+        this.mockMvc
+                .perform(post("/api/v1/sports-matches/{id}/checkins", matchId).with(userJwt("free-1", "Lucas"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"token\":\"" + checkinToken + "\"}"))
                 .andExpect(status().isConflict());
 
         JsonNode scoredGame = null;

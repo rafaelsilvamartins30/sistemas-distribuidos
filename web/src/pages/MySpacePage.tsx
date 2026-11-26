@@ -2,6 +2,7 @@ import { RegistrationRefundPolicy } from "../components/RegistrationRefundPolicy
 import { useEffect, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import type Keycloak from "keycloak-js";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { Icon } from "../components/Icon";
 import { SemesterSelector } from "../components/SemesterSelector";
 import { UniversalAttendanceModal } from "../components/UniversalAttendanceModal";
@@ -20,7 +21,7 @@ import { cancelRegistration, RegistrationApiError } from "../services/registrati
 import { useSemesterFilter } from "../hooks/useSemesterFilter";
 import { extractErrorMessage } from "../utils/apiError.js";
 
-type TicketFilter = "upcoming" | "past";
+type TicketFilter = "upcoming" | "past" | "cancelled";
 
 function dateTime(value: string): string {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "long", timeStyle: "short" }).format(new Date(value));
@@ -67,6 +68,7 @@ export function MySpacePage() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState("");
   const { semesters, selectedTerm, selectedSemester, setSelectedTerm } = useSemesterFilter(keycloak.token ?? "");
+  const [cancellingTicket, setCancellingTicket] = useState<TicketRegistration | null>(null);
   const [attendanceModal, setAttendanceModal] = useState<{
     ticket: TicketRegistration;
     mode: "participant" | "participant-ticket";
@@ -107,26 +109,18 @@ export function MySpacePage() {
     try {
       await keycloak.updateToken(30);
       if (!keycloak.token) throw new Error("Token de acesso indisponível.");
-      const updated = await cancelRegistration(keycloak.token, ticket.id);
+      await cancelRegistration(keycloak.token, ticket.id);
       setPage((current) =>
         current
           ? {
               ...current,
-              items: current.items.map((item) =>
-                item.id === updated.id
-                  ? {
-                      ...item,
-                      status: updated.status,
-                      cancelledAt: updated.cancelledAt,
-                      canCancel: updated.canCancel,
-                      cancellationBlockedReason: updated.cancellationBlockedReason,
-                    }
-                  : item,
-              ),
+              items: current.items.filter((item) => item.id !== ticket.id),
+              totalElements: Math.max(0, current.totalElements - 1),
             }
           : current,
       );
-      toast.success("Inscrição cancelada.");
+      setCancellingTicket(null);
+      toast.success("Inscrição cancelada. Ela foi movida para a aba Cancelados.");
     } catch (error) {
       toast.error(
         error instanceof RegistrationApiError && error.detail === "CANCELLATION_WINDOW_CLOSED"
@@ -206,7 +200,7 @@ export function MySpacePage() {
         <div className="account-panel-heading">
           <p className="eyebrow">Eventos</p>
           <h2 id="my-space-tickets-title">Sua agenda</h2>
-          <p>Eventos futuros e anteriores, com o estado atual da inscrição e da presença.</p>
+          <p>Eventos futuros, anteriores e cancelados, com o estado atual da inscrição e da presença.</p>
         </div>
         <div className="semester-filter-row">
           <SemesterSelector
@@ -239,6 +233,16 @@ export function MySpacePage() {
             }}
           >
             Eventos anteriores
+          </button>
+          <button
+            type="button"
+            className={filter === "cancelled" ? "is-active" : ""}
+            onClick={() => {
+              setPageNumber(0);
+              setFilter("cancelled");
+            }}
+          >
+            Cancelados
           </button>
         </div>
 
@@ -330,7 +334,7 @@ export function MySpacePage() {
                             className="button button-secondary"
                             type="button"
                             disabled={busyId === ticket.id}
-                            onClick={() => void cancel(ticket)}
+                            onClick={() => setCancellingTicket(ticket)}
                           >
                             {busyId === ticket.id ? "Cancelando…" : "Cancelar inscrição"}
                           </button>
@@ -345,8 +349,10 @@ export function MySpacePage() {
                 <strong>{page?.items.length ? "Nenhum evento neste período" : "Você ainda não tem tickets"}</strong>
                 <span>
                   {page?.items.length
-                    ? "Alterne entre próximos eventos e eventos anteriores."
-                    : "Suas inscrições confirmadas aparecerão aqui."}
+                    ? "Alterne entre próximos eventos, eventos anteriores e cancelados."
+                    : filter === "cancelled"
+                      ? "Nenhuma inscrição ou evento cancelado neste semestre."
+                      : "Suas inscrições confirmadas aparecerão aqui."}
                 </span>
                 {!page?.items.length && (
                   <Link className="button button-primary" to="/eventos">
@@ -381,6 +387,17 @@ export function MySpacePage() {
           </div>
         )}
       </section>
+
+      {cancellingTicket && (
+        <ConfirmModal
+          title="Deseja mesmo cancelar sua inscrição?"
+          description={`Você perderá sua vaga confirmada em “${cancellingTicket.event.title}”. Caso queira voltar depois, será necessário fazer uma nova inscrição se ainda houver vagas.`}
+          confirmLabel="Sim, cancelar inscrição"
+          busy={busyId === cancellingTicket.id}
+          onConfirm={() => void cancel(cancellingTicket)}
+          onClose={() => setCancellingTicket(null)}
+        />
+      )}
 
       {attendanceModal && (
         <UniversalAttendanceModal

@@ -732,7 +732,9 @@ test("Campus profile requests, feed, community conversations, follows, and notif
   assert.equal(profilePatch.json().administratorUserIds, undefined);
   assert.equal(unfollow.statusCode, 204);
   assert.deepEqual(
-    requested.map(({ url, options }) => [url, options.method, options.headers.authorization]),
+    requested
+      .filter(({ url }) => url.startsWith("http://campus:3000/"))
+      .map(({ url, options }) => [url, options.method, options.headers.authorization]),
     [
       ["http://campus:3000/departments/department-1", "PATCH", token],
       ["http://campus:3000/requests", "POST", token],
@@ -1383,4 +1385,95 @@ test("attendance review uses Access authorization before resolving participant n
   const closed = await server.inject({ method: "POST", url, headers: { authorization: "Bearer organizer" } });
   assert.equal(closed.statusCode, 200);
   assert.equal(closed.json().entries[0].name, "Marina Costa");
+});
+
+test("organizer check-in preview resolves participant display name from Campus", async (t) => {
+  const server = createServer({
+    accessServiceUrl: "http://access:8080",
+    campusUrl: "http://campus:3000",
+    fetch: async (url) => {
+      const path = new URL(url);
+      if (path.hostname === "access") {
+        assert.equal(path.pathname, "/api/v1/attendance/organizer-check-ins/preview");
+        return Response.json({
+          eventId: "event-1",
+          eventTitle: "Oficina UNIR",
+          attendanceEntryId: "entry-1",
+          registrationId: "reg-1",
+          participantUserId: "participant-1",
+          status: "ELIGIBLE",
+        });
+      }
+      assert.equal(path.pathname, "/users");
+      assert.deepEqual(path.searchParams.getAll("subjects[]"), ["participant-1"]);
+      return Response.json({ items: [{ keycloakUserId: "participant-1", name: "Lucas Almeida" }] });
+    },
+  });
+  t.after(() => server.close());
+  const response = await server.inject({
+    method: "POST",
+    url: "/api/v1/web/attendance/organizer-check-ins/preview",
+    headers: { authorization: "Bearer organizer" },
+    payload: { token: "ticket-token-123" },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().participantName, "Lucas Almeida");
+  assert.equal(response.json().participantUserId, "participant-1");
+});
+
+test("GET /api/v1/web/notifications syncs refunded payments to Campus before reading notifications", async (t) => {
+  let syncedBody = null;
+  const server = createServer({
+    campusUrl: "http://campus:3000",
+    paymentServiceUrl: "http://payment:8080",
+    engagementServiceUrl: "http://engagement:8080",
+    fetch: async (url, options = {}) => {
+      const path = new URL(url);
+      if (path.hostname === "payment") {
+        return Response.json({
+          items: [
+            { id: "charge-1", referenceId: "reg-1", amountMinor: 2500, status: "REFUNDED" },
+            { id: "charge-2", referenceId: "reg-2", amountMinor: 1000, status: "PAID" },
+          ],
+        });
+      }
+      if (path.hostname === "engagement") {
+        return Response.json({
+          "reg-1": { origin: "EVENT", title: "Mostra de protótipos", subtitle: "Inscrição em evento" },
+        });
+      }
+      if (path.pathname === "/internal/v1/refund-notifications") {
+        syncedBody = JSON.parse(options.body);
+        return new Response(null, { status: 204 });
+      }
+      return Response.json({
+        items: [
+          {
+            id: "notif-1",
+            eventType: "PAYMENT_REFUNDED",
+            title: "Estorno concluído",
+            message: "R$ 25,00 estornados · Mostra de protótipos",
+            resourceType: "PAYMENT",
+            resourceId: "charge-1",
+            readAt: null,
+            createdAt: "2026-11-25T15:00:00Z",
+          },
+        ],
+        unreadCount: 1,
+      });
+    },
+  });
+  t.after(() => server.close());
+
+  const response = await server.inject({
+    method: "GET",
+    url: "/api/v1/web/notifications",
+    headers: { authorization: "Bearer buyer-token" },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(syncedBody, {
+    items: [{ chargeId: "charge-1", amountMinor: 2500, label: "Mostra de protótipos" }],
+  });
+  assert.equal(response.json().unreadCount, 1);
+  assert.equal(response.json().items[0].eventType, "PAYMENT_REFUNDED");
 });

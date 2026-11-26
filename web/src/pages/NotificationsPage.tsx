@@ -17,6 +17,7 @@ interface WebContext {
 
 export function notificationPath(notification: CampusNotification): string {
   if (notification.resourceType === "REQUEST") return "/solicitacoes";
+  if (notification.resourceType === "PAYMENT") return "/pagamentos";
   const id = encodeURIComponent(notification.resourceId);
   if (notification.resourceType === "UNIVERSITY") return "/universidade?tab=posts";
   if (notification.resourceType === "ACADEMIC_UNIT") return `/unidades/${id}?tab=posts`;

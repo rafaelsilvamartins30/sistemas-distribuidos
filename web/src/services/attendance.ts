@@ -10,6 +10,8 @@ export interface MyAttendance {
   attendanceEntryId: string;
   status: AttendanceEntryStatus;
   action?: ParticipantAttendanceAction | null;
+  checkInOpensAt?: string | null;
+  checkInClosesAt?: string | null;
   registeredAt: string;
   checkedAt: string | null;
 }
@@ -77,7 +79,27 @@ export interface OrganizerCheckInPreview {
   attendanceEntryId: string;
   registrationId: string | null;
   participantUserId: string;
+  participantName?: string | null;
   status: AttendanceEntryStatus;
+}
+
+const ATTENDANCE_ERROR_MESSAGES: Record<string, string> = {
+  "Check-in is outside the allowed window": "A lista de presença deste evento não está aberta para check-in.",
+  "QR token is invalid": "Código QR inválido ou expirado. Peça ou gere um novo código.",
+  "Attendance session is closed or unavailable":
+    "A lista de presença deste evento já foi fechada ou o evento foi cancelado.",
+  "Participant is not eligible for this event":
+    "Este participante não possui inscrição confirmada elegível para o evento.",
+  "Attendance entry is not eligible": "Esta inscrição não está mais elegível para registro de presença.",
+  "Only the recorded event creator can manage attendance":
+    "Apenas o criador registrado do evento pode gerenciar a presença e o QR Code.",
+  "Check-in could not be saved": "Não foi possível salvar a presença agora. Tente novamente em instantes.",
+  "Attendance is unavailable": "O serviço de presença está temporariamente indisponível.",
+};
+
+export function translateAttendanceError(detail: string): string {
+  const normalized = detail.trim();
+  return ATTENDANCE_ERROR_MESSAGES[normalized] ?? normalized;
 }
 
 export class AttendanceApiError extends Error {
@@ -85,7 +107,7 @@ export class AttendanceApiError extends Error {
     public readonly status: number,
     public readonly detail: string,
   ) {
-    super(detail || `Gateway respondeu com status ${status}.`);
+    super(translateAttendanceError(detail || `Gateway respondeu com status ${status}.`));
     this.name = "AttendanceApiError";
   }
 }
@@ -108,7 +130,7 @@ async function request<T>(
   });
   if (!response.ok) {
     const parsed = await parseApiError(response);
-    throw new AttendanceApiError(response.status, parsed.message);
+    throw new AttendanceApiError(response.status, translateAttendanceError(parsed.message));
   }
   return (await response.json()) as T;
 }
@@ -139,7 +161,7 @@ export function checkInWithEventQr(
 
 export function getMyTickets(
   token: string,
-  filters: { page: number; agenda: "upcoming" | "past"; startOn?: string; endOn?: string },
+  filters: { page: number; agenda: "upcoming" | "past" | "cancelled"; startOn?: string; endOn?: string },
   gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<TicketPage> {
@@ -166,12 +188,18 @@ export function issueMyTicketQr(
 
 export type OrganizerAttendanceAction = "GENERATE_EVENT_QR" | "SCAN_PARTICIPANT_QR" | "REVIEW_ATTENDANCE";
 
+export interface OrganizerAttendanceActionInfo {
+  action: OrganizerAttendanceAction | null;
+  checkInOpensAt?: string | null;
+  checkInClosesAt?: string | null;
+}
+
 export function getOrganizerAttendanceAction(
   token: string,
   eventId: string,
   gatewayUrl = import.meta.env.VITE_GATEWAY_URL ?? "",
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<{ action: OrganizerAttendanceAction | null }> {
+): Promise<OrganizerAttendanceActionInfo> {
   return request(
     "GET",
     `/api/v1/web/attendance/events/${encodeURIComponent(eventId)}/organizer-action`,

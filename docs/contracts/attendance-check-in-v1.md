@@ -3,7 +3,9 @@
 ## Decisões
 
 - Access supports `PARTICIPANT_SCANS_EVENT` and `ORGANIZER_SCANS_PARTICIPANT`.
-- Check-in is allowed during the inclusive `startsAt`–`endsAt` window.
+- Check-in, QR issuance, and organizer scans are allowed whenever the attendance session is `OPEN` (not cancelled and not explicitly closed by the organizer). There is no wall-clock time-window lock; once the organizer closes the list (`POST /api/v1/attendance/events/{eventId}/attendance-review`), the session transitions to `CLOSED`, QR tokens are revoked, remaining `ELIGIBLE` entries become `NO_SHOW`, and further check-ins are rejected.
+- Access also consumes `EventProjectionUpdated` (`engagement.event.projection.updated.v1`) so edits to an event's title or schedule in Engagement stay synced in `attendance_sessions`.
+- `GET /api/v1/attendance/me`, `GET /api/v1/attendance/tickets/me`, and `GET /api/v1/attendance/events/{eventId}/organizer-action` keep exposing `checkInOpensAt` and `checkInClosesAt` for reference.
 - QR tokens are opaque random values. Access stores only SHA-256 hashes. Issuing a replacement invalidates the previous token.
 - JWT signature, issuer, expiry, and global `USER`/`PLATFORM_ADMIN` role are verified by Access. User identity comes from `sub`; clients do not send their own `userId`.
 - The organizer rule compares the authenticated `sub` with `eventCreatorUserId` propagated from Engagement. It trusts the recorded creator; it does not grant rights based on request fields. Events without a recorded creator cannot use organizer QR actions.
@@ -57,7 +59,7 @@ A prévia retorna evento, inscrição, `participantUserId` e status. Ela não al
 { "token": "<conteúdo opaco do QR do participante>" }
 ```
 
-Somente o organizador registrado no evento pode emitir seu QR compartilhado, consultar a prévia e confirmar a presença. O contrato de inscrição atualmente carrega o Keycloak `sub`, não o nome do perfil; por isso a prévia apresenta o identificador da conta até Campus disponibilizar uma consulta de perfil adequada.
+Somente o organizador registrado no evento pode emitir seu QR compartilhado, consultar a prévia e confirmar a presença. O Web BFF enriquece a prévia (`POST /api/v1/web/attendance/organizer-check-ins/preview`) com `participantName` resolvido no Campus (`/users?subjects[]=...`) após a autorização no Access.
 
 ## Cancelamento e histórico
 
@@ -98,10 +100,10 @@ The participant entries in `/api/v1/attendance/me` and `/api/v1/attendance/ticke
 include `action` (`SCAN_EVENT_QR`, `GENERATE_PARTICIPANT_QR`, or null). Access
 derives this from the open session, its mode and the entry's eligibility.
 
-The recorded creator can inspect live check-ins at any time while the session is not cancelled via
-`GET /api/v1/attendance/events/{eventId}/attendance-review` (returning recorded check-ins and
-`closedAt`). After the check-in window, Access advertises `REVIEW_ATTENDANCE` to the recorded
-creator and `POST` at the same path finalizes the list (marking remaining eligible entries as
-`NO_SHOW`) and preserves the original closing time on retries. `POST` before the end of the check-in
-window returns `409 Conflict`. The Web BFF resolves display names through Campus after Access
-authorizes the request. The closing action preserves existing check-ins.
+The recorded creator can inspect live check-ins and close the attendance list at any time while
+the session is not cancelled via `GET` / `POST /api/v1/attendance/events/{eventId}/attendance-review`
+(returning recorded check-ins and `closedAt`). `POST` closes the session (`status = CLOSED`, revokes
+active QR hashes, marks remaining eligible entries as `NO_SHOW`), switches organizer action to
+`REVIEW_ATTENDANCE`, and preserves the original closing time on retries. The Web BFF resolves
+display names through Campus after Access authorizes the request. The closing action preserves
+existing check-ins.

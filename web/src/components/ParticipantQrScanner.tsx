@@ -18,14 +18,20 @@ declare global {
 interface ParticipantQrScannerProps {
   busy: boolean;
   autoSubmitOnScan?: boolean;
+  scanMessage?: string;
+  cameraButtonLabel?: string;
   submitLabel?: string;
+  resetKey?: number;
   onToken: (token: string) => void;
 }
 
 export function ParticipantQrScanner({
   busy,
   autoSubmitOnScan = false,
+  scanMessage,
+  cameraButtonLabel,
   submitLabel,
+  resetKey = 0,
   onToken,
 }: ParticipantQrScannerProps) {
   const toast = useToast();
@@ -41,6 +47,13 @@ export function ParticipantQrScanner({
   useEffect(() => {
     onTokenRef.current = onToken;
   }, [onToken]);
+
+  useEffect(() => {
+    if (resetKey > 0) {
+      setManualToken("");
+      setMessage(null);
+    }
+  }, [resetKey]);
 
   const stopCamera = useCallback(() => {
     scanningRef.current = false;
@@ -82,7 +95,7 @@ export function ParticipantQrScanner({
             stopCamera();
             setManualToken(token);
             if (autoSubmitOnScan) {
-              setMessage("QR lido. Registrando sua presença…");
+              setMessage(scanMessage ?? "QR lido. Registrando sua presença…");
               onTokenRef.current(token);
             } else {
               toast.info("QR lido. Confira os dados antes de confirmar.");
@@ -123,7 +136,7 @@ export function ParticipantQrScanner({
       }
       setManualToken(text);
       if (autoSubmitOnScan && !busy) {
-        setMessage("Código colado. Registrando presença…");
+        setMessage(scanMessage ?? "Código colado. Registrando presença…");
         onToken(text);
       } else {
         toast.info("Código do QR colado. Clique no botão abaixo para confirmar.");
@@ -142,7 +155,9 @@ export function ParticipantQrScanner({
           disabled={busy}
           onClick={() => (scanning ? stopCamera() : void startCamera())}
         >
-          {scanning ? "Parar câmera" : autoSubmitOnScan ? "Ler QR pela câmera" : "Ler QR do participante"}
+          {scanning
+            ? "Parar câmera"
+            : (cameraButtonLabel ?? (autoSubmitOnScan ? "Ler QR pela câmera" : "Ler QR do participante"))}
         </button>
         <button
           className="button button-secondary"

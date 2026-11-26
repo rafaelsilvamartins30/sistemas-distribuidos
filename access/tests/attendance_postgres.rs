@@ -250,8 +250,8 @@ async fn repeated_message_and_registration_create_one_session_and_one_eligible_e
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(window.0.format(&Rfc3339).unwrap(), "2027-06-15T17:00:00Z");
-    assert_eq!(window.1.format(&Rfc3339).unwrap(), "2027-06-15T19:00:00Z");
+    assert_eq!(window.0.format(&Rfc3339).unwrap(), "2027-06-15T15:00:00Z");
+    assert_eq!(window.1.format(&Rfc3339).unwrap(), "2027-06-15T20:00:00Z");
     cleanup(&pool, registration_id, event_id).await;
 }
 
@@ -365,23 +365,6 @@ async fn organizer_qr_requires_event_owner_and_explicit_confirmation() {
     );
     assert_eq!(validator.as_deref(), Some(organizer_id.as_str()));
     assert!(matches!(
-        event_attendance_review(&pool, event_id, &organizer_id, true).await,
-        Err(CheckInError::SessionUnavailable)
-    ));
-    let end = OffsetDateTime::now_utc() - TimeDuration::seconds(1);
-    sqlx::query("UPDATE attendance_sessions SET check_in_closes_at = $2 WHERE source_id = $1")
-        .bind(event_id)
-        .bind(end)
-        .execute(&pool)
-        .await
-        .unwrap();
-    assert_eq!(
-        get_organizer_action(&pool, event_id, &organizer_id)
-            .await
-            .unwrap(),
-        Some(OrganizerAction::ReviewAttendance)
-    );
-    assert!(matches!(
         event_attendance_review(&pool, event_id, &participant_id, false).await,
         Err(CheckInError::NotEventCreator)
     ));
@@ -391,6 +374,16 @@ async fn organizer_qr_requires_event_owner_and_explicit_confirmation() {
     let json = serde_json::to_value(review).unwrap();
     assert_eq!(json["entries"][0]["userId"], participant_id);
     assert!(json["closedAt"].is_string());
+    assert_eq!(
+        get_organizer_action(&pool, event_id, &organizer_id)
+            .await
+            .unwrap(),
+        Some(OrganizerAction::ReviewAttendance)
+    );
+    assert!(matches!(
+        preview_organizer_check_in(&pool, &qr.token, &organizer_id).await,
+        Err(CheckInError::SessionUnavailable)
+    ));
     let repeated = event_attendance_review(&pool, event_id, &organizer_id, true)
         .await
         .unwrap();
@@ -487,31 +480,25 @@ async fn registration_cancellation_revokes_ticket_and_past_eligible_entries_are_
     assert_eq!(attendance[0].registration_id, Some(registration_id));
     cleanup(&pool, Uuid::nil(), event_id).await;
 
-    let (past_event_id, past_entry_id) = check_in_fixture(&pool, &participant_id).await;
-    sqlx::query(
-        "UPDATE attendance_sessions SET starts_at = $2, ends_at = $3, \
-         check_in_opens_at = $2, check_in_closes_at = $3 WHERE source_id = $1",
-    )
-    .bind(past_event_id)
-    .bind(OffsetDateTime::now_utc() - TimeDuration::hours(2))
-    .bind(OffsetDateTime::now_utc() - TimeDuration::hours(1))
-    .execute(&pool)
-    .await
-    .unwrap();
+    let (closed_event_id, _, closed_entry_id) =
+        organizer_check_in_fixture(&pool, &participant_id, &organizer_id).await;
+    event_attendance_review(&pool, closed_event_id, &organizer_id, true)
+        .await
+        .unwrap();
     let tickets = get_my_tickets(&pool, &participant_id).await.unwrap();
     let no_show = tickets
         .iter()
-        .find(|ticket| ticket.event_id == past_event_id)
+        .find(|ticket| ticket.event_id == closed_event_id)
         .unwrap();
     assert_eq!(no_show.status, "NO_SHOW");
     let stored_status: String =
         sqlx::query_scalar("SELECT status FROM attendance_entries WHERE id = $1")
-            .bind(past_entry_id)
+            .bind(closed_entry_id)
             .fetch_one(&pool)
             .await
             .unwrap();
     assert_eq!(stored_status, "NO_SHOW");
-    cleanup(&pool, Uuid::nil(), past_event_id).await;
+    cleanup(&pool, Uuid::nil(), closed_event_id).await;
 }
 
 #[tokio::test]
@@ -555,27 +542,45 @@ async fn check_in_rejects_invalid_token_non_eligible_user_and_cancelled_session(
 
 #[tokio::test]
 #[ignore = "requires ACCESS_TEST_DATABASE_URL pointing to an isolated PostgreSQL database"]
-async fn check_in_rejects_requests_outside_the_starts_at_ends_at_window() {
+async fn check_in_works_while_open_and_rejects_after_organizer_closes_list() {
     let pool = test_pool().await;
     let user_id = format!("kc-{}", Uuid::new_v4());
+    let owner_id = format!("kc-owner-{}", Uuid::new_v4());
     let (event_id, _) = check_in_fixture(&pool, &user_id).await;
-    let token = issue_event_qr_token(&pool, event_id).await.unwrap();
-    let opens_at = OffsetDateTime::now_utc() + TimeDuration::hours(2);
-    let closes_at = opens_at + TimeDuration::hours(1);
+    let future_starts = OffsetDateTime::now_utc() + TimeDuration::days(7);
+    let future_ends = future_starts + TimeDuration::hours(2);
     sqlx::query(
-        "UPDATE attendance_sessions SET starts_at = $2, ends_at = $3, \
-         check_in_opens_at = $2, check_in_closes_at = $3 WHERE source_id = $1",
+        "UPDATE attendance_sessions SET event_creator_user_id = $2, starts_at = $3, ends_at = $4, \
+         check_in_opens_at = $3, check_in_closes_at = $4 WHERE source_id = $1",
     )
     .bind(event_id)
-    .bind(opens_at)
-    .bind(closes_at)
+    .bind(&owner_id)
+    .bind(future_starts)
+    .bind(future_ends)
     .execute(&pool)
     .await
     .unwrap();
 
+    let token = issue_event_qr_for_creator(&pool, event_id, &owner_id)
+        .await
+        .unwrap()
+        .token;
+    let check_in = record_participant_check_in(&pool, &token, &user_id)
+        .await
+        .unwrap();
+    assert_eq!(check_in.status, "ATTENDED");
+
+    // Once the organizer closes the list, new QR issuance and check-ins are blocked.
+    event_attendance_review(&pool, event_id, &owner_id, true)
+        .await
+        .unwrap();
+    assert!(matches!(
+        issue_event_qr_for_creator(&pool, event_id, &owner_id).await,
+        Err(CheckInError::SessionUnavailable)
+    ));
     assert!(matches!(
         record_participant_check_in(&pool, &token, &user_id).await,
-        Err(CheckInError::OutsideWindow)
+        Err(CheckInError::InvalidToken)
     ));
     cleanup(&pool, Uuid::nil(), event_id).await;
 }
@@ -819,5 +824,62 @@ async fn delayed_registration_confirmed_cannot_reopen_cancelled_attendance() {
     assert_eq!(sessions, 0);
     assert_eq!(entries, 0);
     assert_eq!(processed_entry, None);
+    cleanup(&pool, registration_id, event_id).await;
+}
+
+#[tokio::test]
+#[ignore = "requires ACCESS_TEST_DATABASE_URL pointing to an isolated PostgreSQL database"]
+async fn event_projection_updated_syncs_session_dates_and_title() {
+    let pool = test_pool().await;
+    let registration_id = Uuid::new_v4();
+    let event_id = Uuid::new_v4();
+    process_message(
+        &pool,
+        &message(registration_id, event_id, Uuid::new_v4(), true),
+    )
+    .await
+    .unwrap();
+
+    let updated = json!({
+        "messageId": Uuid::new_v4(),
+        "eventType": "EventProjectionUpdated",
+        "aggregateType": "Event",
+        "aggregateId": event_id,
+        "occurredAt": "2026-11-25T12:00:00Z",
+        "schemaVersion": 1,
+        "payloadJson": {
+            "eventId": event_id,
+            "aggregateVersion": 2,
+            "title": "Mostra remarcada",
+            "startsAt": "2026-11-26T14:00:00Z",
+            "endsAt": "2026-11-26T16:00:00Z",
+            "status": "ACTIVE"
+        }
+    })
+    .to_string()
+    .into_bytes();
+    process_message(&pool, &updated).await.unwrap();
+
+    let row = sqlx::query(
+        "SELECT source_title, starts_at, ends_at, check_in_opens_at, check_in_closes_at \
+         FROM attendance_sessions WHERE source_id = $1",
+    )
+    .bind(event_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.get::<String, _>("source_title"), "Mostra remarcada");
+    assert_eq!(
+        row.get::<OffsetDateTime, _>("starts_at")
+            .format(&Rfc3339)
+            .unwrap(),
+        "2026-11-26T14:00:00Z"
+    );
+    assert_eq!(
+        row.get::<OffsetDateTime, _>("ends_at")
+            .format(&Rfc3339)
+            .unwrap(),
+        "2026-11-26T16:00:00Z"
+    );
     cleanup(&pool, registration_id, event_id).await;
 }

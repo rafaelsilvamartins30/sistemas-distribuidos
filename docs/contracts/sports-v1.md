@@ -79,8 +79,10 @@ Match responses include a display label for the round. `GET /api/v1/payment-refe
 `origin`, `title`, `subtitle` and `targetPath`. References absent from the result are displayed as
 unknown.
 
-The sports overview exposes `viewerCanReviewAttendance`. Review/closing opens when a score is
-recorded or the scheduled date has passed in America/Sao_Paulo. `GET
+The sports overview exposes `viewerCanReviewAttendance`, `checkInOpensAt` and `checkInClosesAt`.
+Athlete check-in (`POST /api/v1/sports-matches/{matchId}/checkins`) and QR issuance are allowed
+whenever the championship is active, a match QR has been generated, and the organizer has not yet
+closed the match attendance list (no wall-clock time-window lock). `GET
 /api/v1/sports-matches/{matchId}/attendance` lists recorded check-ins live at any time for an
-authorized organizer, while `POST` closes the list and revokes the match QR (returning `409` if
-called before the match finishes).
+authorized organizer, while `POST` closes the list and revokes the match QR at any time, permanently
+blocking further check-ins and new QR generation for that match.

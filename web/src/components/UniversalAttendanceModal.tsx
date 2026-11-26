@@ -18,8 +18,10 @@ export interface UniversalAttendanceModalProps {
   organizerCanManageQr?: boolean;
   organizerScanMode?: boolean;
   scannedTicket?: OrganizerCheckInPreview | null;
+  scannerResetKey?: number;
   onPreviewParticipantQr?: (token: string) => void;
   onConfirmParticipantQr?: () => void;
+  onResetScannedTicket?: () => void;
   attendanceReview?: EventAttendanceReview | null;
   attendanceListLoading?: boolean;
   canCloseAttendance?: boolean;
@@ -49,8 +51,10 @@ export function UniversalAttendanceModal({
   organizerCanManageQr = true,
   organizerScanMode = false,
   scannedTicket = null,
+  scannerResetKey = 0,
   onPreviewParticipantQr,
   onConfirmParticipantQr,
+  onResetScannedTicket,
   attendanceReview = null,
   attendanceListLoading = false,
   canCloseAttendance = false,
@@ -65,6 +69,7 @@ export function UniversalAttendanceModal({
   const [activeTab, setActiveTab] = useState<OrganizerTab>(
     mode === "organizer" && !organizerCanManageQr && !organizerScanMode && hasListPanel ? "list" : "qr",
   );
+  const [confirmingClose, setConfirmingClose] = useState(false);
 
   const qrDataUri = qrSvg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(qrSvg)}` : null;
   const entries = attendanceReview?.entries ?? [];
@@ -94,12 +99,14 @@ export function UniversalAttendanceModal({
     mode === "organizer" && hasListPanel ? (
       isClosed ? (
         <span className="attendance-status-pill is-closed">Lista fechada</span>
-      ) : canCloseAttendance ? (
-        <span className="attendance-status-pill is-review">Aguardando fechamento</span>
       ) : (
         <span className="attendance-status-pill is-open">Check-in aberto</span>
       )
-    ) : undefined;
+    ) : checkedIn ? (
+      <span className="attendance-status-pill is-open">Presença confirmada</span>
+    ) : (
+      <span className="attendance-status-pill is-open">Check-in aberto</span>
+    );
 
   const tabsNode =
     mode === "organizer" && hasListPanel ? (
@@ -197,18 +204,47 @@ export function UniversalAttendanceModal({
                   Lista fechada em {formatDateTime(attendanceReview.closedAt)}.
                 </p>
               ) : canCloseAttendance && onCloseAttendanceList ? (
-                <button
-                  type="button"
-                  className="button button-primary"
-                  disabled={busy || attendanceListLoading}
-                  onClick={onCloseAttendanceList}
-                >
-                  {busy ? "Fechando…" : "Fechar lista de presença"}
-                </button>
+                confirmingClose ? (
+                  <div className="sports-modal-stack">
+                    <p className="attendance-hint" role="status">
+                      Deseja mesmo fechar a lista de presença? Após o fechamento, novos check-ins serão bloqueados e
+                      quem não registrou presença constará como ausente.
+                    </p>
+                    <div className="attendance-qr-actions">
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        disabled={busy}
+                        onClick={() => setConfirmingClose(false)}
+                      >
+                        Voltar
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-primary"
+                        disabled={busy || attendanceListLoading}
+                        onClick={() => {
+                          setConfirmingClose(false);
+                          onCloseAttendanceList();
+                        }}
+                      >
+                        {busy ? "Fechando…" : "Sim, fechar lista"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    disabled={busy || attendanceListLoading}
+                    onClick={() => setConfirmingClose(true)}
+                  >
+                    {busy ? "Fechando…" : "Fechar lista de presença"}
+                  </button>
+                )
               ) : (
                 <p className="attendance-hint">
-                  As presenças aparecem aqui em tempo real. O fechamento definitivo fica disponível após o término da
-                  atividade.
+                  As presenças aparecem aqui em tempo real até que a lista seja fechada.
                 </p>
               )}
             </div>
@@ -216,26 +252,51 @@ export function UniversalAttendanceModal({
         ) : organizerScanMode && !isClosed ? (
           <div className="sports-modal-stack">
             <p className="attendance-hint">
-              Leia o QR do participante ou informe o código do ticket para validar a entrada:
+              Leia o QR do participante pela câmera ou cole o código do ticket para consultar os dados e confirmar a
+              entrada:
             </p>
             {onPreviewParticipantQr && (
-              <ParticipantQrScanner busy={busy} submitLabel="Verificar ticket" onToken={onPreviewParticipantQr} />
+              <ParticipantQrScanner
+                busy={busy}
+                autoSubmitOnScan
+                cameraButtonLabel="Ler QR do participante"
+                scanMessage="QR lido. Consultando dados do participante…"
+                submitLabel="Verificar ticket"
+                resetKey={scannerResetKey}
+                onToken={onPreviewParticipantQr}
+              />
             )}
             {scannedTicket && (
               <div className="organizer-ticket-preview" role="status">
-                <strong>{scannedTicket.status === "ATTENDED" ? "Presença já registrada" : "Ticket válido"}</strong>
+                <strong>
+                  {scannedTicket.status === "ATTENDED"
+                    ? "✓ Presença já registrada"
+                    : "Ticket válido · pronto para confirmar"}
+                </strong>
+                <span>Participante: {scannedTicket.participantName ?? scannedTicket.participantUserId}</span>
                 <span>Evento: {scannedTicket.eventTitle}</span>
-                <span>Participante: {scannedTicket.participantUserId}</span>
-                {scannedTicket.status !== "ATTENDED" && onConfirmParticipantQr && (
-                  <button
-                    className="button button-primary"
-                    type="button"
-                    disabled={busy}
-                    onClick={onConfirmParticipantQr}
-                  >
-                    {busy ? "Confirmando…" : "Confirmar presença"}
-                  </button>
-                )}
+                <div className="attendance-qr-actions">
+                  {scannedTicket.status !== "ATTENDED" && onConfirmParticipantQr && (
+                    <button
+                      className="button button-primary"
+                      type="button"
+                      disabled={busy}
+                      onClick={onConfirmParticipantQr}
+                    >
+                      {busy ? "Confirmando…" : "Confirmar presença"}
+                    </button>
+                  )}
+                  {onResetScannedTicket && (
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      disabled={busy}
+                      onClick={onResetScannedTicket}
+                    >
+                      Validar próximo participante
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -282,11 +343,7 @@ export function UniversalAttendanceModal({
         ) : (
           <div className="attendance-closed-box">
             <strong>Check-in por QR Code encerrado</strong>
-            <p>
-              {isClosed
-                ? "A lista de presença deste evento já foi fechada definitivamente."
-                : "O horário de check-in deste evento foi encerrado. Consulte ou feche a lista final na aba Lista de presença."}
-            </p>
+            <p>A lista de presença deste evento foi fechada definitivamente e não aceita novos check-ins.</p>
             {hasListPanel && (
               <button type="button" className="button button-secondary" onClick={() => setActiveTab("list")}>
                 Ver lista de presença ({entries.length})
